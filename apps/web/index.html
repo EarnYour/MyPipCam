@@ -472,6 +472,15 @@
               >Agent / build notes</a
             >
           </div>
+          <p class="tip-jar">
+            MyPipCam is free and open source. If it helps your workflow,
+            <a
+              href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"
+              rel="noopener noreferrer"
+              >leave a tip</a
+            >
+            — any amount is appreciated.
+          </p>
         </div>
       </section>
 
@@ -553,6 +562,12 @@
             <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
             ·
             <a href="https://mypipcam.earnyour.com/terms">Terms</a>
+            ·
+            <a
+              href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"
+              rel="noopener noreferrer"
+              >Tip jar</a
+            >
             · Support:
             <a href="mailto:steven@earnyour.com">steven@earnyour.com</a>
           </p>
@@ -560,11 +575,26 @@
       </section>
     </main>
 
+    <div class="thanks-banner" id="thanks-banner" hidden role="status">
+      <p>
+        Thank you for the tip — it helps keep MyPipCam free and open source.
+        <a href="#install">Back to install</a>
+      </p>
+      <button type="button" class="thanks-banner__dismiss" id="thanks-dismiss" aria-label="Dismiss">
+        ×
+      </button>
+    </div>
+
     <footer class="site-footer">
       <div class="site-footer__inner">
         <p>© 2026 MyPipCam · EarnYour Marketing</p>
         <nav aria-label="Footer">
           <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
+          <a
+            href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"
+            rel="noopener noreferrer"
+            >Tip jar</a
+          >
           <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
           <a href="https://mypipcam.earnyour.com/terms">Terms</a>
           <a href="https://earnyour.com">EarnYour</a>
@@ -575,11 +605,33 @@
       (function () {
         var video = document.getElementById("promo-video");
         var fallback = document.getElementById("promo-video-fallback");
-        if (!video) return;
-        video.addEventListener("error", function () {
-          if (fallback) fallback.hidden = false;
-          video.removeAttribute("data-ready");
-        });
+        if (video) {
+          video.addEventListener("error", function () {
+            if (fallback) fallback.hidden = false;
+            video.removeAttribute("data-ready");
+          });
+        }
+
+        var params = new URLSearchParams(window.location.search);
+        if (params.get("thanks") === "1") {
+          var banner = document.getElementById("thanks-banner");
+          var dismiss = document.getElementById("thanks-dismiss");
+          if (banner) {
+            banner.hidden = false;
+            document.body.classList.add("has-thanks");
+          }
+          if (dismiss && banner) {
+            dismiss.addEventListener("click", function () {
+              banner.hidden = true;
+              document.body.classList.remove("has-thanks");
+              if (window.history && window.history.replaceState) {
+                var url = new URL(window.location.href);
+                url.searchParams.delete("thanks");
+                window.history.replaceState({}, "", url.pathname + url.hash);
+              }
+            });
+          }
+        }
       })();
     </script>
   </body>
