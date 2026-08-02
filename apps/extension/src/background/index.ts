@@ -1,11 +1,12 @@
 /**
- * MV3 service worker entry — loads BEFORE the heavy main module.
+ * MV3 service worker entry.
  *
- * If main fails to import (crash loop), PING / GET_SW_HEALTH still answer so
- * Settings can show a real diagnosis instead of a silent "No response".
+ * Chrome forbids dynamic import() on ServiceWorkerGlobalScope. Use static
+ * imports only — Vite/CRX may still emit separate ESM chunks, which is fine.
  */
 
 import { STABLE_EXTENSION_ID } from '../shared/driveConfig'
+import './main'
 
 const KEEP_ALIVE_ALARM = 'mypipcam-sw-keepalive'
 
@@ -24,7 +25,6 @@ function bootHealth() {
   }
 }
 
-// Register immediately — before dynamic import settles.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target === 'offscreen') return false
   if (message?.type === 'PING') {
@@ -76,19 +76,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void chrome.storage.session.set({ swKeepAliveAt: Date.now() })
 })
 
+// Static import of ./main already evaluated successfully if we reach here.
+mainReady = true
+bootError = null
 console.log('[MyPipCam] SW boot', bootHealth())
-
-// Dynamic import keeps PING/health alive if main fails.
-// vite.config.ts strips Vite's __vitePreload wrapper (document/window) from this
-// chunk — without that, MV3 SW registration fails with "document is not defined".
-void import('./main')
-  .then(() => {
-    mainReady = true
-    bootError = null
-    console.log('[MyPipCam] SW main ready', bootHealth())
-  })
-  .catch((err) => {
-    mainReady = false
-    bootError = err instanceof Error && err.message.trim() ? err.message.trim() : String(err)
-    console.error('[MyPipCam] SW main FAILED to load — recording/Drive will not work:', err)
-  })
+console.log('[MyPipCam] SW main ready', bootHealth())

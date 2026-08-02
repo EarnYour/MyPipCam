@@ -6,9 +6,9 @@ import manifest from './manifest.config'
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
   build: {
-    // MV3 service workers have no `document`. Emptying modulepreload deps
-    // avoids the worst crash path; scripts/strip-sw-vite-preload.mjs then
-    // removes Vite's document-based preload helper from the SW boot chunk.
+    // MV3 SW: no document. Keep modulePreload off so Vite does not inject
+    // document-based preload helpers around any remaining dynamic imports in
+    // page bundles that share the Rollup graph.
     modulePreload: false,
     rollupOptions: {
       input: {
@@ -18,6 +18,9 @@ export default defineConfig({
         offscreen: 'src/offscreen/index.html',
         pip: 'src/pip/index.html',
       },
+      // Background entry must not emit import() — source uses static imports
+      // only (see src/background/index.ts). Shared ESM chunks are OK for
+      // type:"module" service workers; post-build verify-sw catches regressions.
     },
   },
   server: {
