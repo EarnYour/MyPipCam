@@ -1,10 +1,16 @@
 import {
   cors,
+  DEFAULT_SHARE_TTL_DAYS,
+  expiresAtIsoFromDays,
   getSupabase,
+  isShareExpired,
   json,
   makeShareId,
   mapShare,
+  normalizeExpiresInDays,
+  normalizeProcessingStatus,
   readJson,
+  SHARE_SELECT,
 } from '../_lib/supabase.js'
 
 /**
@@ -37,9 +43,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabase
         .from('mypipcam_shares')
-        .select(
-          'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
-        )
+        .select(SHARE_SELECT)
         .in('id', ids)
 
       if (error) {
@@ -61,6 +65,16 @@ export default async function handler(req, res) {
       const ownerHint = body.ownerHint
         ? String(body.ownerHint).trim().slice(0, 80)
         : null
+      const processingStatus = normalizeProcessingStatus(body.processingStatus)
+      const driveReadyAt =
+        body.driveReadyAt === null
+          ? null
+          : body.driveReadyAt
+            ? String(body.driveReadyAt)
+            : undefined
+      const expiresInDays =
+        normalizeExpiresInDays(body.expiresInDays) ?? DEFAULT_SHARE_TTL_DAYS
+      const renew = Boolean(body.renew)
 
       if (!recordingId || recordingId.length > 80) {
         json(res, 400, { error: 'recordingId is required' })
@@ -69,9 +83,7 @@ export default async function handler(req, res) {
 
       const { data: existing, error: findErr } = await supabase
         .from('mypipcam_shares')
-        .select(
-          'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
-        )
+        .select(SHARE_SELECT)
         .eq('recording_id', recordingId)
         .maybeSingle()
 
@@ -81,21 +93,30 @@ export default async function handler(req, res) {
       }
 
       if (existing) {
-        // Refresh Drive fields if the extension re-shares.
-        if (
-          (driveFileId && driveFileId !== existing.drive_file_id) ||
-          (driveWebViewLink && driveWebViewLink !== existing.drive_web_view_link)
-        ) {
+        const patch = {}
+        if (driveFileId && driveFileId !== existing.drive_file_id) {
+          patch.drive_file_id = driveFileId
+        }
+        if (driveWebViewLink && driveWebViewLink !== existing.drive_web_view_link) {
+          patch.drive_web_view_link = driveWebViewLink
+        }
+        if (processingStatus && processingStatus !== existing.processing_status) {
+          patch.processing_status = processingStatus
+        }
+        if (driveReadyAt !== undefined && driveReadyAt !== existing.drive_ready_at) {
+          patch.drive_ready_at = driveReadyAt
+        }
+        // Renew only when asked, or automatically if the link already expired.
+        if (renew || isShareExpired(existing)) {
+          patch.expires_at = expiresAtIsoFromDays(expiresInDays)
+        }
+
+        if (Object.keys(patch).length > 0) {
           const { data: updated, error: updErr } = await supabase
             .from('mypipcam_shares')
-            .update({
-              drive_file_id: driveFileId ?? existing.drive_file_id,
-              drive_web_view_link: driveWebViewLink ?? existing.drive_web_view_link,
-            })
+            .update(patch)
             .eq('id', existing.id)
-            .select(
-              'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
-            )
+            .select(SHARE_SELECT)
             .single()
 
           if (updErr) {
@@ -119,10 +140,11 @@ export default async function handler(req, res) {
           drive_file_id: driveFileId,
           drive_web_view_link: driveWebViewLink,
           owner_hint: ownerHint,
+          processing_status: processingStatus || 'processing',
+          drive_ready_at: driveReadyAt === undefined ? null : driveReadyAt,
+          expires_at: expiresAtIsoFromDays(expiresInDays),
         })
-        .select(
-          'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
-        )
+        .select(SHARE_SELECT)
         .single()
 
       if (insErr) {
@@ -130,9 +152,7 @@ export default async function handler(req, res) {
         if (insErr.code === '23505') {
           const { data: raced } = await supabase
             .from('mypipcam_shares')
-            .select(
-              'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
-            )
+            .select(SHARE_SELECT)
             .eq('recording_id', recordingId)
             .maybeSingle()
           if (raced) {

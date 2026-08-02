@@ -1,214 +1,460 @@
+:root {
+  --loom-card: #ffffff;
+  --loom-ink: #111312;
+  --loom-muted: #6b6f6d;
+  --loom-line: rgba(17, 19, 18, 0.08);
+  --loom-soft: #f3f3f0;
+  --loom-primary: #ff5e29;
+  --loom-on: #7ddf9a;
+}
+
+html,
 body {
-  width: 320px;
-  min-height: 260px;
+  width: 300px;
   margin: 0;
-  background:
-    radial-gradient(ellipse at top right, rgba(255, 94, 41, 0.16), transparent 55%),
-    var(--color-bg);
+  background: transparent;
+}
+
+body {
+  min-height: 0;
+  background: var(--loom-card);
 }
 
 .popup {
-  padding: 1rem 1rem 1.1rem;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  background: var(--loom-card);
+  color: var(--loom-ink);
+  min-height: 320px;
 }
 
-.popup-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.popup-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: block;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.popup-brand h1 {
-  margin: 0;
-  font-size: 1.05rem;
-  color: var(--color-text);
-}
-
-.popup-brand p {
-  margin: 0.1rem 0 0;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-}
-
-.popup-modes {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 0.35rem;
-}
-
-.popup-mode {
-  padding: 0.55rem 0.25rem;
-  font-size: 0.72rem;
-  font-weight: 600;
+/* Beat shared button chrome from styles.css */
+.popup button {
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-border) 6%, var(--color-bg));
-  color: var(--color-text-secondary);
-  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
 }
 
-.popup-mode.is-active {
-  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-bg));
-  color: var(--color-text);
-  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+.popup button:hover:not(:disabled) {
+  background: transparent;
 }
 
-.popup-shapes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem;
-}
-
-.popup-shape {
-  padding: 0.45rem 0.25rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-border) 6%, var(--color-bg));
-  color: var(--color-text-secondary);
-  border: 1px solid transparent;
-}
-
-.popup-shape.is-active {
-  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-bg));
-  color: var(--color-text);
-  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
-}
-
-.popup-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-}
-
-.popup-field select {
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 22%, transparent);
-  background: #fff;
-  color: var(--color-text);
-}
-
-.popup-mic-row {
+/* —— Top nav —— */
+.loom-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: -0.35rem;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--loom-line);
 }
 
-.popup-mic-refresh {
-  padding: 0.3rem 0.55rem;
-  font-size: 0.72rem;
-}
-
-.popup-mic-count {
-  font-size: 0.68rem;
-  color: var(--color-text-secondary);
-}
-
-.popup-field-hint {
-  font-size: 0.68rem;
-  line-height: 1.3;
-  color: var(--color-text-secondary);
-  opacity: 0.9;
-}
-
-.popup button.primary {
-  width: 100%;
-  padding: 0.75rem;
-  font-size: 0.95rem;
-  background: var(--color-primary);
-}
-
-.popup-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.45rem;
-}
-
-.popup-hint {
-  font-size: 0.72rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-  line-height: 1.35;
-}
-
-.popup-hint-muted {
-  opacity: 0.75;
-}
-
-.popup-error {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--danger);
-  line-height: 1.35;
-}
-
-.popup-step-label {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.popup-mic-status {
-  margin: 0;
-  padding: 0.5rem 0.65rem;
-  border-radius: 10px;
-  font-size: 0.78rem;
-  border: 1px solid color-mix(in srgb, var(--color-border) 28%, transparent);
-  background: color-mix(in srgb, var(--color-border) 6%, var(--color-bg));
-  color: var(--color-text);
-}
-
-.popup-mic-status.is-granted {
-  border-color: color-mix(in srgb, var(--color-secondary) 55%, transparent);
-  background: color-mix(in srgb, var(--color-secondary) 14%, var(--color-bg));
-}
-
-.popup-mic-status.is-denied {
-  border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, transparent);
-  background: color-mix(in srgb, var(--danger, #c0392b) 10%, var(--color-bg));
-}
-
-.popup-mic-status.is-skipped {
-  border-color: color-mix(in srgb, var(--color-text-secondary) 35%, transparent);
-}
-
-.popup-tab-card {
-  margin: 0;
-  padding: 0.65rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 28%, transparent);
-  background: color-mix(in srgb, var(--color-border) 6%, var(--color-bg));
-  font-size: 0.8rem;
-  line-height: 1.35;
-  color: var(--color-text);
-  word-break: break-word;
-}
-
-.popup button.primary.stop {
-  background: var(--color-primary);
-}
-
-.popup label {
+.loom-nav-tabs {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
+  gap: 4px;
+}
+
+.loom-nav-btn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--loom-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.loom-nav-btn:hover {
+  background: var(--loom-soft);
+  color: var(--loom-ink);
+}
+
+.loom-nav-btn.is-active {
+  background: color-mix(in srgb, var(--loom-primary) 12%, #fff);
+  color: var(--loom-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--loom-primary) 35%, transparent);
+}
+
+.loom-nav-btn svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.loom-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 12px;
+}
+
+/* —— Scope —— */
+.loom-scope {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--loom-line);
+  background: var(--loom-soft);
+  color: var(--loom-ink);
+  font: 650 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  text-align: left;
+}
+
+.loom-scope:hover {
+  background: color-mix(in srgb, var(--loom-soft) 70%, #fff);
+}
+
+.loom-scope svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--loom-muted);
+}
+
+.loom-scope-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.loom-scope-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--loom-muted);
+  opacity: 0.7;
+}
+
+.loom-scope-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+}
+
+/* —— Device rows —— */
+.loom-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loom-device {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--loom-line);
+  background: #fff;
+  min-height: 48px;
+}
+
+.loom-device.is-off {
+  opacity: 0.72;
+}
+
+.loom-device > svg,
+.loom-device-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: block;
+  color: var(--loom-muted);
+}
+
+.loom-device-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.loom-device-name {
+  font: 600 12.5px/1.25 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loom-device-select {
+  position: absolute;
+  left: 40px;
+  right: 56px;
+  top: 0;
+  bottom: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.loom-device-select:disabled {
+  cursor: default;
+}
+
+/* —— Toggle —— */
+.loom-toggle {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  background: #d5d5d0;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+
+.loom-toggle.is-on {
+  background: var(--loom-on);
+}
+
+.loom-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s ease;
+}
+
+.loom-toggle.is-on::after {
+  transform: translateX(16px);
+}
+
+.loom-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* —— CTA —— */
+/* Beat `.popup button` (transparent) so Start Recording stays solid orange */
+.popup button.loom-start {
+  width: 100%;
+  margin-top: 2px;
+  border: none;
+  border-radius: 14px;
+  padding: 13px 16px;
+  background: #ff5e29;
+  color: #fff;
+  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.popup button.loom-start:hover:not(:disabled) {
+  background: #ff5e29;
+  color: #fff;
+  filter: brightness(1.05);
+}
+
+.popup button.loom-start:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.popup button.loom-start:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.popup button.loom-start.is-stop {
+  background: var(--loom-ink);
+  color: #fff;
+}
+
+.popup button.loom-start.is-stop:hover:not(:disabled) {
+  background: var(--loom-ink);
+  color: #fff;
+}
+
+.loom-helper {
+  margin: 0;
+  text-align: center;
+  font: 500 11.5px/1.35 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-muted);
+}
+
+.loom-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #d6453a 10%, #fff);
+  color: #b13228;
+  font: 550 11.5px/1.35 ui-sans-serif, system-ui, sans-serif;
+}
+
+/* —— Footer —— */
+.loom-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--loom-line);
+}
+
+.loom-footer-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--loom-muted);
+  font: 600 10.5px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.loom-footer-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.loom-footer-btn:hover {
+  background: var(--loom-soft);
+  color: var(--loom-ink);
+}
+
+.loom-footer-btn.is-active {
+  color: var(--loom-ink);
+  background: color-mix(in srgb, var(--loom-primary) 10%, #fff);
+}
+
+/* —— Effects / Filters panel —— */
+.effects-header {
+  display: grid;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--loom-line);
+}
+
+.effects-back {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--loom-ink);
+  cursor: pointer;
+  padding: 0;
+}
+
+.effects-back:hover {
+  background: var(--loom-soft);
+}
+
+.effects-title {
+  margin: 0;
+  text-align: center;
+  font: 700 15px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-ink);
+}
+
+.effects-header-spacer {
+  width: 36px;
+  height: 36px;
+}
+
+.effects-body {
+  gap: 10px;
+}
+
+.effects-section-label {
+  margin: 0;
+  font: 700 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-ink);
+}
+
+.effects-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px 6px;
+}
+
+.effects-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: var(--loom-muted);
+}
+
+.effects-filter-swatch {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(17, 19, 18, 0.08);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+}
+
+.effects-filter.is-selected .effects-filter-swatch {
+  box-shadow: inset 0 0 0 1px rgba(17, 19, 18, 0.06), 0 0 0 2.5px #ff5e29;
+}
+
+.effects-filter-none {
+  font: 650 11px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-ink);
+}
+
+.effects-filter-label {
+  font: 600 10px/1 ui-sans-serif, system-ui, sans-serif;
+  color: var(--loom-muted);
+}
+
+.effects-filter.is-selected .effects-filter-label {
+  color: var(--loom-ink);
+}
+
+.effects-filter:hover .effects-filter-swatch {
+  box-shadow: inset 0 0 0 1px rgba(17, 19, 18, 0.12), 0 0 0 2px color-mix(in srgb, #ff5e29 45%, transparent);
+}
+
+.effects-filter.is-selected:hover .effects-filter-swatch {
+  box-shadow: inset 0 0 0 1px rgba(17, 19, 18, 0.06), 0 0 0 2.5px #ff5e29;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-nav-btn,
+  .loom-toggle,
+  .loom-toggle::after,
+  .popup button.loom-start,
+  .effects-filter-swatch {
+    transition: none;
+  }
 }

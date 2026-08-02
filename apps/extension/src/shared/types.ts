@@ -4,9 +4,18 @@ export type TranscriptSegment = {
   text: string
 }
 
+/** Word-level timing from Whisper (needed for filler-word cuts). */
+export type TranscriptWord = {
+  word: string
+  start: number
+  end: number
+}
+
 export type TranscriptData = {
   text: string
   segments: TranscriptSegment[]
+  /** Present when transcribed with word timestamps; required for filler removal. */
+  words?: TranscriptWord[]
   language?: string
   createdAt: number
   provider: 'openai'
@@ -25,12 +34,21 @@ export type RecordingMeta = {
   driveFileId?: string
   driveWebViewLink?: string
   driveShared?: boolean
+  /**
+   * Drive video playback readiness (binary — API has no percent).
+   * Inferred from videoMediaMetadata / thumbnail after upload.
+   */
+  driveProcessingStatus?: 'processing' | 'ready' | 'unknown'
+  /** Epoch ms when Drive readiness proxies first looked ready. */
+  driveReadyAt?: number
   /** MyPipCam watch-page share id (`mypipcam.earnyour.com/w/{shareId}`). */
   shareId?: string
   /** Cached view count from the share API (refreshed on Library load). */
   shareViewCount?: number
   /** ISO timestamp of last watch-page open. */
   shareLastViewedAt?: string | null
+  /** ISO timestamp when the public watch link expires (default 30 days). */
+  shareExpiresAt?: string | null
   /** Present only when the item exists on Drive but not locally (other device). */
   driveOnly?: boolean
 }
@@ -56,6 +74,16 @@ export type BubbleShape = 'circle' | 'square'
 /** Loom-style camera background effect (person segmentation). */
 export type BackgroundEffect = 'none' | 'blur'
 
+/** Color filter on the camera PiP (see shared/cameraFilters.ts). */
+export type CameraFilterId =
+  | 'none'
+  | 'bw'
+  | 'sepia'
+  | 'warm'
+  | 'cool'
+  | 'contrast'
+  | 'soft'
+
 export type PipSettings = {
   cameraDeviceId: string | null
   micDeviceId: string | null
@@ -69,6 +97,8 @@ export type PipSettings = {
   mirror: boolean
   /** Person-sharp background blur (MediaPipe selfie segmenter). */
   backgroundEffect: BackgroundEffect
+  /** Color filter on the camera bubble (persisted in chrome.storage.local). */
+  cameraFilter: CameraFilterId
   openLibraryOnFinish: boolean
 }
 
@@ -84,6 +114,7 @@ export const DEFAULT_PIP_SETTINGS: PipSettings = {
   shadow: true,
   mirror: true,
   backgroundEffect: 'none',
+  cameraFilter: 'none',
   openLibraryOnFinish: true,
 }
 

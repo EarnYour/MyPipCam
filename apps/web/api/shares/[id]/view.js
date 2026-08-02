@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto'
-import { cors, getSupabase, json, mapShare, readJson } from '../../_lib/supabase.js'
+import {
+  cors,
+  getSupabase,
+  isShareExpired,
+  json,
+  mapShare,
+  readJson,
+  SHARE_SELECT,
+} from '../../_lib/supabase.js'
 
 /**
  * POST /api/shares/:id/view — record a watch-page open (counts as a view)
@@ -31,22 +39,55 @@ export default async function handler(req, res) {
       /* empty body ok */
     }
 
+    const supabase = getSupabase()
+
+    // Fast path: reject expired before inserting a view row.
+    const { data: existing, error: findErr } = await supabase
+      .from('mypipcam_shares')
+      .select(SHARE_SELECT)
+      .eq('id', id)
+      .maybeSingle()
+
+    if (findErr) {
+      json(res, 500, { error: findErr.message })
+      return
+    }
+    if (!existing) {
+      json(res, 404, { error: 'Share not found' })
+      return
+    }
+    if (isShareExpired(existing)) {
+      json(res, 410, {
+        error: 'This link has expired',
+        expired: true,
+        share: mapShare(existing),
+      })
+      return
+    }
+
     const ua = String(req.headers['user-agent'] || '')
     const uaHash = ua
       ? createHash('sha256').update(ua).digest('hex').slice(0, 32)
       : null
 
-    const supabase = getSupabase()
     const { data, error } = await supabase.rpc('mypipcam_record_view', {
       p_share_id: id,
       p_ua_hash: uaHash,
     })
 
     if (error) {
+      const expired = /share expired/i.test(error.message || '')
       const notFound =
         /share not found|invalid share/i.test(error.message || '') ||
         error.code === 'P0001'
-      json(res, notFound ? 404 : 500, { error: error.message })
+      json(
+        res,
+        expired ? 410 : notFound ? 404 : 500,
+        {
+          error: expired ? 'This link has expired' : error.message,
+          expired: expired || undefined,
+        },
+      )
       return
     }
 

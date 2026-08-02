@@ -173,6 +173,13 @@ body {
   background: rgba(255, 196, 72, 0.45);
 }
 
+.timeline .filler {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(167, 139, 250, 0.5);
+}
+
 .timeline .playhead {
   position: absolute;
   top: 0;
@@ -209,6 +216,24 @@ body {
 
 .sil-leg::before {
   background: rgba(255, 196, 72, 0.8);
+}
+
+.fil-leg::before {
+  background: rgba(167, 139, 250, 0.9);
+}
+
+.editor-status {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.editor-status.error {
+  color: var(--danger);
+}
+
+.editor-status.success {
+  color: var(--color-secondary);
 }
 
 .controls-panel,

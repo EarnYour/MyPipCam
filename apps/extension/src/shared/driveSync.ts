@@ -6,11 +6,13 @@
 import {
   enableAnyoneWithLink,
   ensureLibraryFolder,
+  getVideoPlaybackStatus,
   listLibraryFiles,
   uploadRecordingFile,
   downloadFileBlob,
   driveFileToRecordingMeta,
   type DriveFileMeta,
+  type DriveVideoPlaybackStatus,
 } from './driveApi'
 import {
   clearDriveAuth,
@@ -27,10 +29,12 @@ import {
   clearDriveSettings,
   loadDriveSettings,
   saveDriveSettings,
+  type DriveSettings,
 } from './driveSettings'
 import type { RecordingMeta, RecordingRecord } from './types'
 
 const STORAGE_PENDING_DRIVE = 'drivePendingUploadIds'
+const STORAGE_LAST_DRIVE_ERROR = 'driveLastUploadError'
 
 export async function getPendingDriveUploadIds(): Promise<string[]> {
   const result = await chrome.storage.local.get(STORAGE_PENDING_DRIVE)
@@ -54,38 +58,72 @@ export async function removePendingDriveUploadId(id: string): Promise<void> {
   }
 }
 
+export async function getLastDriveUploadError(): Promise<string | null> {
+  const result = await chrome.storage.local.get(STORAGE_LAST_DRIVE_ERROR)
+  const raw = result[STORAGE_LAST_DRIVE_ERROR]
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
+export async function setLastDriveUploadError(message: string | null): Promise<void> {
+  if (!message?.trim()) {
+    await chrome.storage.local.remove(STORAGE_LAST_DRIVE_ERROR)
+    return
+  }
+  await chrome.storage.local.set({ [STORAGE_LAST_DRIVE_ERROR]: message.trim() })
+}
+
 export type DriveConnectionStatus = {
   configured: boolean
+  /**
+   * Persisted Drive library folder from a prior successful Connect.
+   * This is the UI "Connected" signal — do not require a live token probe
+   * (probes often race/timeout and disagree with Settings after Connect).
+   */
+  linked: boolean
+  /** Live OAuth token available without interactive consent. */
   signedIn: boolean
   folderId: string | null
   folderName: string | null
   autoUpload: boolean
 }
 
+/** True when the user has a Drive library folder configured (Settings + header). */
+export function isDriveLinked(status: Pick<DriveConnectionStatus, 'folderId'>): boolean {
+  return Boolean(status.folderId)
+}
+
+function statusFromSettings(
+  settings: DriveSettings,
+  opts: { configured: boolean; signedIn: boolean },
+): DriveConnectionStatus {
+  return {
+    configured: opts.configured,
+    linked: Boolean(settings.folderId),
+    signedIn: opts.signedIn,
+    folderId: settings.folderId,
+    folderName: settings.folderName,
+    autoUpload: settings.autoUpload,
+  }
+}
+
 export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus> {
   const settings = await loadDriveSettings()
   const configured = isOAuthClientConfigured()
   let signedIn = false
-  if (configured) {
+  if (configured && settings.folderId) {
     try {
       // Status probes must not hang Settings / Library on identity messaging.
       signedIn = await Promise.race([
         hasDriveAuth(),
         new Promise<boolean>((resolve) => {
-          setTimeout(() => resolve(false), 1500)
+          setTimeout(() => resolve(false), 2500)
         }),
       ])
     } catch {
       signedIn = false
     }
   }
-  return {
-    configured,
-    signedIn,
-    folderId: settings.folderId,
-    folderName: settings.folderName,
-    autoUpload: settings.autoUpload,
-  }
+  return statusFromSettings(settings, { configured, signedIn })
 }
 
 /**
@@ -113,6 +151,7 @@ async function connectGoogleDriveCore(opts?: {
   // Avoid re-probing identity (can race/timeout right after connect).
   return {
     configured: true,
+    linked: true,
     signedIn: true,
     folderId: folder.id,
     folderName: folder.name,
@@ -197,7 +236,7 @@ export async function connectGoogleDriveInBackground(
 export async function disconnectGoogleDrive(): Promise<void> {
   await clearDriveAuth()
   await clearDriveSettings()
-  await chrome.storage.local.remove(STORAGE_PENDING_DRIVE)
+  await chrome.storage.local.remove([STORAGE_PENDING_DRIVE, STORAGE_LAST_DRIVE_ERROR])
 }
 
 export async function setDriveAutoUpload(autoUpload: boolean): Promise<void> {
@@ -246,6 +285,7 @@ export async function uploadRecordingToDrive(
   })
 
   await removePendingDriveUploadId(record.id)
+  await setLastDriveUploadError(null)
 
   return {
     driveFileId: file.id,
@@ -261,9 +301,10 @@ export async function uploadRecordingToDrive(
  */
 export async function maybeQueueDriveUpload(record: RecordingRecord): Promise<DriveUploadResult | null> {
   try {
-    const status = await getDriveConnectionStatus()
-    if (!status.configured || !status.folderId) return null
-    if (!status.autoUpload) return null
+    const settings = await loadDriveSettings()
+    if (!isOAuthClientConfigured() || !settings.folderId || !settings.autoUpload) {
+      return null
+    }
     if (record.driveFileId) {
       return {
         driveFileId: record.driveFileId,
@@ -272,11 +313,20 @@ export async function maybeQueueDriveUpload(record: RecordingRecord): Promise<Dr
       }
     }
 
+    // Persist queue before upload so retries survive if this context is torn down.
     await addPendingDriveUploadId(record.id)
-    if (!(await hasDriveAuth())) return null
+    if (!(await hasDriveAuth())) {
+      await setLastDriveUploadError(
+        'Drive session expired — open Library and reconnect Google Drive to finish uploading.',
+      )
+      return null
+    }
 
     return await uploadRecordingToDrive(record, { interactive: false })
-  } catch {
+  } catch (err) {
+    await setLastDriveUploadError(
+      err instanceof Error ? err.message : 'Could not upload recording to Google Drive.',
+    )
     return null
   }
 }
@@ -320,9 +370,15 @@ export async function flushPendingDriveUploads(
         driveShared: result.driveShared,
       })
       uploaded += 1
-    } catch {
-      /* keep pending */
+    } catch (err) {
+      await setLastDriveUploadError(
+        err instanceof Error ? err.message : 'Could not upload recording to Google Drive.',
+      )
+      /* keep pending for next flush */
     }
+  }
+  if (uploaded > 0 && (await getPendingDriveUploadIds()).length === 0) {
+    await setLastDriveUploadError(null)
   }
   return uploaded
 }
@@ -333,17 +389,101 @@ export async function shareRecordingOnDrive(
   return enableAnyoneWithLink(driveFileId, true)
 }
 
-export async function listDriveLibraryRecordings(): Promise<
-  Array<ReturnType<typeof driveFileToRecordingMeta>>
-> {
+const DEFAULT_READY_MAX_WAIT_MS = 3 * 60_000
+const DEFAULT_READY_INTERVAL_MS = 2500
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(t)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * Poll Drive files.get until video metadata/thumbnail signals playback readiness.
+ * Binary only — Drive exposes no processing percent.
+ */
+export async function waitForDriveVideoReady(
+  driveFileId: string,
+  opts?: {
+    interactive?: boolean
+    maxWaitMs?: number
+    intervalMs?: number
+    onStatus?: (status: DriveVideoPlaybackStatus) => void
+    signal?: AbortSignal
+  },
+): Promise<DriveVideoPlaybackStatus> {
+  const interactive = opts?.interactive ?? false
+  const maxWaitMs = opts?.maxWaitMs ?? DEFAULT_READY_MAX_WAIT_MS
+  const baseInterval = opts?.intervalMs ?? DEFAULT_READY_INTERVAL_MS
+  const started = Date.now()
+  let attempt = 0
+  let last: DriveVideoPlaybackStatus = {
+    fileId: driveFileId,
+    ready: false,
+    hasThumbnail: false,
+    hasThumbnailLink: false,
+    durationMillis: null,
+    width: null,
+    height: null,
+  }
+
+  while (Date.now() - started < maxWaitMs) {
+    if (opts?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    last = await getVideoPlaybackStatus(driveFileId, interactive)
+    opts?.onStatus?.(last)
+    if (last.ready) return last
+
+    attempt += 1
+    const delay = Math.min(12_000, baseInterval + attempt * 750)
+    const remaining = maxWaitMs - (Date.now() - started)
+    if (remaining <= 0) break
+    await sleep(Math.min(delay, remaining), opts?.signal)
+  }
+
+  return last
+}
+
+export type { DriveVideoPlaybackStatus }
+
+export type DriveLibraryListResult = {
+  items: Array<ReturnType<typeof driveFileToRecordingMeta>>
+  error: string | null
+}
+
+export async function listDriveLibraryRecordings(): Promise<DriveLibraryListResult> {
   const settings = await loadDriveSettings()
-  if (!settings.folderId) return []
-  if (!(await hasDriveAuth())) return []
+  if (!settings.folderId) return { items: [], error: null }
   try {
+    if (!(await hasDriveAuth())) {
+      return {
+        items: [],
+        error: 'Drive session expired — reconnect Google Drive to list cloud recordings.',
+      }
+    }
     const files = await listLibraryFiles(settings.folderId, false)
-    return files.map(driveFileToRecordingMeta)
-  } catch {
-    return []
+    return { items: files.map(driveFileToRecordingMeta), error: null }
+  } catch (err) {
+    return {
+      items: [],
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Could not list Google Drive recordings.',
+    }
   }
 }
 

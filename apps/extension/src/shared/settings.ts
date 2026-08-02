@@ -1,4 +1,9 @@
 import {
+  isCameraFilterId,
+  normalizeCameraFilter,
+  saveCameraFilter,
+} from './cameraFilters'
+import {
   DEFAULT_PIP_SETTINGS,
   type PipSettings,
 } from './types'
@@ -7,11 +12,19 @@ import { sanitizeCssColor } from './security'
 const KEY = 'pipSettings'
 
 export async function loadPipSettings(): Promise<PipSettings> {
-  const result = await chrome.storage.sync.get(KEY)
+  const [result, localFilter] = await Promise.all([
+    chrome.storage.sync.get(KEY),
+    chrome.storage.local.get('cameraFilter'),
+  ])
   const raw = { ...DEFAULT_PIP_SETTINGS, ...(result[KEY] as Partial<PipSettings> | undefined) }
+  // Filter source of truth is chrome.storage.local (falls back to sync blob / default).
+  const cameraFilter = isCameraFilterId(localFilter.cameraFilter)
+    ? localFilter.cameraFilter
+    : normalizeCameraFilter(raw.cameraFilter)
   return {
     ...raw,
     borderColor: sanitizeCssColor(raw.borderColor, DEFAULT_PIP_SETTINGS.borderColor),
+    cameraFilter,
   }
 }
 
@@ -20,6 +33,9 @@ export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipS
   const next = { ...current, ...patch }
   if (patch.borderColor !== undefined) {
     next.borderColor = sanitizeCssColor(patch.borderColor, current.borderColor)
+  }
+  if (patch.cameraFilter !== undefined) {
+    next.cameraFilter = await saveCameraFilter(patch.cameraFilter)
   }
   await chrome.storage.sync.set({ [KEY]: next })
   return next

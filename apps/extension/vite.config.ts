@@ -20,7 +20,16 @@ export default defineConfig(async ({ mode }) => {
   const { default: manifest } = await import('./manifest.config')
 
   return {
-    plugins: [react(), crx({ manifest })],
+    plugins: [
+      react(),
+      crx({
+        manifest,
+        contentScripts: {
+          // Belt-and-suspenders: force IIFE even if a ?script import loses &iife.
+          standaloneFiles: ['src/content/pipOverlay.ts'],
+        },
+      }),
+    ],
     build: {
       // MV3 SW: no document. Keep modulePreload off so Vite does not inject
       // document-based preload helpers around any remaining dynamic imports in
@@ -35,6 +44,7 @@ export default defineConfig(async ({ mode }) => {
           pip: 'src/pip/index.html',
           hud: 'src/hud/index.html',
           micGrant: 'src/permissions/mic.html',
+          share: 'src/share/index.html',
         },
         // Background entry must not emit import() — source uses static imports
         // only (see src/background/index.ts). Shared ESM chunks are OK for

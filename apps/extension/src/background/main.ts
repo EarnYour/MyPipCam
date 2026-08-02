@@ -1,4 +1,8 @@
-import pipOverlayScript from '../content/pipOverlay.ts?script'
+// Force CRX to emit a classic IIFE at src/content/pipOverlay.js.
+// IMPORTANT: never inject the import value. `*?script` is an alias for
+// `*?script&loader` (hashed ESM loader under assets/) — executeScript cannot
+// run those loaders. Always inject the stable IIFE path below.
+import crxPipOverlayPath from '../content/pipOverlay.ts?script&iife'
 import {
   clearDriveAuthDirect,
   DriveAuthError,
@@ -8,6 +12,7 @@ import {
   invalidateAccessTokenDirect,
 } from '../shared/driveAuth'
 import { connectGoogleDriveInBackground } from '../shared/driveSync'
+import { normalizeCameraFilter } from '../shared/cameraFilters'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
 import { openEditorTab, openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
@@ -58,6 +63,11 @@ async function validatePipChannelToken(token: string): Promise<boolean> {
 }
 
 const OFFSCREEN_URL = 'src/offscreen/index.html'
+/**
+ * Stable classic-script path written by CRX's IIFE content-script pass.
+ * Must match dist/src/content/pipOverlay.js — never a hashed assets/*-loader-*.
+ */
+const PIP_OVERLAY_SCRIPT = 'src/content/pipOverlay.js'
 
 type LoomSession = {
   tabId: number
@@ -74,8 +84,14 @@ type LoomSession = {
 let loomSession: LoomSession | null = null
 let starting = false
 let armingCapture = false
-/** Fallback extension window when page overlay inject/visibility fails. */
+/** Recording controls window (outside tabCapture). */
 let hudWindowId: number | null = null
+/** When popup window create fails, HUD opens as a normal tab instead. */
+let hudTabId: number | null = null
+/** Suppress auto-reopen while we intentionally tear down the HUD. */
+let hudClosingIntentionally = false
+/** Last driveCountdown flag — used when reopening after user closes mid-session. */
+let hudDriveCountdown = false
 
 type StoredLoomRecording = {
   tabId?: number
@@ -194,33 +210,202 @@ async function notifyStartFailure(reason: string) {
 }
 
 async function closeHudWindow() {
-  if (hudWindowId == null) return
-  const id = hudWindowId
+  hudClosingIntentionally = true
+  const winId = hudWindowId
+  const tabId = hudTabId
   hudWindowId = null
+  hudTabId = null
   try {
-    await chrome.windows.remove(id)
-  } catch {
-    /* already closed */
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId)
+      } catch {
+        /* already closed */
+      }
+    }
+    if (winId != null) {
+      try {
+        await chrome.windows.remove(winId)
+      } catch {
+        /* already closed */
+      }
+    }
+  } finally {
+    // Allow reopen logic again after a tick (onRemoved may fire async).
+    setTimeout(() => {
+      hudClosingIntentionally = false
+    }, 400)
   }
 }
 
-async function openFallbackHud(): Promise<{ ok: boolean; reason?: string }> {
+async function focusHudWindow(): Promise<boolean> {
+  if (hudWindowId != null) {
+    try {
+      await chrome.windows.update(hudWindowId, { focused: true, drawAttention: true })
+      return true
+    } catch {
+      hudWindowId = null
+    }
+  }
+  if (hudTabId != null) {
+    try {
+      const tab = await chrome.tabs.get(hudTabId)
+      await chrome.tabs.update(hudTabId, { active: true })
+      if (typeof tab.windowId === 'number') {
+        await chrome.windows.update(tab.windowId, { focused: true, drawAttention: true })
+        hudWindowId = tab.windowId
+      }
+      return true
+    } catch {
+      hudTabId = null
+    }
+  }
+  return false
+}
+
+async function resolveHudAnchor(anchorTabId?: number): Promise<{ left: number; top: number }> {
+  const height = 420
+  try {
+    let win: chrome.windows.Window | undefined
+    if (typeof anchorTabId === 'number') {
+      const tab = await chrome.tabs.get(anchorTabId)
+      if (typeof tab.windowId === 'number') {
+        win = await chrome.windows.get(tab.windowId)
+      }
+    }
+    if (!win) win = await chrome.windows.getLastFocused()
+    const left = Math.max(8, (win.left ?? 0) + 16)
+    const top = Math.max(
+      8,
+      (win.top ?? 0) + Math.round(((win.height ?? 800) - height) / 2),
+    )
+    return { left, top }
+  } catch {
+    return { left: 24, top: 120 }
+  }
+}
+
+/**
+ * Recording controls live in an extension popup so tabCapture never records
+ * the stop/pause/timer dock. Always open focused + positioned beside the
+ * captured window — otherwise focusCapturedTab buries an unfocused HUD.
+ */
+async function openRecordingHud(options?: {
+  driveCountdown?: boolean
+  focused?: boolean
+  anchorTabId?: number
+  /** Reuse existing HUD if still open (just focus + sync). */
+  reuse?: boolean
+}): Promise<{ ok: boolean; reason?: string }> {
+  const driveCountdown = Boolean(options?.driveCountdown)
+  hudDriveCountdown = driveCountdown
+  const qs = driveCountdown ? '?drive=1' : '?drive=0'
+  const url = chrome.runtime.getURL(`src/hud/index.html${qs}`)
+
+  if (options?.reuse !== false) {
+    const focused = await focusHudWindow()
+    if (focused) {
+      startLog('recording HUD reused/focused', { windowId: hudWindowId, tabId: hudTabId })
+      return { ok: true }
+    }
+  }
+
   await closeHudWindow()
+  // closeHudWindow sets the intentional flag — clear so create failures aren't confused.
+  hudClosingIntentionally = false
+
+  const { left, top } = await resolveHudAnchor(options?.anchorTabId)
   try {
     const win = await chrome.windows.create({
-      url: 'src/hud/index.html',
+      url,
       type: 'popup',
-      width: 300,
-      height: 260,
+      width: 320,
+      height: 420,
+      left,
+      top,
       focused: true,
     })
     hudWindowId = typeof win?.id === 'number' ? win.id : null
-    startLog('fallback HUD opened', { windowId: hudWindowId })
-    return { ok: hudWindowId != null }
+    if (hudWindowId == null) {
+      throw new Error('Recording controls window opened without an id')
+    }
+    // Second focus pass — create(..., focused:true) is flaky after tabCapture.
+    await chrome.windows.update(hudWindowId, { focused: true, drawAttention: true })
+    startLog('recording HUD opened', { windowId: hudWindowId, driveCountdown, left, top })
+    return { ok: true }
   } catch (err) {
-    const reason = errMessage(err, 'Could not open fallback recording controls')
-    startError('fallback HUD failed', reason)
-    return { ok: false, reason }
+    const createReason = errMessage(err, 'Could not open recording controls window')
+    startWarn('recording HUD popup failed — trying window/tab fallback', createReason)
+    // Fallback 1: normal focused window (still outside the captured tab).
+    try {
+      const win = await chrome.windows.create({
+        url,
+        type: 'normal',
+        width: 360,
+        height: 480,
+        left,
+        top,
+        focused: true,
+      })
+      hudWindowId = typeof win?.id === 'number' ? win.id : null
+      const tabs = win?.tabs
+      hudTabId =
+        tabs && tabs[0] && typeof tabs[0].id === 'number' ? tabs[0].id : null
+      if (hudWindowId == null) throw new Error('Fallback HUD window missing id')
+      await chrome.windows.update(hudWindowId, { focused: true, drawAttention: true })
+      startLog('recording HUD opened as normal window', {
+        windowId: hudWindowId,
+        tabId: hudTabId,
+      })
+      return { ok: true }
+    } catch (winErr) {
+      startWarn(
+        'recording HUD normal-window fallback failed — trying tab',
+        errMessage(winErr, ''),
+      )
+    }
+    // Fallback 2: focused tab the user can definitely see.
+    try {
+      const tab = await chrome.tabs.create({ url, active: true })
+      hudTabId = typeof tab.id === 'number' ? tab.id : null
+      if (typeof tab.windowId === 'number') hudWindowId = tab.windowId
+      if (hudTabId == null) throw new Error('HUD tab opened without an id')
+      await chrome.windows.update(tab.windowId!, { focused: true, drawAttention: true })
+      startLog('recording HUD opened as tab', { tabId: hudTabId, windowId: hudWindowId })
+      return { ok: true }
+    } catch (tabErr) {
+      const reason = errMessage(tabErr, createReason)
+      startError('recording HUD failed', reason)
+      return { ok: false, reason }
+    }
+  }
+}
+
+async function syncHud(phase: string, reason?: string) {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'HUD_SYNC',
+      phase,
+      ...(reason ? { reason } : {}),
+    })
+  } catch {
+    /* HUD may have closed */
+  }
+}
+
+/** After focusing the captured tab, bring HUD back on top so controls stay visible. */
+async function focusCapturedTabThenHud(tabId: number) {
+  await focusCapturedTab(tabId)
+  // Brief delay so Chrome finishes tab focus before we steal it back for controls.
+  await new Promise((r) => setTimeout(r, 80))
+  const ok = await focusHudWindow()
+  if (!ok) {
+    const session = (await hydrateLoomSession()) ?? loomSession
+    await openRecordingHud({
+      driveCountdown: hudDriveCountdown || session?.phase === 'countdown',
+      anchorTabId: tabId,
+      reuse: false,
+    })
   }
 }
 
@@ -341,22 +526,36 @@ async function ensureMicrophoneAccess(): Promise<{ ok: boolean; reason?: string 
 }
 
 async function injectOverlay(tabId: number) {
-  startLog('injectOverlay', { tabId, script: pipOverlayScript })
+  // Defense: if CRX ever regresses to returning a loader path, ignore it.
+  if (crxPipOverlayPath !== PIP_OVERLAY_SCRIPT) {
+    startError('CRX overlay path mismatch — using stable IIFE path', {
+      crxPath: crxPipOverlayPath,
+      stablePath: PIP_OVERLAY_SCRIPT,
+    })
+  }
+  if (/loader/i.test(crxPipOverlayPath) || /assets\//i.test(crxPipOverlayPath)) {
+    startError('CRX returned forbidden overlay path shape', crxPipOverlayPath)
+  }
+  startLog('injectOverlay', {
+    tabId,
+    script: PIP_OVERLAY_SCRIPT,
+    crxPath: crxPipOverlayPath,
+  })
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: [pipOverlayScript],
+    files: [PIP_OVERLAY_SCRIPT],
   })
-  startLog('injectOverlay executeScript resolved', { tabId })
+  startLog('injectOverlay executeScript resolved', { tabId, script: PIP_OVERLAY_SCRIPT })
 }
 
 /**
- * CRX content scripts load via async dynamic import(). executeScript resolves
- * before onMessage is registered — retry until the overlay listener answers.
+ * Overlay inject is IIFE (sync), but the tab may still be settling after
+ * executeScript / share-picker focus — retry briefly until the listener answers.
  */
 async function sendOverlayMessage<T extends { ok?: boolean; reason?: string }>(
   tabId: number,
   message: Record<string, unknown>,
-  attempts = 30,
+  attempts = 20,
 ): Promise<T> {
   let lastErr = 'Overlay content script did not respond'
   startLog('sendOverlayMessage', { tabId, type: message.type, attempts })
@@ -553,9 +752,9 @@ async function getTabStreamId(tabId: number): Promise<string> {
 /**
  * Phase 1 (must stay in the Start user-gesture chain):
  * mint/consume tabCapture streamId → hold MediaStreams in offscreen →
- * inject overlay + 3→2→1. MediaRecorder starts on LOOM_COUNTDOWN_DONE.
- * If page overlay is invisible/unreachable, open a fallback HUD window and
- * keep capture armed (never leave orphaned "Sharing…" with zero UI).
+ * inject page PiP bubble + 3→2→1 → always open recording HUD controls
+ * (outside the captured tab). MediaRecorder starts on LOOM_COUNTDOWN_DONE.
+ * If page overlay fails, HUD also drives the countdown.
  */
 async function startLoomRecording(
   explicitTabId?: number,
@@ -660,6 +859,7 @@ async function startLoomRecording(
       micDeviceId: micDeviceId ?? null,
       cameraDeviceId: cameraDeviceId ?? null,
       recordMode,
+      cameraFilter: settings.cameraFilter,
     })
 
     if (!prepareResult?.ok) {
@@ -674,6 +874,7 @@ async function startLoomRecording(
     startLog('OFFSCREEN_PREPARE ok')
 
     let ui: 'page' | 'hud' = 'page'
+    let pageOverlayOk = false
     try {
       await injectOverlay(tab.id)
       const overlayRes = await sendOverlayMessage<{
@@ -692,26 +893,37 @@ async function startLoomRecording(
         shadow: settings.shadow,
         bubbleShape: settings.bubbleShape,
         backgroundEffect: settings.backgroundEffect,
+        cameraFilter: settings.cameraFilter,
         mode: 'live',
         recordMode,
         cameraDeviceId: cameraDeviceId ?? null,
         phase: 'countdown',
       })
       startLog('page overlay ready', overlayRes)
+      pageOverlayOk = true
     } catch (err) {
       const reason = errMessage(err, 'Could not start camera overlay in this tab.')
-      startError('page overlay failed — trying HUD fallback', reason)
+      startError('page overlay failed — HUD will drive countdown', reason)
       await showOverlayInjectFailureToast(tab.id, reason)
-      const hud = await openFallbackHud()
-      if (!hud.ok) {
+    }
+
+    // Controls always live outside the tab so they are never tabCaptured.
+    // Always focused + anchored — unfocused create was buried by focusCapturedTab.
+    const hud = await openRecordingHud({
+      driveCountdown: !pageOverlayOk,
+      anchorTabId: tab.id,
+      reuse: false,
+    })
+    if (!hud.ok) {
+      if (!pageOverlayOk) {
         await teardownCaptureStreams(tab.id)
-        const detail = `${reason} Fallback controls also failed: ${hud.reason || 'unknown'}`
+        const detail = `Could not show recording UI. ${hud.reason || 'unknown'}`
         await notifyStartFailure(detail)
-        // Do not focusCapturedTab here — that closes the popup before it can show the error.
         return { ok: false, reason: detail }
       }
-      ui = 'hud'
+      startWarn('recording HUD failed — page PiP only; use ⌘⇧U / Ctrl+Shift+U to stop', hud.reason)
     }
+    ui = pageOverlayOk ? 'page' : 'hud'
 
     loomSession = {
       tabId: tab.id,
@@ -725,7 +937,7 @@ async function startLoomRecording(
     }
     await persistLoomSession(loomSession, ui)
     await setRecordingBadge(true)
-    startLog('session armed', { tabId: tab.id, ui })
+    startLog('session armed', { tabId: tab.id, ui, pageOverlayOk, hudOk: hud.ok })
     // Do NOT focusCapturedTab here — focusing steals focus from the action
     // popup, which destroys it before sendResponse is delivered. The popup then
     // sees a null response and FORCE_STOPs a successful start (zero UI).
@@ -746,9 +958,23 @@ async function startLoomRecording(
 
 /** Phase 2: countdown finished → start MediaRecorder on already-held streams. */
 async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: string }> {
-  if (armingCapture) return { ok: false, reason: 'already-arming' }
+  // Page + HUD may both fire LOOM_COUNTDOWN_DONE (Skip) — tolerate races.
+  if (armingCapture) {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      const live = (await hydrateLoomSession()) ?? loomSession
+      if (live?.phase === 'recording') return { ok: true }
+      if (!armingCapture) break
+    }
+    const live = (await hydrateLoomSession()) ?? loomSession
+    if (live?.phase === 'recording') return { ok: true }
+    return { ok: false, reason: 'already-arming' }
+  }
+
   const session = (await hydrateLoomSession()) ?? loomSession
-  if (!session || session.phase !== 'countdown') {
+  if (!session) return { ok: false, reason: 'no-countdown-session' }
+  if (session.phase === 'recording') return { ok: true }
+  if (session.phase !== 'countdown') {
     return { ok: false, reason: 'no-countdown-session' }
   }
 
@@ -757,6 +983,7 @@ async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: strin
     if (!session.prepared) {
       const reason = 'Capture was not armed before countdown. Try Start again.'
       await failCaptureKeepOverlay(session.tabId)
+      await syncHud('countdown', reason)
       return { ok: false, reason }
     }
 
@@ -768,6 +995,7 @@ async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: strin
       const detail =
         startResult?.reason?.trim() || 'Could not start MediaRecorder after countdown.'
       await failCaptureKeepOverlay(session.tabId)
+      await syncHud('countdown', detail)
       return { ok: false, reason: detail }
     }
 
@@ -782,6 +1010,8 @@ async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: strin
     } catch {
       /* overlay may have been removed */
     }
+    await syncHud('recording')
+    await focusHudWindow()
 
     return { ok: true }
   } catch (err) {
@@ -976,6 +1206,7 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
         }
       }
 
+      const restartSettings = await loadPipSettings()
       reset = await sendOffscreen<{ ok?: boolean; reason?: string }>({
         type: 'OFFSCREEN_PREPARE',
         streamId,
@@ -983,6 +1214,7 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
         micDeviceId: session.micDeviceId,
         cameraDeviceId: session.cameraDeviceId,
         recordMode: session.recordMode,
+        cameraFilter: restartSettings.cameraFilter,
       })
 
       if (!reset?.ok) {
@@ -1005,12 +1237,10 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
         type: 'PIP_OVERLAY_RESTART',
       })
     } catch (err) {
-      await failCaptureKeepOverlay(session.tabId)
-      return {
-        ok: false,
-        reason: errMessage(err, 'Could not reset the recording overlay.'),
-      }
+      // Page overlay optional — HUD can still drive countdown after restart.
+      startWarn('page overlay restart failed', errMessage(err, 'overlay restart failed'))
     }
+    await syncHud('countdown')
 
     return { ok: true }
   } catch (err) {
@@ -1039,6 +1269,7 @@ async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
     } catch {
       /* ignore */
     }
+    await syncHud('paused')
   }
   return res?.ok ? { ok: true } : { ok: false, reason: res?.reason || 'pause-failed' }
 }
@@ -1060,6 +1291,7 @@ async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> 
     } catch {
       /* ignore */
     }
+    await syncHud('recording')
   }
   return res?.ok ? { ok: true } : { ok: false, reason: res?.reason || 'resume-failed' }
 }
@@ -1076,12 +1308,51 @@ chrome.commands.onCommand.addListener(async (command) => {
     return
   }
   const result = await startLoomRecording()
-  if (result.ok && result.ui === 'page' && typeof result.tabId === 'number') {
-    await focusCapturedTab(result.tabId)
+  if (result.ok && typeof result.tabId === 'number') {
+    await focusCapturedTabThenHud(result.tabId)
   }
 })
 
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (hudWindowId !== windowId) return
+  hudWindowId = null
+  if (hudClosingIntentionally) return
+  void (async () => {
+    const session = (await hydrateLoomSession()) ?? loomSession
+    if (!session) return
+    startWarn('recording HUD closed mid-session — reopening')
+    const reopen = await openRecordingHud({
+      driveCountdown: hudDriveCountdown || session.phase === 'countdown',
+      anchorTabId: session.tabId,
+      reuse: false,
+    })
+    if (reopen.ok) {
+      await syncHud(session.phase === 'countdown' ? 'countdown' : 'recording')
+      await focusHudWindow()
+    }
+  })()
+})
+
 chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === hudTabId) {
+    hudTabId = null
+    if (!hudClosingIntentionally) {
+      void (async () => {
+        const session = (await hydrateLoomSession()) ?? loomSession
+        if (!session) return
+        startWarn('recording HUD tab closed mid-session — reopening')
+        const reopen = await openRecordingHud({
+          driveCountdown: hudDriveCountdown || session.phase === 'countdown',
+          anchorTabId: session.tabId,
+          reuse: false,
+        })
+        if (reopen.ok) {
+          await syncHud(session.phase === 'countdown' ? 'countdown' : 'recording')
+          await focusHudWindow()
+        }
+      })()
+    }
+  }
   if (loomSession?.tabId === tabId) {
     void discardLoomRecording()
   }
@@ -1348,11 +1619,11 @@ function dispatchExtensionMessage(
           startError('START_LOOM_RECORDING failed:', result.reason)
         } else {
           startLog('START_LOOM_RECORDING ok', result)
-          // Focus after reply so the popup receives ok before it is destroyed.
-          if (result.ui === 'page' && typeof result.tabId === 'number') {
+          // After reply: show page PiP briefly, then bring HUD controls back on top.
+          if (typeof result.tabId === 'number') {
             const focusTabId = result.tabId
             setTimeout(() => {
-              void focusCapturedTab(focusTabId)
+              void focusCapturedTabThenHud(focusTabId)
             }, 50)
           }
         }
@@ -1376,9 +1647,31 @@ function dispatchExtensionMessage(
         typeof message.tabId === 'number' ? message.tabId : loomSession?.tabId
       if (typeof tabId === 'number') {
         startLog('FOCUS_CAPTURED_TAB', { tabId })
-        await focusCapturedTab(tabId)
+        // Keep recording controls visible — don't leave HUD buried behind the tab.
+        await focusCapturedTabThenHud(tabId)
       }
       sendResponse({ ok: true })
+    })()
+    return true
+  }
+
+  if (message?.type === 'ENSURE_RECORDING_HUD') {
+    void (async () => {
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (!session) {
+        sendResponse({ ok: false, reason: 'not-recording' })
+        return
+      }
+      const hud = await openRecordingHud({
+        driveCountdown: hudDriveCountdown || session.phase === 'countdown',
+        anchorTabId: session.tabId,
+        reuse: true,
+      })
+      if (hud.ok) {
+        await syncHud(session.phase === 'countdown' ? 'countdown' : 'recording')
+        await focusHudWindow()
+      }
+      sendResponse(hud)
     })()
     return true
   }
@@ -1526,6 +1819,26 @@ function dispatchExtensionMessage(
     return false
   }
 
+  if (message?.type === 'LOOM_BUBBLE_FILTER') {
+    const cameraFilter = normalizeCameraFilter(message.cameraFilter)
+    void (async () => {
+      await savePipSettings({ cameraFilter })
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            cameraFilter,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true, cameraFilter })
+    })()
+    return true
+  }
+
   if (message?.type === 'LOOM_TAB_ENDED') {
     void stopLoomRecording()
     sendResponse({ ok: true })
@@ -1558,6 +1871,7 @@ function dispatchExtensionMessage(
           shadow: message.shadow,
           bubbleShape: message.bubbleShape,
           backgroundEffect: message.backgroundEffect,
+          cameraFilter: normalizeCameraFilter(message.cameraFilter),
           mode: 'guide',
           recordMode: 'screen-cam',
           phase: 'recording',
@@ -1595,6 +1909,7 @@ function dispatchExtensionMessage(
           shadow: message.shadow,
           bubbleShape: message.bubbleShape,
           backgroundEffect: message.backgroundEffect,
+          cameraFilter: message.cameraFilter,
         })
         sendResponse({ ok: true })
       } catch {

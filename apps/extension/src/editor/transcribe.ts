@@ -1,4 +1,4 @@
-import type { TranscriptData, TranscriptSegment } from '../shared/types'
+import type { TranscriptData, TranscriptSegment, TranscriptWord } from '../shared/types'
 
 type WhisperVerboseResponse = {
   text?: string
@@ -8,10 +8,16 @@ type WhisperVerboseResponse = {
     end?: number
     text?: string
   }>
+  words?: Array<{
+    word?: string
+    start?: number
+    end?: number
+  }>
 }
 
 /**
  * Transcribe a recording with OpenAI Whisper using the user's API key.
+ * Requests segment + word timestamps (word timings power filler-word cuts).
  * Does not log the key. Throws friendly Error messages for UI.
  */
 export async function transcribeWithOpenAI(
@@ -28,7 +34,9 @@ export async function transcribeWithOpenAI(
   form.append('file', blob, filename)
   form.append('model', 'whisper-1')
   form.append('response_format', 'verbose_json')
+  // Both granularities: segments for captions UI, words for filler removal.
   form.append('timestamp_granularities[]', 'segment')
+  form.append('timestamp_granularities[]', 'word')
 
   let res: Response
   try {
@@ -56,6 +64,14 @@ export async function transcribeWithOpenAI(
     }))
     .filter((s) => s.text.length > 0)
 
+  const words: TranscriptWord[] = (data.words ?? [])
+    .map((w) => ({
+      word: (w.word ?? '').trim(),
+      start: Number(w.start) || 0,
+      end: Number(w.end) || 0,
+    }))
+    .filter((w) => w.word.length > 0 && w.end >= w.start)
+
   const text = (data.text ?? segments.map((s) => s.text).join(' ')).trim()
   if (!text) {
     throw new Error('Transcription returned empty text. Try again or check audio levels.')
@@ -64,6 +80,7 @@ export async function transcribeWithOpenAI(
   return {
     text,
     segments,
+    words: words.length > 0 ? words : undefined,
     language: data.language,
     createdAt: Date.now(),
     provider: 'openai',
