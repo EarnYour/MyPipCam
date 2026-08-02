@@ -1,4 +1,10 @@
-import type { BubbleShape, PipSettings } from '../shared/types'
+import {
+  captureQualitySize,
+  cursorCaptureConstraint,
+  normalizeCaptureQuality,
+  type BubbleShape,
+  type PipSettings,
+} from '../shared/types'
 import { SQUARE_CORNER_FRACTION } from '../shared/types'
 import {
   createPersonBackgroundBlur,
@@ -186,14 +192,46 @@ export async function startCapture(settings: PipSettings): Promise<{
   setDrawCamera: (on: boolean) => void
   displaySurface: string | undefined
 }> {
+  const cursor = cursorCaptureConstraint(settings.captureCursor !== false)
+  const quality = normalizeCaptureQuality(settings.captureQuality)
+  const { width: idealW, height: idealH } = captureQualitySize(quality)
   const displayStream = await navigator.mediaDevices.getDisplayMedia({
     video: {
-      frameRate: 30,
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
+      frameRate: { ideal: 30 },
+      width: { ideal: idealW },
+      height: { ideal: idealH },
+      // Screen Capture: cursor + resolution apply to tab/screen, not camera PiP.
+      cursor,
+    } as MediaTrackConstraints,
     audio: true,
   })
+  // Best-effort if the picker ignored constraints (some surfaces/browsers).
+  const displayVideoTrack = displayStream.getVideoTracks()[0]
+  if (displayVideoTrack) {
+    try {
+      await displayVideoTrack.applyConstraints({
+        width: { ideal: idealW },
+        height: { ideal: idealH },
+        frameRate: { ideal: 30 },
+        cursor,
+      } as MediaTrackConstraints)
+    } catch {
+      try {
+        await displayVideoTrack.applyConstraints({
+          width: { ideal: idealW },
+          height: { ideal: idealH },
+          frameRate: { ideal: 30 },
+        })
+      } catch {
+        /* unsupported on this surface */
+      }
+      try {
+        await displayVideoTrack.applyConstraints({ cursor } as MediaTrackConstraints)
+      } catch {
+        /* unsupported on this surface */
+      }
+    }
+  }
 
   let cameraStream: MediaStream | null = null
   try {

@@ -1,11 +1,11 @@
 /**
- * On-tab recording chrome (captured by tabCapture — keep lean):
+ * On-tab recording chrome (captured by tabCapture — dock may appear in video):
  * - Freely draggable circular camera bubble (extension-origin iframe)
- * - Center-screen 3→2→1 countdown (number only; ends before MediaRecorder)
+ * - Left-edge collapsible dock: collapsed = timer+Stop only; expand for more
+ * - Center-screen 3→2→1 countdown with Cancel / Skip
  *
- * Stop / pause / timer / trim live in the extension HUD window so they are
- * never baked into the recorded video. Mounted in a closed Shadow DOM under
- * a fixed max-z host — never the Popover API (see ensureMount).
+ * Mounted in a closed Shadow DOM under a fixed max-z host — never the Popover
+ * API (see ensureMount). Dock may appear in tabCapture (user-accepted tradeoff).
  */
 
 import {
@@ -13,11 +13,26 @@ import {
   sanitizeCssColor,
 } from '../shared/security'
 
-/** Prevent duplicate onMessage listeners when IIFE is re-injected. */
+/**
+ * Prevent duplicate onMessage listeners when IIFE is re-injected.
+ * A single thin dispatcher calls the latest handler body so extension reloads
+ * pick up dock fixes without stacking listeners or keeping a stale pre-dock
+ * TabOverlay class. DISPATCHER_KEY is new — older builds only set INSTALL_KEY.
+ */
 const INSTALL_KEY = '__mypipcamPipOverlayInstalled'
+const DISPATCHER_KEY = '__mypipcamPipOverlayDispatcher'
+const HANDLER_KEY = '__mypipcamPipOverlayHandle'
+const INSTALL_VERSION = 5
+type OverlayMessageHandler = (
+  message: any,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: any) => void,
+) => boolean | void
 declare global {
   interface Window {
-    [INSTALL_KEY]?: boolean
+    [INSTALL_KEY]?: number | boolean
+    [DISPATCHER_KEY]?: boolean
+    [HANDLER_KEY]?: OverlayMessageHandler
   }
 }
 
@@ -76,6 +91,29 @@ const BUBBLE_MIN_PX = 96
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
+}
+
+/** Wait for N animation frames so the compositor drops the previous paint. */
+function waitAnimationFrames(count: number): Promise<void> {
+  return new Promise((resolve) => {
+    const step = (left: number) => {
+      if (left <= 0) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(() => step(left - 1))
+    }
+    requestAnimationFrame(() => step(count - 1))
+  })
+}
+
+/**
+ * After removing countdown chrome, give Chrome tabCapture time to stop
+ * including the last painted "1" before MediaRecorder starts.
+ */
+async function waitCountdownClearedFromCapture(): Promise<void> {
+  await waitAnimationFrames(2)
+  await new Promise<void>((r) => window.setTimeout(r, 80))
 }
 
 type OverlayMount = {
@@ -264,7 +302,448 @@ function overlayStyles(): string {
     }
     .mpc-menu button:hover { background: rgba(255,255,255,0.1); }
 
-    /* Camera failure chip — rare; avoid leaving chrome in the capture */
+    /* —— Left collapsible dock: collapsed = timer + Stop only —— */
+    .mpc-dock {
+      position: fixed !important;
+      left: 10px !important;
+      top: 50% !important;
+      transform: translateY(-50%) !important;
+      z-index: 2147483647 !important;
+      pointer-events: none;
+      /* display:none while hidden — opacity alone can stay invisible under
+         aggressive page compositing / capture overlays. */
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 48px;
+      min-height: 96px;
+      padding: 6px 5px 8px;
+      gap: 4px;
+      border-radius: 999px;
+      background: rgba(17, 19, 18, 0.94) !important;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.42);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.18s ease;
+    }
+    .mpc-dock.is-visible {
+      display: flex !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      pointer-events: auto !important;
+    }
+
+    .mpc-dock-head {
+      all: unset;
+      box-sizing: border-box;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      border-radius: 12px;
+      padding: 2px 0 1px;
+    }
+    .mpc-dock-head:hover { background: rgba(255,255,255,0.06); }
+    .mpc-dock-head:focus-visible {
+      outline: 2px solid rgba(255, 94, 41, 0.7);
+      outline-offset: 1px;
+    }
+
+    .mpc-dock-rec {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #e11d2e;
+      box-shadow: 0 0 0 2px rgba(225, 29, 46, 0.25);
+      flex-shrink: 0;
+    }
+    .mpc-dock.is-paused .mpc-dock-rec {
+      background: #8a8d88;
+      box-shadow: none;
+    }
+
+    .mpc-dock-timer {
+      color: #fff;
+      font: 700 11px/1 ui-sans-serif, system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+      letter-spacing: 0.02em;
+      min-height: 1em;
+    }
+
+    .mpc-dock-chevron {
+      width: 14px;
+      height: 14px;
+      color: rgba(255,255,255,0.55);
+      display: grid;
+      place-items: center;
+    }
+    .mpc-dock-chevron svg {
+      width: 12px;
+      height: 12px;
+      display: block;
+      transition: transform 0.15s ease;
+    }
+    .mpc-dock.is-expanded .mpc-dock-chevron svg {
+      transform: rotate(180deg);
+    }
+
+    .mpc-dock-core,
+    .mpc-dock-more {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      width: 100%;
+    }
+    .mpc-dock-more {
+      display: none;
+      padding-top: 2px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      margin-top: 2px;
+    }
+    .mpc-dock.is-expanded .mpc-dock-more {
+      display: flex;
+    }
+
+    .mpc-dock button.mpc-dock-btn {
+      all: unset;
+      box-sizing: border-box;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      color: #fff;
+    }
+    .mpc-dock button.mpc-dock-btn:hover { background: rgba(255,255,255,0.1); }
+    .mpc-dock button.mpc-dock-btn:disabled { opacity: 0.45; cursor: default; }
+    .mpc-dock button.mpc-dock-btn svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+    .mpc-dock .mpc-stop {
+      background: #e11d2e;
+      border-radius: 11px;
+      width: 36px;
+      height: 36px;
+    }
+    .mpc-dock .mpc-stop:hover { background: #c91828; }
+    .mpc-dock .mpc-stop svg { width: 13px; height: 13px; }
+    .mpc-dock .mpc-discard { color: #ffb4a8; }
+    .mpc-dock .mpc-trim { position: relative; }
+    .mpc-dock .mpc-trim-label {
+      position: absolute;
+      left: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(17, 19, 18, 0.94);
+      color: #fafaf7;
+      font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s ease;
+    }
+    .mpc-dock.is-expanded .mpc-trim:hover .mpc-trim-label,
+    .mpc-dock.is-expanded .mpc-trim:focus-visible .mpc-trim-label {
+      opacity: 1;
+    }
+
+    /* Mid-take rewind & trim — wide scrub panel (not a tiny flyout) */
+    .mpc-dock.is-rewind {
+      z-index: 2147483647 !important;
+    }
+    .mpc-dock-rewind {
+      position: absolute;
+      left: calc(100% + 12px);
+      top: 50%;
+      transform: translateY(-50%);
+      width: min(460px, calc(100vw - 80px));
+      min-width: 320px;
+      padding: 16px 18px 18px;
+      border-radius: 18px;
+      background: linear-gradient(165deg, rgba(28, 30, 29, 0.98) 0%, rgba(14, 15, 14, 0.99) 100%);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.58), 0 0 0 1px rgba(255,94,41,0.12);
+      color: #fafaf7;
+      font: 600 12px/1.35 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 4;
+      pointer-events: auto;
+    }
+    .mpc-dock-rewind.is-open { display: flex; }
+    .mpc-dock-rewind-title {
+      font-weight: 750;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+    }
+    .mpc-dock-rewind-time {
+      font-variant-numeric: tabular-nums;
+      font-size: 28px;
+      font-weight: 750;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+    .mpc-dock-rewind-time span {
+      color: rgba(250,250,247,0.5);
+      font-size: 16px;
+      font-weight: 600;
+      margin-left: 8px;
+      letter-spacing: -0.01em;
+    }
+    .mpc-dock-rewind-preview {
+      position: relative;
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #0b0c0b;
+      border: 1px solid rgba(255,255,255,0.08);
+      aspect-ratio: 16 / 9;
+      max-height: 200px;
+      display: none;
+    }
+    .mpc-dock-rewind-preview.is-visible { display: block; }
+    .mpc-dock-rewind-preview video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      background: #0b0c0b;
+    }
+    .mpc-dock-rewind-scrub {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 4px 4px;
+    }
+    .mpc-dock-rewind-scrub-label {
+      font-size: 11px;
+      font-weight: 650;
+      color: rgba(250,250,247,0.62);
+      letter-spacing: 0.02em;
+    }
+    .mpc-dock-rewind input[type='range'] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 28px;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .mpc-dock-rewind input[type='range']:focus {
+      outline: none;
+    }
+    .mpc-dock-rewind input[type='range']:focus-visible {
+      outline: 2px solid rgba(255,94,41,0.65);
+      outline-offset: 3px;
+      border-radius: 8px;
+    }
+    .mpc-dock-rewind input[type='range']::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        #ff5e29 0%,
+        #ff5e29 var(--mpc-rewind-pct, 100%),
+        rgba(255,255,255,0.16) var(--mpc-rewind-pct, 100%),
+        rgba(255,255,255,0.16) 100%
+      );
+    }
+    .mpc-dock-rewind input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      margin-top: -7px;
+      border-radius: 50%;
+      background: #fff;
+      border: 3px solid #ff5e29;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+      cursor: grab;
+    }
+    .mpc-dock-rewind input[type='range']:active::-webkit-slider-thumb {
+      cursor: grabbing;
+      transform: scale(1.08);
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.16);
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #ff5e29;
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      border: 3px solid #ff5e29;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+      cursor: grab;
+    }
+    .mpc-dock-rewind-ends {
+      display: flex;
+      justify-content: space-between;
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(250,250,247,0.45);
+    }
+    .mpc-dock-rewind-jumps {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .mpc-dock-rewind-jumps-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: rgba(250,250,247,0.45);
+      margin-right: 2px;
+    }
+    .mpc-dock-rewind-jumps button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 7px 12px;
+      border-radius: 9px;
+      background: rgba(255,255,255,0.08);
+      font: 650 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+    }
+    .mpc-dock-rewind-jumps button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-rewind-actions {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 2px;
+    }
+    .mpc-dock-rewind-actions button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 11px 14px;
+      border-radius: 11px;
+      font: 700 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+      background: rgba(255,255,255,0.08);
+      text-align: center;
+    }
+    .mpc-dock-rewind-actions button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-rewind-actions button.mpc-rewind-apply {
+      flex: 1;
+      background: #ff5e29;
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(255,94,41,0.35);
+    }
+    .mpc-dock-rewind-actions button.mpc-rewind-apply:hover {
+      background: #e85220;
+    }
+    .mpc-dock-rewind-actions button:disabled,
+    .mpc-dock-rewind-jumps button:disabled,
+    .mpc-dock-rewind input[type='range']:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .mpc-dock-rewind-hint {
+      color: rgba(250,250,247,0.62);
+      font-weight: 550;
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+
+    /* Compact confirm / toast to the right of the dock (avoids window.confirm) */
+    .mpc-dock-confirm {
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      width: 220px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(17, 19, 18, 0.96);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+      color: #fafaf7;
+      font: 600 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 2;
+      pointer-events: auto;
+    }
+    .mpc-dock-confirm.is-open { display: flex; }
+    .mpc-dock-confirm-title {
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.01em;
+    }
+    .mpc-dock-confirm-body {
+      color: rgba(250,250,247,0.78);
+      font-weight: 550;
+    }
+    .mpc-dock-confirm-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .mpc-dock-confirm-actions button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+      background: rgba(255,255,255,0.08);
+    }
+    .mpc-dock-confirm-actions button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-confirm-actions button.mpc-confirm-ok {
+      background: #ff5e29;
+      color: #fff;
+    }
+    .mpc-dock-confirm-actions button.mpc-confirm-ok:hover {
+      background: #e85220;
+    }
+    .mpc-dock-toast {
+      position: absolute;
+      left: calc(100% + 10px);
+      bottom: 8px;
+      max-width: 200px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(80, 20, 16, 0.95);
+      border: 1px solid rgba(255, 120, 100, 0.45);
+      color: #ffe8e4;
+      font: 600 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .mpc-dock-toast.is-visible { display: block; }
+
+    /* Camera failure chip — visible even while dock is hidden during countdown */
     .mpc-cam-status {
       position: fixed !important;
       left: 12px !important;
@@ -289,15 +768,12 @@ function overlayStyles(): string {
       visibility: visible !important;
     }
 
-    /*
-     * Countdown is number-only (Cancel/Skip live in the HUD window) and is
-     * fully hidden (display:none) before LOOM_COUNTDOWN_DONE starts capture.
-     */
+    /* Countdown with Cancel / Skip — hidden before MediaRecorder starts */
     .mpc-countdown {
       position: fixed !important;
       inset: 0 !important;
       z-index: 2147483647 !important;
-      pointer-events: none !important;
+      pointer-events: auto !important;
       display: flex !important;
       flex-direction: column;
       align-items: center;
@@ -320,16 +796,32 @@ function overlayStyles(): string {
       animation: mpc-pop 0.35s ease;
       pointer-events: none !important;
     }
-    .mpc-countdown-hint {
-      padding: 8px 14px;
+    .mpc-countdown-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto !important;
+    }
+    .mpc-countdown-actions button {
+      all: unset;
+      cursor: pointer;
+      font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+      color: #fff;
+      padding: 10px 18px;
       border-radius: 999px;
-      background: rgba(17, 19, 18, 0.82);
-      color: rgba(250, 250, 247, 0.92);
-      font: 550 12px/1.3 ui-sans-serif, system-ui, sans-serif;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.28);
-      max-width: min(360px, calc(100vw - 48px));
-      text-align: center;
-      pointer-events: none !important;
+      background: rgba(28,28,30,0.88);
+      border: 1px solid rgba(255,255,255,0.14);
+    }
+    .mpc-countdown-actions button.mpc-countdown-skip {
+      background: rgba(255, 94, 41, 0.28);
+      border-color: rgba(255, 94, 41, 0.55);
+      color: #ffe8e0;
+    }
+    .mpc-countdown-actions button:hover {
+      background: rgba(40,40,44,0.95);
+    }
+    .mpc-countdown-actions button.mpc-countdown-skip:hover {
+      background: rgba(255, 94, 41, 0.4);
     }
     .mpc-cam-fallback {
       position: absolute;
@@ -448,10 +940,15 @@ type OverlayVisibility = {
   height: number
   display: string
   countdownVisible: boolean
+  dockVisible: boolean
   phase: string | null
 }
 
-function readHostVisibility(phase: string | null, countdownVisible: boolean): OverlayVisibility {
+function readHostVisibility(
+  phase: string | null,
+  countdownVisible: boolean,
+  dockVisible = false,
+): OverlayVisibility {
   const host = overlayMount?.host
   if (!host?.isConnected) {
     return {
@@ -463,6 +960,7 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
       height: 0,
       display: 'missing',
       countdownVisible: false,
+      dockVisible: false,
       phase,
     }
   }
@@ -486,6 +984,7 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
     height: Math.round(rect.height),
     display,
     countdownVisible,
+    dockVisible,
     phase,
   }
 }
@@ -554,6 +1053,13 @@ function removeRoot() {
   overlayMount = null
 }
 
+function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 function pipFrameUrl(
   mirror: boolean,
   cameraDeviceId: string | null,
@@ -570,6 +1076,29 @@ function pipFrameUrl(
   return url.toString()
 }
 
+function iconStop(): string {
+  return `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`
+}
+function iconPause(): string {
+  return `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`
+}
+function iconPlay(): string {
+  return `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`
+}
+function iconTrash(): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>`
+}
+function iconRestart(): string {
+  // Circular arrow (rotate-ccw) — same stroke weight as trim/discard.
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
+}
+function iconTrim(): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a5 5 0 010 10H9"/></svg>`
+}
+function iconChevron(): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`
+}
+
 class TabOverlay {
   private root: HTMLDivElement
   private bubble: HTMLDivElement
@@ -577,6 +1106,31 @@ class TabOverlay {
   private frame: HTMLIFrameElement | null = null
   private menuBtn: HTMLButtonElement | null = null
   private menu: HTMLDivElement | null = null
+  private dock: HTMLDivElement
+  private dockHead: HTMLButtonElement
+  private timerEl: HTMLSpanElement
+  private stopBtn: HTMLButtonElement
+  private pauseBtn: HTMLButtonElement
+  private trimBtn: HTMLButtonElement
+  private restartBtn: HTMLButtonElement
+  private discardBtn: HTMLButtonElement
+  private confirmEl: HTMLDivElement
+  private confirmTitle: HTMLDivElement
+  private confirmBody: HTMLDivElement
+  private confirmOkBtn: HTMLButtonElement
+  private confirmCancelBtn: HTMLButtonElement
+  private toastEl: HTMLDivElement
+  private rewindEl: HTMLDivElement
+  private rewindTimeEl: HTMLDivElement
+  private rewindPreviewWrap: HTMLDivElement
+  private rewindVideo: HTMLVideoElement
+  private rewindRange: HTMLInputElement
+  private rewindEndStartEl: HTMLSpanElement
+  private rewindEndTotalEl: HTMLSpanElement
+  private rewindHintEl: HTMLDivElement
+  private rewindApplyBtn: HTMLButtonElement
+  private rewindCancelBtn: HTMLButtonElement
+  private rewindJumpBtns: HTMLButtonElement[] = []
   private countdownEl: HTMLDivElement
   private countdownNum: HTMLDivElement
   private camClip: HTMLDivElement | null = null
@@ -585,11 +1139,29 @@ class TabOverlay {
   private errorBanner: HTMLDivElement | null = null
   private state: BubbleState
   private pipChannelToken: string
+  private recordingStartedAt = 0
+  private pausedAccumMs = 0
+  private pauseStartedAt = 0
+  private timerId: number | null = null
   private countdownId: number | null = null
   private camWatchId: number | null = null
+  private collapseTimerId: number | null = null
+  private toastTimerId: number | null = null
+  private stopping = false
+  private restarting = false
+  /** Guards skip + interval both firing LOOM_COUNTDOWN_DONE. */
+  private finishingCountdown = false
+  private rewindOpen = false
+  private rewindBusy = false
+  private rewindDurationMs = 0
+  private rewindKeepMs = 0
+  private rewindPreviewUrl: string | null = null
+  private dockExpanded = false
   private dragging = false
   private menuOpen = false
   private camReady = false
+  private confirmAction: null | 'restart' | 'discard' = null
+  private confirmResolver: ((ok: boolean) => void) | null = null
 
   constructor(initial: BubbleState) {
     this.state = {
@@ -720,7 +1292,207 @@ class TabOverlay {
       }, 2500)
     }
 
-    // —— Countdown (number only; Cancel/Skip/Stop live in the HUD window) ——
+    // —— Collapsible left dock (collapsed = timer + Stop) ——
+    this.dock = document.createElement('div')
+    this.dock.className = 'mpc-dock'
+    this.dock.setAttribute('role', 'toolbar')
+    this.dock.setAttribute('aria-label', 'Recording controls')
+
+    this.dockHead = document.createElement('button')
+    this.dockHead.type = 'button'
+    this.dockHead.className = 'mpc-dock-head'
+    this.dockHead.dataset.mpcAction = 'toggle-expand'
+    this.dockHead.title = 'More recording controls'
+    this.dockHead.setAttribute('aria-expanded', 'false')
+    this.dockHead.setAttribute('aria-label', 'Expand recording controls')
+
+    const recDot = document.createElement('span')
+    recDot.className = 'mpc-dock-rec'
+    recDot.setAttribute('aria-hidden', 'true')
+
+    this.timerEl = document.createElement('span')
+    this.timerEl.className = 'mpc-dock-timer'
+    this.timerEl.textContent = '0:00'
+
+    const chevron = document.createElement('span')
+    chevron.className = 'mpc-dock-chevron'
+    chevron.innerHTML = iconChevron()
+    chevron.setAttribute('aria-hidden', 'true')
+
+    this.dockHead.append(recDot, this.timerEl, chevron)
+
+    const core = document.createElement('div')
+    core.className = 'mpc-dock-core'
+    this.stopBtn = document.createElement('button')
+    this.stopBtn.type = 'button'
+    this.stopBtn.className = 'mpc-dock-btn mpc-stop'
+    this.stopBtn.dataset.mpcAction = 'stop'
+    this.stopBtn.title = 'Stop & save'
+    this.stopBtn.setAttribute('aria-label', 'Stop and save')
+    this.stopBtn.innerHTML = iconStop()
+
+    // Pause lives in core so Resume stays reachable when the dock collapses.
+    this.pauseBtn = document.createElement('button')
+    this.pauseBtn.type = 'button'
+    this.pauseBtn.className = 'mpc-dock-btn'
+    this.pauseBtn.dataset.mpcAction = 'pause'
+    this.pauseBtn.title = 'Pause'
+    this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+    this.pauseBtn.innerHTML = iconPause()
+    core.append(this.stopBtn, this.pauseBtn)
+
+    const more = document.createElement('div')
+    more.className = 'mpc-dock-more'
+
+    this.trimBtn = document.createElement('button')
+    this.trimBtn.type = 'button'
+    this.trimBtn.className = 'mpc-dock-btn mpc-trim'
+    this.trimBtn.dataset.mpcAction = 'trim'
+    this.trimBtn.title = 'Rewind & Trim'
+    this.trimBtn.setAttribute(
+      'aria-label',
+      'Rewind and trim — pause, pick a point, discard the tail, continue recording',
+    )
+    this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
+
+    this.restartBtn = document.createElement('button')
+    this.restartBtn.type = 'button'
+    this.restartBtn.className = 'mpc-dock-btn'
+    this.restartBtn.dataset.mpcAction = 'restart'
+    this.restartBtn.title = 'Restart'
+    this.restartBtn.setAttribute('aria-label', 'Restart recording')
+    this.restartBtn.innerHTML = iconRestart()
+
+    this.discardBtn = document.createElement('button')
+    this.discardBtn.type = 'button'
+    this.discardBtn.className = 'mpc-dock-btn mpc-discard'
+    this.discardBtn.dataset.mpcAction = 'discard'
+    this.discardBtn.title = 'Discard'
+    this.discardBtn.setAttribute('aria-label', 'Discard recording')
+    this.discardBtn.innerHTML = iconTrash()
+
+    more.append(this.trimBtn, this.restartBtn, this.discardBtn)
+
+    this.confirmEl = document.createElement('div')
+    this.confirmEl.className = 'mpc-dock-confirm'
+    this.confirmEl.setAttribute('role', 'alertdialog')
+    this.confirmEl.setAttribute('aria-modal', 'true')
+    this.confirmTitle = document.createElement('div')
+    this.confirmTitle.className = 'mpc-dock-confirm-title'
+    this.confirmBody = document.createElement('div')
+    this.confirmBody.className = 'mpc-dock-confirm-body'
+    const confirmActions = document.createElement('div')
+    confirmActions.className = 'mpc-dock-confirm-actions'
+    this.confirmCancelBtn = document.createElement('button')
+    this.confirmCancelBtn.type = 'button'
+    this.confirmCancelBtn.dataset.mpcAction = 'confirm-cancel'
+    this.confirmCancelBtn.textContent = 'Cancel'
+    this.confirmOkBtn = document.createElement('button')
+    this.confirmOkBtn.type = 'button'
+    this.confirmOkBtn.className = 'mpc-confirm-ok'
+    this.confirmOkBtn.dataset.mpcAction = 'confirm-ok'
+    this.confirmOkBtn.textContent = 'Confirm'
+    confirmActions.append(this.confirmCancelBtn, this.confirmOkBtn)
+    this.confirmEl.append(this.confirmTitle, this.confirmBody, confirmActions)
+
+    this.toastEl = document.createElement('div')
+    this.toastEl.className = 'mpc-dock-toast'
+    this.toastEl.setAttribute('role', 'status')
+
+    this.rewindEl = document.createElement('div')
+    this.rewindEl.className = 'mpc-dock-rewind'
+    this.rewindEl.setAttribute('role', 'dialog')
+    this.rewindEl.setAttribute('aria-modal', 'true')
+    this.rewindEl.setAttribute('aria-label', 'Rewind and trim')
+    const rewindTitle = document.createElement('div')
+    rewindTitle.className = 'mpc-dock-rewind-title'
+    rewindTitle.textContent = 'Rewind & trim'
+    this.rewindTimeEl = document.createElement('div')
+    this.rewindTimeEl.className = 'mpc-dock-rewind-time'
+    this.rewindTimeEl.setAttribute('aria-live', 'polite')
+    this.rewindTimeEl.textContent = '0:00'
+    this.rewindPreviewWrap = document.createElement('div')
+    this.rewindPreviewWrap.className = 'mpc-dock-rewind-preview'
+    this.rewindVideo = document.createElement('video')
+    this.rewindVideo.muted = true
+    this.rewindVideo.playsInline = true
+    this.rewindVideo.preload = 'auto'
+    this.rewindVideo.setAttribute('aria-label', 'Preview frame at scrub position')
+    this.rewindPreviewWrap.appendChild(this.rewindVideo)
+    const scrub = document.createElement('div')
+    scrub.className = 'mpc-dock-rewind-scrub'
+    const scrubLabel = document.createElement('div')
+    scrubLabel.className = 'mpc-dock-rewind-scrub-label'
+    scrubLabel.textContent = 'Drag to the exact moment — then trim & continue'
+    this.rewindRange = document.createElement('input')
+    this.rewindRange.type = 'range'
+    this.rewindRange.min = '0'
+    this.rewindRange.max = '1000'
+    this.rewindRange.value = '1000'
+    this.rewindRange.step = '1'
+    this.rewindRange.dataset.mpcAction = 'rewind-scrub'
+    this.rewindRange.setAttribute('aria-label', 'Trim point')
+    this.rewindRange.addEventListener('input', () => this.onRewindScrub())
+    this.rewindRange.addEventListener('change', () => this.onRewindScrub())
+    const ends = document.createElement('div')
+    ends.className = 'mpc-dock-rewind-ends'
+    this.rewindEndStartEl = document.createElement('span')
+    this.rewindEndStartEl.textContent = '0:00'
+    this.rewindEndTotalEl = document.createElement('span')
+    this.rewindEndTotalEl.textContent = '0:00'
+    ends.append(this.rewindEndStartEl, this.rewindEndTotalEl)
+    scrub.append(scrubLabel, this.rewindRange, ends)
+    const jumps = document.createElement('div')
+    jumps.className = 'mpc-dock-rewind-jumps'
+    const jumpsLabel = document.createElement('span')
+    jumpsLabel.className = 'mpc-dock-rewind-jumps-label'
+    jumpsLabel.textContent = 'Jump'
+    jumps.appendChild(jumpsLabel)
+    for (const sec of [5, 10, 20] as const) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.dataset.mpcAction = `rewind-jump-${sec}`
+      btn.textContent = `−${sec}s`
+      btn.title = `Jump back ${sec} seconds`
+      this.rewindJumpBtns.push(btn)
+      jumps.appendChild(btn)
+    }
+    this.rewindHintEl = document.createElement('div')
+    this.rewindHintEl.className = 'mpc-dock-rewind-hint'
+    this.rewindHintEl.textContent =
+      'Keeps everything up to the scrub point, discards the rest, and resumes the same take.'
+    const rewindActions = document.createElement('div')
+    rewindActions.className = 'mpc-dock-rewind-actions'
+    this.rewindCancelBtn = document.createElement('button')
+    this.rewindCancelBtn.type = 'button'
+    this.rewindCancelBtn.dataset.mpcAction = 'rewind-cancel'
+    this.rewindCancelBtn.textContent = 'Cancel'
+    this.rewindApplyBtn = document.createElement('button')
+    this.rewindApplyBtn.type = 'button'
+    this.rewindApplyBtn.className = 'mpc-rewind-apply'
+    this.rewindApplyBtn.dataset.mpcAction = 'rewind-apply'
+    this.rewindApplyBtn.textContent = 'Trim & continue'
+    rewindActions.append(this.rewindCancelBtn, this.rewindApplyBtn)
+    this.rewindEl.append(
+      rewindTitle,
+      this.rewindTimeEl,
+      this.rewindPreviewWrap,
+      scrub,
+      jumps,
+      this.rewindHintEl,
+      rewindActions,
+    )
+
+    this.dock.append(
+      this.dockHead,
+      core,
+      more,
+      this.confirmEl,
+      this.rewindEl,
+      this.toastEl,
+    )
+
+    // —— Countdown with Cancel / Skip ——
     this.countdownEl = document.createElement('div')
     this.countdownEl.className = 'mpc-countdown'
 
@@ -728,23 +1500,47 @@ class TabOverlay {
     this.countdownNum.className = 'mpc-countdown-num'
     this.countdownNum.textContent = String(COUNTDOWN_FROM)
 
-    const hint = document.createElement('div')
-    hint.className = 'mpc-countdown-hint'
-    hint.textContent = 'Recording controls open in the MyPipCam window'
-
-    this.countdownEl.append(this.countdownNum, hint)
+    const countdownActions = document.createElement('div')
+    countdownActions.className = 'mpc-countdown-actions'
+    const cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'
+    cancelBtn.textContent = 'Cancel'
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      void this.requestDiscard(true)
+    })
+    const skipBtn = document.createElement('button')
+    skipBtn.type = 'button'
+    skipBtn.className = 'mpc-countdown-skip'
+    skipBtn.textContent = 'Skip'
+    skipBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      void this.finishCountdown()
+    })
+    countdownActions.append(cancelBtn, skipBtn)
+    this.countdownEl.append(this.countdownNum, countdownActions)
 
     this.camStatusEl = document.createElement('div')
     this.camStatusEl.className = 'mpc-cam-status'
     this.camStatusEl.setAttribute('role', 'status')
 
-    this.root.append(this.bubble, this.countdownEl, this.camStatusEl)
+    this.root.append(this.bubble, this.dock, this.countdownEl, this.camStatusEl)
 
     // Drag from bubble / drag surface (never from menu)
     const dragTarget = this.dragSurface ?? this.bubble
     dragTarget.addEventListener('pointerdown', (e) => this.onMoveDown(e))
     this.bubble.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
 
+    /*
+     * Delegate dock actions on pointerdown (not click). During tabCapture,
+     * document-capture outside-dismiss + layout changes from collapse can
+     * swallow click; pointerdown matches the bubble menu pattern and stays
+     * reliable for both collapsed and expanded controls.
+     */
+    this.dock.addEventListener('pointerdown', this.onDockPointerDown)
+    // Bubble / overlay chrome outside the dock — listener is inside the closed
+    // shadow, so composedPath() still includes dock/menu nodes.
+    this.root.addEventListener('pointerdown', this.onOverlayPointerDown)
     document.addEventListener('pointerdown', this.onDocPointerDown, true)
     window.addEventListener('resize', this.onWindowResize)
 
@@ -791,12 +1587,118 @@ class TabOverlay {
     )
   }
 
+  /**
+   * Outside the overlay host only. Closed shadow roots omit shadow descendants
+   * from composedPath() for listeners outside the tree — never use path.includes
+   * (dock/confirm) here or every press looks "outside" and collapses the dock
+   * on pointerdown (hiding .mpc-dock-more before click can fire).
+   */
   private onDocPointerDown = (e: PointerEvent) => {
-    if (!this.menuOpen || !this.menu || !this.menuBtn) return
-    // Closed shadow retargets target to the host — use composedPath.
+    const host = overlayMount?.host
+    if (
+      host &&
+      (e.target === host || (e.target instanceof Node && host.contains(e.target)))
+    ) {
+      return
+    }
+    if (this.menuOpen) this.closeMenu()
+    if (this.rewindOpen) return
+    if (this.confirmAction) {
+      this.resolveConfirm(false)
+      return
+    }
+    if (this.dockExpanded) this.setDockExpanded(false)
+  }
+
+  /** Inside closed shadow — composedPath includes dock / menu / confirm nodes. */
+  private onOverlayPointerDown = (e: PointerEvent) => {
     const path = e.composedPath()
-    if (path.includes(this.menu) || path.includes(this.menuBtn)) return
-    this.closeMenu()
+    if (this.menuOpen && this.menu && this.menuBtn) {
+      if (!path.includes(this.menu) && !path.includes(this.menuBtn)) {
+        this.closeMenu()
+      }
+    }
+    if (this.rewindOpen) return
+    if (this.confirmAction) {
+      if (!path.includes(this.confirmEl)) this.resolveConfirm(false)
+      return
+    }
+    if (this.dockExpanded && !path.includes(this.dock)) {
+      this.setDockExpanded(false)
+    }
+  }
+
+  private onDockPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    const raw = e.target
+    if (!(raw instanceof Element)) return
+    const btn = raw.closest('button[data-mpc-action]')
+    if (!(btn instanceof HTMLButtonElement) || !this.dock.contains(btn)) return
+    if (btn.disabled) return
+
+    const action = btn.dataset.mpcAction
+    if (!action) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    // Pending confirm must not soft-lock other dock buttons (Stop/Pause/…).
+    if (
+      this.confirmAction &&
+      action !== 'confirm-ok' &&
+      action !== 'confirm-cancel'
+    ) {
+      this.resolveConfirm(false)
+    }
+
+    switch (action) {
+      case 'toggle-expand':
+        if (this.rewindOpen) return
+        this.setDockExpanded(!this.dockExpanded)
+        break
+      case 'stop':
+        if (this.rewindOpen) return
+        void this.requestStop()
+        break
+      case 'pause':
+        if (this.rewindOpen) return
+        void this.togglePause()
+        break
+      case 'trim':
+        void this.openRewindTrim()
+        break
+      case 'restart':
+        if (this.rewindOpen) return
+        void this.requestRestart()
+        break
+      case 'discard':
+        if (this.rewindOpen) return
+        void this.requestDiscard(false)
+        break
+      case 'confirm-ok':
+        this.resolveConfirm(true)
+        break
+      case 'confirm-cancel':
+        this.resolveConfirm(false)
+        break
+      case 'rewind-apply':
+        void this.applyRewindTrim()
+        break
+      case 'rewind-cancel':
+        void this.cancelRewindTrim()
+        break
+      case 'rewind-jump-5':
+        this.nudgeRewind(-5000)
+        break
+      case 'rewind-jump-10':
+        this.nudgeRewind(-10000)
+        break
+      case 'rewind-jump-20':
+        this.nudgeRewind(-20000)
+        break
+      default:
+        break
+    }
   }
 
   private onPipMessage = (event: MessageEvent) => {
@@ -830,7 +1732,11 @@ class TabOverlay {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
-    this.countdownEl.classList.add('is-hidden')
+    this.finishingCountdown = false
+    this.clearCollapseTimer()
+    this.hideCountdownChrome()
+    this.hideDock()
+    this.setDockExpanded(false)
     this.errorBanner?.remove()
     const banner = document.createElement('div')
     banner.className = 'mpc-error-banner'
@@ -854,8 +1760,25 @@ class TabOverlay {
     if (host) prepareHostShell(host)
     const countdownVisible =
       this.state.phase === 'countdown' &&
+      this.countdownEl.isConnected &&
       !this.countdownEl.classList.contains('is-hidden')
-    return readHostVisibility(this.state.phase, countdownVisible)
+    const dockVisible = this.isDockPainted()
+    return readHostVisibility(this.state.phase, countdownVisible, dockVisible)
+  }
+
+  /** True when the left dock is actually painted (not just mounted). */
+  private isDockPainted(): boolean {
+    if (!this.dock.isConnected) return false
+    if (!this.dock.classList.contains('is-visible')) return false
+    const rect = this.dock.getBoundingClientRect()
+    const cs = getComputedStyle(this.dock)
+    return (
+      cs.display !== 'none' &&
+      cs.visibility !== 'hidden' &&
+      cs.opacity !== '0' &&
+      rect.width >= 24 &&
+      rect.height >= 48
+    )
   }
 
   private showCamBlockedFallback(message: string) {
@@ -962,12 +1885,17 @@ class TabOverlay {
   /** Called by background when MediaRecorder has actually started. */
   beginRecordingClock() {
     this.state.phase = 'recording'
+    this.recordingStartedAt = Date.now()
+    this.pausedAccumMs = 0
+    this.pauseStartedAt = 0
+    this.restarting = false
+    this.setDockBusy(false)
     this.setPausedUi(false)
     this.enterRecordingUi()
   }
 
   /**
-   * Soft restart: keep bubble mounted, re-run 3→2→1.
+   * Soft restart: keep bubble/dock mounted, reset timer, re-run 3→2→1.
    * Capture streams were already re-armed by the background.
    */
   beginRestartCountdown() {
@@ -975,9 +1903,29 @@ class TabOverlay {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
+    if (this.timerId != null) {
+      window.clearInterval(this.timerId)
+      this.timerId = null
+    }
+    this.clearCollapseTimer()
+    this.hideConfirm()
+    this.hideRewindPanel()
     this.errorBanner?.remove()
     this.errorBanner = null
+    this.restarting = false
+    this.stopping = false
+    this.recordingStartedAt = 0
+    this.pausedAccumMs = 0
+    this.pauseStartedAt = 0
+    this.timerEl.textContent = '0:00'
     this.state.phase = 'countdown'
+    this.pauseBtn.innerHTML = iconPause()
+    this.pauseBtn.title = 'Pause'
+    this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+    this.setDockBusy(false)
+    this.setDockExpanded(false)
+    this.dock.classList.remove('is-paused')
+    this.hideDock()
     if (!this.countdownEl.isConnected) {
       this.root.appendChild(this.countdownEl)
     }
@@ -985,51 +1933,184 @@ class TabOverlay {
   }
 
   setPausedUi(paused: boolean) {
-    this.state.phase = paused ? 'paused' : 'recording'
+    this.dock.classList.toggle('is-paused', paused)
+    if (paused) {
+      if (this.state.phase !== 'paused') {
+        this.pauseStartedAt = Date.now()
+      }
+      this.state.phase = 'paused'
+      this.pauseBtn.innerHTML = iconPlay()
+      this.pauseBtn.title = 'Resume'
+      this.pauseBtn.setAttribute('aria-label', 'Resume recording')
+    } else {
+      if (this.state.phase === 'paused' && this.pauseStartedAt) {
+        this.pausedAccumMs += Date.now() - this.pauseStartedAt
+        this.pauseStartedAt = 0
+      }
+      this.state.phase = 'recording'
+      this.pauseBtn.innerHTML = iconPause()
+      this.pauseBtn.title = 'Pause'
+      this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+    }
+    this.tickTimer()
   }
 
-  private enterRecordingUi() {
-    // display:none so countdown chrome is never painted into tabCapture frames.
+  /**
+   * Fully hide + detach countdown so tabCapture cannot still sample "3/2/1".
+   * Call this (and wait for paint) before LOOM_COUNTDOWN_DONE.
+   */
+  private hideCountdownChrome() {
     this.countdownEl.classList.add('is-hidden')
+    this.countdownEl.style.setProperty('display', 'none', 'important')
+    this.countdownEl.style.setProperty('visibility', 'hidden', 'important')
+    this.countdownEl.style.setProperty('opacity', '0', 'important')
     this.countdownEl.remove()
   }
 
-  private finishCountdown() {
+  private enterRecordingUi() {
+    // Countdown must already be gone before MediaRecorder starts; this is
+    // idempotent for RECORDING_STARTED / retry paths. Dock may appear in
+    // tabCapture (accepted tradeoff so Stop is never missing).
+    this.hideCountdownChrome()
+    this.setDockExpanded(false)
+    this.revealDock()
+    if (this.timerId == null) {
+      this.timerId = window.setInterval(() => this.tickTimer(), 250)
+    }
+    this.tickTimer()
+  }
+
+  /**
+   * Force the collapsed left dock onto the page. Uses class + inline
+   * !important so a missed RECORDING_STARTED message or page CSS cannot
+   * leave Stop/timer invisible after countdown.
+   */
+  private revealDock() {
+    if (!this.dock.isConnected) {
+      this.root.appendChild(this.dock)
+    }
+    this.dock.classList.add('is-visible')
+    const props: Array<[string, string]> = [
+      ['display', 'flex'],
+      ['opacity', '1'],
+      ['visibility', 'visible'],
+      ['pointer-events', 'auto'],
+      ['position', 'fixed'],
+      ['left', '10px'],
+      ['top', '50%'],
+      ['transform', 'translateY(-50%)'],
+      ['z-index', '2147483647'],
+    ]
+    for (const [k, v] of props) this.dock.style.setProperty(k, v, 'important')
+    const host = overlayMount?.host
+    if (host) prepareHostShell(host)
+  }
+
+  private hideDock() {
+    this.dock.classList.remove('is-visible')
+    this.dock.style.removeProperty('display')
+    this.dock.style.removeProperty('opacity')
+    this.dock.style.removeProperty('visibility')
+    this.dock.style.removeProperty('pointer-events')
+  }
+
+  private tickTimer() {
+    if (this.state.phase === 'countdown') {
+      this.timerEl.textContent = '0:00'
+      return
+    }
+    let elapsed = Date.now() - this.recordingStartedAt - this.pausedAccumMs
+    if (this.state.phase === 'paused' && this.pauseStartedAt) {
+      elapsed = this.pauseStartedAt - this.recordingStartedAt - this.pausedAccumMs
+    }
+    this.timerEl.textContent = formatDuration(Math.max(0, elapsed))
+  }
+
+  private setDockExpanded(expanded: boolean) {
+    this.clearCollapseTimer()
+    this.dockExpanded = expanded
+    this.dock.classList.toggle('is-expanded', expanded)
+    this.dockHead.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    this.dockHead.setAttribute(
+      'aria-label',
+      expanded ? 'Collapse recording controls' : 'Expand recording controls',
+    )
+    this.dockHead.title = expanded ? 'Hide extra controls' : 'More recording controls'
+  }
+
+  private scheduleDockCollapse(ms = 2200) {
+    this.clearCollapseTimer()
+    this.collapseTimerId = window.setTimeout(() => {
+      this.collapseTimerId = null
+      this.setDockExpanded(false)
+    }, ms)
+  }
+
+  private clearCollapseTimer() {
+    if (this.collapseTimerId != null) {
+      window.clearTimeout(this.collapseTimerId)
+      this.collapseTimerId = null
+    }
+  }
+
+  private async finishCountdown() {
+    if (this.finishingCountdown) return
+    this.finishingCountdown = true
     if (this.countdownId != null) {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
-    // Hide before MediaRecorder starts — Cancel/Skip are not on-page anymore,
-    // but the number/dim must not linger into the first recorded frames.
-    this.countdownEl.classList.add('is-hidden')
-    this.countdownEl.remove()
-    void (async () => {
-      try {
-        const res = (await chrome.runtime.sendMessage({
-          type: 'LOOM_COUNTDOWN_DONE',
-        })) as { ok?: boolean; reason?: string } | undefined
-        if (!res?.ok) {
-          this.showError(
-            res?.reason?.trim() ||
-              'Could not start capture after countdown. Try Start again.',
-          )
-        }
-      } catch (err) {
-        const msg =
-          err instanceof Error && err.message.trim()
-            ? err.message.trim()
-            : 'Could not start capture after countdown.'
-        this.showError(msg)
+    // Remove countdown from the painted tab BEFORE arming MediaRecorder —
+    // otherwise Chrome tabCapture still includes the last "1" frame.
+    this.hideCountdownChrome()
+    // Show dock immediately so Stop is never missing if RECORDING_STARTED drops.
+    // Dock-in-capture is an accepted tradeoff (see file header).
+    this.setDockExpanded(false)
+    this.revealDock()
+    if (this.timerId == null) {
+      this.timerId = window.setInterval(() => this.tickTimer(), 250)
+    }
+    this.tickTimer()
+
+    await waitCountdownClearedFromCapture()
+
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'LOOM_COUNTDOWN_DONE',
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.finishingCountdown = false
+        this.showError(
+          res?.reason?.trim() ||
+            'Could not start capture after countdown. Try Start again.',
+        )
+        return
       }
-    })()
+      // Belt-and-suspenders: ensure dock stays painted even if the SW's
+      // RECORDING_STARTED ping was dropped.
+      this.enterRecordingUi()
+    } catch (err) {
+      this.finishingCountdown = false
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not start capture after countdown.'
+      this.showError(msg)
+    }
   }
 
   private startCountdown() {
+    this.finishingCountdown = false
     let n = COUNTDOWN_FROM
     if (!this.countdownEl.isConnected) {
       this.root.appendChild(this.countdownEl)
     }
+    this.countdownEl.style.removeProperty('display')
+    this.countdownEl.style.removeProperty('visibility')
+    this.countdownEl.style.removeProperty('opacity')
     this.countdownEl.classList.remove('is-hidden')
+    this.hideDock()
+    this.setDockExpanded(false)
     const show = () => {
       this.countdownNum.textContent = String(n)
       this.countdownNum.style.animation = 'none'
@@ -1041,11 +2122,426 @@ class TabOverlay {
     this.countdownId = window.setInterval(() => {
       n -= 1
       if (n <= 0) {
-        this.finishCountdown()
+        void this.finishCountdown()
         return
       }
       show()
     }, 1000)
+  }
+
+  private async requestStop() {
+    if (this.stopping || this.restarting || this.confirmAction) return
+    this.hideConfirm()
+    this.stopping = true
+    this.setDockBusy(true)
+    try {
+      await chrome.runtime.sendMessage({ type: 'STOP_LOOM_RECORDING' })
+    } catch {
+      this.stopping = false
+      this.setDockBusy(false)
+    }
+  }
+
+  /**
+   * Loom-style mid-take rewind: pause → scrub → discard tail after keep point →
+   * resume capturing into the same take (prefix sealed in offscreen).
+   */
+  private async openRewindTrim() {
+    if (
+      this.stopping ||
+      this.restarting ||
+      this.confirmAction ||
+      this.rewindOpen ||
+      this.rewindBusy
+    ) {
+      return
+    }
+    if (this.state.phase === 'countdown') return
+    this.hideConfirm()
+    this.setDockExpanded(true)
+    this.clearCollapseTimer()
+    this.rewindBusy = true
+    this.setDockBusy(true)
+    this.showDockToast('Pausing for rewind…')
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'BEGIN_LOOM_REWIND',
+      })) as {
+        ok?: boolean
+        durationMs?: number
+        previewBlob?: Blob
+        reason?: string
+      } | undefined
+      if (!res?.ok || typeof res.durationMs !== 'number') {
+        this.rewindBusy = false
+        this.setDockBusy(false)
+        this.showDockToast(res?.reason?.trim() || 'Could not open rewind.')
+        return
+      }
+      this.setPausedUi(true)
+      this.showRewindPanel(res.durationMs, res.previewBlob)
+      this.rewindBusy = false
+      this.setDockBusy(false)
+      this.showDockToast('Drag the scrubber to the mistake, then Trim & continue.')
+    } catch (err) {
+      this.rewindBusy = false
+      this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not open rewind.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private showRewindPanel(durationMs: number, previewBlob?: Blob) {
+    this.clearRewindPreview()
+    this.rewindOpen = true
+    this.dock.classList.add('is-rewind')
+    this.rewindDurationMs = Math.max(250, durationMs)
+    this.rewindKeepMs = this.rewindDurationMs
+    this.rewindRange.min = '0'
+    this.rewindRange.max = String(this.rewindDurationMs)
+    this.rewindRange.step = '1'
+    this.rewindRange.value = String(this.rewindKeepMs)
+    this.rewindEndTotalEl.textContent = formatDuration(this.rewindDurationMs)
+    this.updateRewindTimeLabel()
+    if (previewBlob && previewBlob.size > 64) {
+      this.rewindPreviewUrl = URL.createObjectURL(previewBlob)
+      this.rewindVideo.src = this.rewindPreviewUrl
+      this.rewindPreviewWrap.classList.add('is-visible')
+      const onMeta = () => {
+        this.rewindVideo.removeEventListener('loadedmetadata', onMeta)
+        this.seekRewindPreview()
+      }
+      this.rewindVideo.addEventListener('loadedmetadata', onMeta)
+      this.rewindVideo.load()
+      // Frame scrub — pause at the selected time (do not autoplay).
+      this.rewindVideo.pause()
+      this.seekRewindPreview()
+    } else {
+      this.rewindPreviewWrap.classList.remove('is-visible')
+    }
+    this.rewindEl.classList.add('is-open')
+    // Primary interaction is the slider — focus it for keyboard + discoverability.
+    window.setTimeout(() => this.rewindRange.focus(), 0)
+  }
+
+  private hideRewindPanel() {
+    this.rewindOpen = false
+    this.rewindBusy = false
+    this.dock.classList.remove('is-rewind')
+    this.rewindEl.classList.remove('is-open')
+    this.clearRewindPreview()
+  }
+
+  private clearRewindPreview() {
+    this.rewindVideo.pause()
+    this.rewindVideo.removeAttribute('src')
+    this.rewindVideo.load()
+    this.rewindPreviewWrap.classList.remove('is-visible')
+    if (this.rewindPreviewUrl) {
+      URL.revokeObjectURL(this.rewindPreviewUrl)
+      this.rewindPreviewUrl = null
+    }
+  }
+
+  private updateRewindTimeLabel() {
+    const keep = formatDuration(this.rewindKeepMs)
+    const total = formatDuration(this.rewindDurationMs)
+    this.rewindTimeEl.innerHTML = `${keep}<span>/ ${total}</span>`
+    const pct =
+      this.rewindDurationMs > 0
+        ? Math.max(0, Math.min(100, (this.rewindKeepMs / this.rewindDurationMs) * 100))
+        : 100
+    this.rewindRange.style.setProperty('--mpc-rewind-pct', `${pct}%`)
+  }
+
+  private onRewindScrub() {
+    if (!this.rewindOpen || this.rewindBusy) return
+    const v = Number(this.rewindRange.value)
+    if (!Number.isFinite(v)) return
+    this.rewindKeepMs = Math.max(0, Math.min(this.rewindDurationMs, Math.round(v)))
+    // Keep a tiny floor so apply never seals an empty take.
+    if (this.rewindKeepMs < 250 && this.rewindDurationMs >= 250) {
+      this.rewindKeepMs = 250
+      this.rewindRange.value = '250'
+    }
+    this.updateRewindTimeLabel()
+    this.seekRewindPreview()
+  }
+
+  private nudgeRewind(deltaMs: number) {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindKeepMs = Math.max(
+      250,
+      Math.min(this.rewindDurationMs, this.rewindKeepMs + deltaMs),
+    )
+    this.rewindRange.value = String(this.rewindKeepMs)
+    this.updateRewindTimeLabel()
+    this.seekRewindPreview()
+  }
+
+  private seekRewindPreview() {
+    if (!this.rewindPreviewWrap.classList.contains('is-visible')) return
+    const t = this.rewindKeepMs / 1000
+    try {
+      this.rewindVideo.pause()
+      if (Number.isFinite(this.rewindVideo.duration) && this.rewindVideo.duration > 0) {
+        this.rewindVideo.currentTime = Math.min(
+          Math.max(0, t),
+          Math.max(0, this.rewindVideo.duration - 0.05),
+        )
+      } else {
+        this.rewindVideo.currentTime = Math.max(0, t)
+      }
+    } catch {
+      /* ignore seek errors on incomplete webm */
+    }
+  }
+
+  private async applyRewindTrim() {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindBusy = true
+    this.setRewindControlsBusy(true)
+    this.showDockToast('Trimming take…')
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'APPLY_LOOM_REWIND',
+        keepMs: this.rewindKeepMs,
+      })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
+      if (!res?.ok) {
+        this.rewindBusy = false
+        this.setRewindControlsBusy(false)
+        this.showDockToast(res?.reason?.trim() || 'Could not trim take.')
+        return
+      }
+      const kept =
+        typeof res.durationMs === 'number' ? res.durationMs : this.rewindKeepMs
+      this.applyRewindClock(kept)
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      this.showDockToast('Trimmed — recording continues.')
+      this.scheduleDockCollapse()
+    } catch (err) {
+      this.rewindBusy = false
+      this.setRewindControlsBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not trim take.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private async cancelRewindTrim() {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindBusy = true
+    this.setRewindControlsBusy(true)
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'CANCEL_LOOM_REWIND',
+      })) as { ok?: boolean; reason?: string } | undefined
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      if (res?.ok) {
+        this.setPausedUi(false)
+        this.scheduleDockCollapse()
+      } else {
+        this.showDockToast(res?.reason?.trim() || 'Could not cancel rewind.')
+      }
+    } catch (err) {
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not cancel rewind.'
+      this.showDockToast(msg)
+    }
+  }
+
+  /** After a successful mid-take trim, resume the dock clock from the kept prefix. */
+  applyRewindClock(keptDurationMs: number) {
+    const kept = Math.max(0, keptDurationMs)
+    this.recordingStartedAt = Date.now() - kept
+    this.pausedAccumMs = 0
+    this.pauseStartedAt = 0
+    this.setPausedUi(false)
+    this.tickTimer()
+  }
+
+  private setRewindControlsBusy(busy: boolean) {
+    this.rewindApplyBtn.disabled = busy
+    this.rewindCancelBtn.disabled = busy
+    this.rewindRange.disabled = busy
+    for (const btn of this.rewindJumpBtns) btn.disabled = busy
+  }
+
+  private async togglePause() {
+    if (
+      this.state.phase === 'countdown' ||
+      this.stopping ||
+      this.restarting ||
+      this.confirmAction ||
+      this.rewindOpen
+    ) {
+      return
+    }
+    const pausing = this.state.phase !== 'paused'
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: pausing ? 'PAUSE_LOOM_RECORDING' : 'RESUME_LOOM_RECORDING',
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.showDockToast(
+          res?.reason?.trim() || (pausing ? 'Could not pause recording.' : 'Could not resume.'),
+        )
+        return
+      }
+      this.setPausedUi(pausing)
+      // Keep Pause/Resume in the always-visible core; no need to force-collapse.
+      if (!pausing) this.scheduleDockCollapse()
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : pausing
+            ? 'Could not pause recording.'
+            : 'Could not resume.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private async requestRestart() {
+    if (this.stopping || this.restarting || this.confirmAction) return
+    if (this.state.phase === 'countdown') return
+    this.setDockExpanded(true)
+    const ok = await this.askDockConfirm(
+      'restart',
+      'Restart recording?',
+      'Current take will be discarded.',
+    )
+    if (!ok) return
+    this.restarting = true
+    this.setDockBusy(true)
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'RESTART_LOOM_RECORDING',
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.restarting = false
+        this.setDockBusy(false)
+        this.showDockToast(
+          res?.reason?.trim() || 'Could not restart recording. Try Start again.',
+        )
+      }
+      // On success, background sends PIP_OVERLAY_RESTART → beginRestartCountdown()
+    } catch (err) {
+      this.restarting = false
+      this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not restart recording.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private askDockConfirm(
+    action: 'restart' | 'discard',
+    title: string,
+    body: string,
+  ): Promise<boolean> {
+    this.hideConfirm()
+    this.clearCollapseTimer()
+    this.confirmAction = action
+    this.confirmTitle.textContent = title
+    this.confirmBody.textContent = body
+    this.confirmOkBtn.textContent = action === 'restart' ? 'Restart' : 'Discard'
+    this.confirmEl.classList.add('is-open')
+    this.confirmEl.setAttribute('aria-label', title)
+    this.confirmOkBtn.focus()
+    return new Promise((resolve) => {
+      this.confirmResolver = resolve
+    })
+  }
+
+  private resolveConfirm(ok: boolean) {
+    const resolver = this.confirmResolver
+    this.confirmAction = null
+    this.confirmResolver = null
+    this.confirmEl.classList.remove('is-open')
+    resolver?.(ok)
+  }
+
+  private hideConfirm() {
+    // Drop pending confirm without resolving (caller is replacing/tearing down).
+    this.confirmAction = null
+    this.confirmResolver = null
+    this.confirmEl.classList.remove('is-open')
+  }
+
+  private showDockToast(message: string) {
+    if (this.toastTimerId != null) {
+      window.clearTimeout(this.toastTimerId)
+      this.toastTimerId = null
+    }
+    this.toastEl.textContent = message
+    this.toastEl.classList.add('is-visible')
+    this.toastTimerId = window.setTimeout(() => {
+      this.toastTimerId = null
+      this.toastEl.classList.remove('is-visible')
+      this.toastEl.textContent = ''
+    }, 4200)
+  }
+
+  private setDockBusy(busy: boolean) {
+    const lock = busy || this.rewindOpen
+    this.stopBtn.disabled = lock
+    this.pauseBtn.disabled = lock
+    this.trimBtn.disabled = lock
+    this.restartBtn.disabled = lock
+    this.discardBtn.disabled = lock
+    this.dockHead.disabled = lock
+    this.confirmOkBtn.disabled = busy
+    this.confirmCancelBtn.disabled = busy
+  }
+
+  private async requestDiscard(fromCountdown: boolean) {
+    if (this.restarting && !fromCountdown) return
+    if (this.stopping || this.confirmAction) return
+    if (!fromCountdown && this.state.phase !== 'countdown') {
+      this.setDockExpanded(true)
+      const ok = await this.askDockConfirm(
+        'discard',
+        'Discard recording?',
+        'This take will be deleted and not saved.',
+      )
+      if (!ok) return
+    }
+    if (this.countdownId != null) {
+      window.clearInterval(this.countdownId)
+      this.countdownId = null
+    }
+    // Cancel during countdown: strip overlay chrome before teardown so a
+    // racing LOOM_COUNTDOWN_DONE cannot capture the last "1".
+    if (fromCountdown) {
+      this.finishingCountdown = true
+      this.hideCountdownChrome()
+    }
+    this.stopping = true
+    this.setDockBusy(true)
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'DISCARD_LOOM_RECORDING',
+        fromCountdown,
+      })
+    } catch {
+      this.stopping = false
+      this.setDockBusy(false)
+      this.dispose()
+    }
   }
 
   private apply() {
@@ -1272,8 +2768,15 @@ class TabOverlay {
   }
 
   dispose() {
+    if (this.timerId != null) window.clearInterval(this.timerId)
     if (this.countdownId != null) window.clearInterval(this.countdownId)
     if (this.camWatchId != null) window.clearTimeout(this.camWatchId)
+    if (this.toastTimerId != null) window.clearTimeout(this.toastTimerId)
+    this.clearCollapseTimer()
+    this.hideConfirm()
+    this.hideRewindPanel()
+    this.dock.removeEventListener('pointerdown', this.onDockPointerDown)
+    this.root.removeEventListener('pointerdown', this.onOverlayPointerDown)
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
     window.removeEventListener('resize', this.onWindowResize)
     window.removeEventListener('message', this.onPipMessage)
@@ -1301,9 +2804,18 @@ function clearOverlaySingleton() {
   overlay = null
 }
 
-if (!window[INSTALL_KEY]) {
-  window[INSTALL_KEY] = true
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const priorInstall = window[INSTALL_KEY]
+if (priorInstall != null && priorInstall !== INSTALL_VERSION) {
+  // Older injected build — drop its host so the new dock markup can mount cleanly.
+  overlay = null
+  try {
+    removeRoot()
+  } catch {
+    /* ignore */
+  }
+}
+
+window[HANDLER_KEY] = (message, _sender, sendResponse) => {
   if (message?.type === 'PIP_OVERLAY_START') {
     try {
       console.log('[MyPipCam][start] PIP_OVERLAY_START received', {
@@ -1399,9 +2911,18 @@ if (!window[INSTALL_KEY]) {
     sendResponse({ ...rest, ok: visibility.visible })
     return true
   }
-  if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED' && overlay) {
+  if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED') {
+    if (!overlay) {
+      sendResponse({ ok: false, reason: 'no-overlay', dockVisible: false })
+      return true
+    }
     overlay.beginRecordingClock()
-    sendResponse({ ok: true })
+    const visibility = overlay.getVisibility()
+    sendResponse({
+      ok: true,
+      dockVisible: visibility.dockVisible,
+      phase: visibility.phase,
+    })
     return true
   }
   if (message?.type === 'PIP_OVERLAY_RESTART' && overlay) {
@@ -1440,6 +2961,15 @@ if (!window[INSTALL_KEY]) {
     sendResponse({ ok: true })
     return true
   }
+  if (message?.type === 'PIP_OVERLAY_REWIND_APPLIED' && overlay) {
+    const ms =
+      typeof message.durationMs === 'number' && Number.isFinite(message.durationMs)
+        ? message.durationMs
+        : 0
+    overlay.applyRewindClock(ms)
+    sendResponse({ ok: true })
+    return true
+  }
   if (message?.type === 'PIP_OVERLAY_UPDATE' && overlay) {
     const patch: Partial<BubbleState> = {}
     if (typeof message.x === 'number' && Number.isFinite(message.x)) patch.x = message.x
@@ -1473,5 +3003,14 @@ if (!window[INSTALL_KEY]) {
     return true
   }
   return false
-})
+}
+
+window[INSTALL_KEY] = INSTALL_VERSION
+if (!window[DISPATCHER_KEY]) {
+  window[DISPATCHER_KEY] = true
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const handle = window[HANDLER_KEY]
+    if (!handle) return false
+    return handle(message, sender, sendResponse) ?? false
+  })
 }

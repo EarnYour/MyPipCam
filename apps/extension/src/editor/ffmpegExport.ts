@@ -49,7 +49,9 @@ export type EditPlan = {
   inSec: number
   /** Keep until this time (seconds) */
   outSec: number
-  /** Optional range to remove inside the keep window */
+  /** Manual cut-out ranges (remove middle pieces; concatenated keeps on export) */
+  cutRanges?: TimeRange[]
+  /** @deprecated Prefer cutRanges — single middle cut for older callers */
   cutStartSec?: number | null
   cutEndSec?: number | null
   /** Extra ranges to remove (e.g. detected silences / fillers) */
@@ -59,7 +61,10 @@ export type EditPlan = {
 }
 
 function collectRemoves(plan: EditPlan): TimeRange[] {
-  const ranges: TimeRange[] = [...(plan.removeRanges ?? [])]
+  const ranges: TimeRange[] = [
+    ...(plan.cutRanges ?? []),
+    ...(plan.removeRanges ?? []),
+  ]
   if (
     plan.cutStartSec != null &&
     plan.cutEndSec != null &&

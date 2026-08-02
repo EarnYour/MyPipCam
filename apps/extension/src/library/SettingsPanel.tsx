@@ -7,6 +7,7 @@ import {
 import {
   clearLibraryFolder,
   getLibraryFolderAccess,
+  grantLibraryAccess,
   pickLibraryFolder,
 } from '../shared/libraryFs'
 import { flushDriveUploads, migrateIdbToFolder } from '../shared/db'
@@ -49,6 +50,7 @@ export function SettingsPanel({
 }: Props) {
   const [openai, setOpenai] = useState('')
   const [folderName, setFolderName] = useState<string | null>(null)
+  const [folderHasHandle, setFolderHasHandle] = useState(false)
   const [folderPermissionOk, setFolderPermissionOk] = useState(true)
   const [saving, setSaving] = useState(false)
   const [folderBusy, setFolderBusy] = useState(false)
@@ -134,10 +136,12 @@ export function SettingsPanel({
     try {
       const access = await getLibraryFolderAccess()
       setFolderName(access.folderName)
+      setFolderHasHandle(access.hasHandle)
       setFolderPermissionOk(!access.hasHandle || access.permission === 'granted')
       return access.folderName
     } catch {
       setFolderName(null)
+      setFolderHasHandle(false)
       setFolderPermissionOk(true)
       return null
     }
@@ -228,6 +232,28 @@ export function SettingsPanel({
       setSavedMsg(hasOpenAiKey(next) ? 'Key saved.' : 'Cleared.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function onGrantFolder() {
+    setFolderBusy(true)
+    setFolderMsg(null)
+    try {
+      const handle = await grantLibraryAccess()
+      if (!handle) {
+        setFolderMsg(
+          'Permission denied. Click Grant again and choose Allow (preferably “Allow on every visit”).',
+        )
+        await refreshFolder()
+        return
+      }
+      await refreshFolder()
+      setFolderMsg(`Access restored to “${handle.name}”.`)
+      onLibraryFolderChanged?.(handle.name)
+    } catch (err) {
+      setFolderMsg(err instanceof Error ? err.message : 'Could not grant folder access.')
+    } finally {
+      setFolderBusy(false)
     }
   }
 
@@ -400,9 +426,23 @@ export function SettingsPanel({
                   )}
                 </div>
                 <div className="settings-actions">
+                  {!folderPermissionOk && folderHasHandle && (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={folderBusy}
+                      onClick={() => void onGrantFolder()}
+                    >
+                      {folderBusy
+                        ? 'Working…'
+                        : `Grant access to ${folderName || 'folder'}`}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="primary"
+                    className={
+                      !folderPermissionOk && folderHasHandle ? 'ghost' : 'primary'
+                    }
                     disabled={folderBusy}
                     onClick={() => void onChooseFolder()}
                   >
@@ -411,7 +451,9 @@ export function SettingsPanel({
                       : folderName
                         ? folderPermissionOk
                           ? 'Change…'
-                          : 'Choose folder again…'
+                          : folderHasHandle
+                            ? 'Change folder…'
+                            : 'Choose folder again…'
                         : 'Choose folder…'}
                   </button>
                   {folderName && (
@@ -426,10 +468,16 @@ export function SettingsPanel({
                   )}
                 </div>
               </div>
-              {!folderPermissionOk && folderName && (
+              {!folderPermissionOk && folderHasHandle && folderName && (
                 <p className="settings-warn">
-                  Folder access expired — choose the folder again (or grant access from the
-                  library banner) to list recordings on disk.
+                  Chrome still knows “{folderName}” — grant access with one click (no need to
+                  re-pick). Prefer <em>Allow on every visit</em> when prompted.
+                </p>
+              )}
+              {!folderPermissionOk && !folderHasHandle && folderName && (
+                <p className="settings-warn">
+                  Saved folder name “{folderName}” but the directory handle is missing — choose
+                  the folder again once.
                 </p>
               )}
               {folderMsg && <p className="settings-saved">{folderMsg}</p>}

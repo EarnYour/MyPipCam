@@ -100,6 +100,52 @@ export type PipSettings = {
   /** Color filter on the camera bubble (persisted in chrome.storage.local). */
   cameraFilter: CameraFilterId
   openLibraryOnFinish: boolean
+  /**
+   * Include the mouse cursor in tab/screen capture (getDisplayMedia / tabCapture).
+   * Does not affect the camera PiP bubble. Default true matches prior behavior.
+   */
+  captureCursor: boolean
+  /**
+   * Target resolution for tab/screen capture (not the camera PiP).
+   * Chrome may deliver a lower size if the surface cannot meet the request.
+   */
+  captureQuality: CaptureQuality
+}
+
+/** Cursor constraint for display/tab capture (`always` | `never`). */
+export type CursorCaptureConstraint = 'always' | 'never'
+
+export function cursorCaptureConstraint(captureCursor: boolean): CursorCaptureConstraint {
+  return captureCursor ? 'always' : 'never'
+}
+
+export type CaptureQuality = '720p' | '1080p' | '1440p' | '4k'
+
+export const CAPTURE_QUALITY_OPTIONS: readonly {
+  id: CaptureQuality
+  label: string
+  width: number
+  height: number
+}[] = [
+  { id: '720p', label: '720p', width: 1280, height: 720 },
+  { id: '1080p', label: '1080p', width: 1920, height: 1080 },
+  { id: '1440p', label: '1440p', width: 2560, height: 1440 },
+  { id: '4k', label: '4K', width: 3840, height: 2160 },
+] as const
+
+export function isCaptureQuality(value: unknown): value is CaptureQuality {
+  return value === '720p' || value === '1080p' || value === '1440p' || value === '4k'
+}
+
+export function normalizeCaptureQuality(value: unknown): CaptureQuality {
+  return isCaptureQuality(value) ? value : '4k'
+}
+
+export function captureQualitySize(quality: CaptureQuality): { width: number; height: number } {
+  const preset = CAPTURE_QUALITY_OPTIONS.find((o) => o.id === quality)
+  return preset
+    ? { width: preset.width, height: preset.height }
+    : { width: 3840, height: 2160 }
 }
 
 export const DEFAULT_PIP_SETTINGS: PipSettings = {
@@ -116,6 +162,8 @@ export const DEFAULT_PIP_SETTINGS: PipSettings = {
   backgroundEffect: 'none',
   cameraFilter: 'none',
   openLibraryOnFinish: true,
+  captureCursor: true,
+  captureQuality: '4k',
 }
 
 /** Corner radius as a fraction of bubble side length (square shape). */

@@ -16,7 +16,21 @@ import {
   type CameraFilterId,
 } from '../shared/cameraFilters'
 import { saveRecording } from '../shared/db'
+import {
+  concatRecordingParts,
+  measureBlobDurationMs,
+  partsDurationMs,
+  sliceTimesliceChunks,
+  trimBlobToSeconds,
+  type RecordingPart,
+} from '../shared/liveTrimMedia'
 import { preferredMimeType } from '../recorder/capture'
+import {
+  captureQualitySize,
+  cursorCaptureConstraint,
+  normalizeCaptureQuality,
+  type CaptureQuality,
+} from '../shared/types'
 
 type RecordMode = 'screen-cam' | 'screen' | 'cam'
 
@@ -28,12 +42,18 @@ type PrepareMessage = {
   cameraDeviceId?: string | null
   recordMode?: RecordMode
   cameraFilter?: CameraFilterId | string | null
+  /** Include mouse cursor in tab capture (default true). Not camera PiP. */
+  captureCursor?: boolean
+  /** Tab/screen capture resolution preset (default 4k). Not camera PiP. */
+  captureQuality?: CaptureQuality | string | null
   /** When true (legacy OFFSCREEN_START), start MediaRecorder immediately. */
   commit?: boolean
 }
 
 let recorder: MediaRecorder | null = null
 let chunks: Blob[] = []
+/** Sealed prefixes from mid-take rewind & trim (concatenated on final save). */
+let sealedParts: RecordingPart[] = []
 let mimeType = 'video/webm'
 let startedAt = 0
 let tabStream: MediaStream | null = null
@@ -43,13 +63,25 @@ let mixedStream: MediaStream | null = null
 let audioCtx: AudioContext | null = null
 let prepared = false
 let paused = false
-/** Accumulated paused time, excluded from the saved duration. */
-let pausedTotalMs = 0
-let pausedAt = 0
+let pausedAccumMs = 0
+let pauseStartedAt = 0
+/** True while dock/HUD rewind scrub UI is open (recorder stays paused). */
+let rewindUiOpen = false
 /** Canvas filter loop for cam-only when a color filter is active. */
 let filterLoopRaf = 0
 let filterVideo: HTMLVideoElement | null = null
 let filterCanvas: HTMLCanvasElement | null = null
+
+function activeElapsedMs(): number {
+  if (!startedAt) return 0
+  let ms = Date.now() - startedAt - pausedAccumMs
+  if (paused && pauseStartedAt) ms -= Date.now() - pauseStartedAt
+  return Math.max(0, ms)
+}
+
+function totalDurationMs(): number {
+  return partsDurationMs(sealedParts) + activeElapsedMs()
+}
 
 function errDetail(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.trim()) return err.message.trim()
@@ -67,39 +99,97 @@ function pickMimeType(): string {
   return preferredMimeType()
 }
 
-async function acquireTabStream(streamId: string): Promise<MediaStream> {
-  const videoConstraints = {
+async function applyTabTrackPrefs(
+  stream: MediaStream,
+  opts: { captureCursor: boolean; width: number; height: number },
+): Promise<MediaStream> {
+  const track = stream.getVideoTracks()[0]
+  if (!track) return stream
+  const cursor = cursorCaptureConstraint(opts.captureCursor)
+  // Best-effort: Chrome may ignore cursor/resolution on tabCapture surfaces.
+  try {
+    await track.applyConstraints({
+      width: { ideal: opts.width },
+      height: { ideal: opts.height },
+      frameRate: { ideal: 30 },
+      cursor,
+    } as MediaTrackConstraints)
+  } catch {
+    try {
+      await track.applyConstraints({
+        width: { ideal: opts.width },
+        height: { ideal: opts.height },
+        frameRate: { ideal: 30 },
+      })
+    } catch {
+      /* ignore */
+    }
+    try {
+      await track.applyConstraints({ cursor } as MediaTrackConstraints)
+    } catch {
+      /* ignore */
+    }
+  }
+  return stream
+}
+
+async function acquireTabStream(
+  streamId: string,
+  opts: { captureCursor?: boolean; captureQuality?: CaptureQuality | string | null } = {},
+): Promise<MediaStream> {
+  const captureCursor = opts.captureCursor !== false
+  const quality = normalizeCaptureQuality(opts.captureQuality)
+  const { width, height } = captureQualitySize(quality)
+  const cursor = cursorCaptureConstraint(captureCursor)
+
+  const buildVideoConstraints = (includePrefs: boolean) => ({
     mandatory: {
       chromeMediaSource: 'tab',
       chromeMediaSourceId: streamId,
       maxFrameRate: 30,
+      ...(includePrefs
+        ? {
+            cursor,
+            maxWidth: width,
+            maxHeight: height,
+          }
+        : {}),
     },
+  })
+
+  const tryAcquire = async (includePrefs: boolean, withAudio: boolean) => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: withAudio
+        ? {
+            mandatory: {
+              chromeMediaSource: 'tab',
+              chromeMediaSourceId: streamId,
+            },
+          }
+        : false,
+      video: buildVideoConstraints(includePrefs),
+    } as unknown as MediaStreamConstraints)
+    return applyTabTrackPrefs(stream, { captureCursor, width, height })
   }
 
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId,
-        },
-      },
-      video: videoConstraints,
-    } as unknown as MediaStreamConstraints)
+    return await tryAcquire(true, true)
   } catch (withAudio) {
     // Some tabs / Chrome builds reject tab audio — fall back to video-only.
     try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: videoConstraints,
-      } as unknown as MediaStreamConstraints)
+      return await tryAcquire(true, false)
     } catch (videoOnly) {
-      throw new Error(
-        errDetail(
-          videoOnly,
-          errDetail(withAudio, 'Tab capture getUserMedia failed'),
-        ),
-      )
+      // Retry without cursor/quality prefs if those constraints were rejected.
+      try {
+        return await tryAcquire(false, false)
+      } catch {
+        throw new Error(
+          errDetail(
+            videoOnly,
+            errDetail(withAudio, 'Tab capture getUserMedia failed'),
+          ),
+        )
+      }
     }
   }
 }
@@ -355,9 +445,12 @@ function cleanupMedia() {
   }
   recorder = null
   chunks = []
+  sealedParts = []
   paused = false
-  pausedTotalMs = 0
-  pausedAt = 0
+  pausedAccumMs = 0
+  pauseStartedAt = 0
+  startedAt = 0
+  rewindUiOpen = false
   prepared = false
   stopCameraFilterPipeline()
   stopTracks(mixedStream)
@@ -403,8 +496,10 @@ async function prepareRecording(msg: PrepareMessage) {
   } else {
     // Tab first — streamId expires in seconds; never delay it behind mic/cam.
     if (!msg.streamId) throw new Error('Missing tab stream id (tabCapture token expired or not granted)')
+    const captureCursor = msg.captureCursor !== false
+    const captureQuality = normalizeCaptureQuality(msg.captureQuality)
     try {
-      tabStream = await acquireTabStream(msg.streamId)
+      tabStream = await acquireTabStream(msg.streamId, { captureCursor, captureQuality })
     } catch (err) {
       throw new Error(
         errDetail(
@@ -444,7 +539,7 @@ async function prepareRecording(msg: PrepareMessage) {
   }
 }
 
-async function startRecorder() {
+async function startRecorder(opts?: { continueSession?: boolean }) {
   if (!mixedStream) throw new Error('Recorder not prepared — streams missing')
   if (recorder && recorder.state !== 'inactive') return
 
@@ -452,9 +547,13 @@ async function startRecorder() {
 
   mimeType = pickMimeType()
   chunks = []
+  if (!opts?.continueSession) {
+    sealedParts = []
+  }
   paused = false
-  pausedTotalMs = 0
-  pausedAt = 0
+  pausedAccumMs = 0
+  pauseStartedAt = 0
+  rewindUiOpen = false
   try {
     recorder = new MediaRecorder(
       mixedStream,
@@ -488,29 +587,70 @@ async function commitRecording(): Promise<{ ok: boolean; reason?: string }> {
 }
 
 function pauseRecording(): { ok: boolean; reason?: string } {
-  if (!recorder || recorder.state !== 'recording') {
+  if (!recorder) {
     return { ok: false, reason: 'not-recording' }
   }
-  try {
-    recorder.pause()
+  if (recorder.state === 'paused') {
     paused = true
-    pausedAt = Date.now()
+    if (!pauseStartedAt) pauseStartedAt = Date.now()
+    return { ok: true }
+  }
+  if (recorder.state !== 'recording') {
+    return { ok: false, reason: `not-recording (${recorder.state})` }
+  }
+  try {
+    // Flush the current timeslice before pausing so wall-clock and blob stay aligned.
+    try {
+      recorder.requestData()
+    } catch {
+      /* requestData optional */
+    }
+    recorder.pause()
+    // MediaRecorder.state typings don't model pause()/resume() transitions.
+    const state = recorder.state as MediaRecorder['state'] | string
+    if (state !== 'paused') {
+      paused = false
+      pauseStartedAt = 0
+      return { ok: false, reason: `pause-rejected (${state})` }
+    }
+    paused = true
+    pauseStartedAt = Date.now()
     return { ok: true }
   } catch (err) {
+    paused = false
+    pauseStartedAt = 0
     return { ok: false, reason: errDetail(err, 'pause-failed') }
   }
 }
 
 function resumeRecording(): { ok: boolean; reason?: string } {
-  if (!recorder || recorder.state !== 'paused') {
+  if (rewindUiOpen) {
+    return { ok: false, reason: 'Finish or cancel rewind first.' }
+  }
+  if (!recorder) {
     return { ok: false, reason: 'not-paused' }
+  }
+  if (recorder.state === 'recording') {
+    if (pauseStartedAt) {
+      pausedAccumMs += Date.now() - pauseStartedAt
+      pauseStartedAt = 0
+    }
+    paused = false
+    return { ok: true }
+  }
+  if (recorder.state !== 'paused') {
+    return { ok: false, reason: `not-paused (${recorder.state})` }
   }
   try {
     recorder.resume()
+    const state = recorder.state as MediaRecorder['state'] | string
+    if (pauseStartedAt) {
+      pausedAccumMs += Date.now() - pauseStartedAt
+      pauseStartedAt = 0
+    }
     paused = false
-    if (pausedAt > 0) {
-      pausedTotalMs += Date.now() - pausedAt
-      pausedAt = 0
+    if (state !== 'recording') {
+      return { ok: false, reason: `resume-rejected (${state})` }
     }
     return { ok: true }
   } catch (err) {
@@ -544,10 +684,12 @@ async function resetRecordingKeepStreams(): Promise<{ ok: boolean; reason?: stri
   }
   recorder = null
   chunks = []
+  sealedParts = []
   paused = false
-  pausedTotalMs = 0
-  pausedAt = 0
+  pausedAccumMs = 0
+  pauseStartedAt = 0
   startedAt = 0
+  rewindUiOpen = false
 
   const videoAlive = Boolean(
     mixedStream?.getVideoTracks().some((t) => t.readyState === 'live'),
@@ -561,17 +703,32 @@ async function resetRecordingKeepStreams(): Promise<{ ok: boolean; reason?: stri
   return { ok: true }
 }
 
-async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+/**
+ * Stop the active MediaRecorder and return its blob + prior timeslice chunks.
+ * Keeps MediaStreams / sealedParts intact for punch-in continue.
+ */
+async function finalizeActiveRecorder(): Promise<{
+  blob: Blob
+  durationMs: number
+  chunks: Blob[]
+} | null> {
+  const durationMs = activeElapsedMs()
+  const savedChunks = [...chunks]
   const active = recorder
   if (!active) {
-    // Still drop any live tab/cam tracks so Chrome's sharing banner clears.
-    cleanupMedia()
-    return { ok: false, reason: 'not-recording' }
+    if (savedChunks.length === 0) return null
+    chunks = []
+    startedAt = 0
+    paused = false
+    pauseStartedAt = 0
+    pausedAccumMs = 0
+    return {
+      blob: new Blob(savedChunks, { type: mimeType }),
+      durationMs,
+      chunks: savedChunks,
+    }
   }
 
-  // Exclude time spent paused — a stop while still paused counts up to pausedAt.
-  const pausedMs = pausedTotalMs + (paused && pausedAt > 0 ? Date.now() - pausedAt : 0)
-  const durationMs = Math.max(0, Date.now() - startedAt - pausedMs)
   const blob = await new Promise<Blob>((resolve, reject) => {
     const finish = () => resolve(new Blob(chunks, { type: mimeType }))
     active.onstop = finish
@@ -582,10 +739,201 @@ async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; re
     } catch (e) {
       reject(e)
     }
-  }).catch((err) => {
-    cleanupMedia()
-    throw err
   })
+
+  recorder = null
+  chunks = []
+  paused = false
+  pauseStartedAt = 0
+  pausedAccumMs = 0
+  startedAt = 0
+  return { blob, durationMs, chunks: savedChunks }
+}
+
+async function beginRewindTrim(): Promise<{
+  ok: boolean
+  durationMs?: number
+  previewBlob?: Blob
+  reason?: string
+}> {
+  if (!recorder && chunks.length === 0 && sealedParts.length === 0) {
+    return { ok: false, reason: 'not-recording' }
+  }
+  if (!paused) {
+    const pauseRes = pauseRecording()
+    if (!pauseRes.ok) return { ok: false, reason: pauseRes.reason || 'pause-failed' }
+  }
+  try {
+    recorder?.requestData()
+  } catch {
+    /* optional */
+  }
+  await new Promise((r) => setTimeout(r, 60))
+
+  const durationMs = totalDurationMs()
+  if (durationMs < 500) {
+    return { ok: false, reason: 'Record a bit more before rewinding.' }
+  }
+
+  rewindUiOpen = true
+
+  // Preview only from the active MediaRecorder buffer (same header). Sealed
+  // parts need ffmpeg concat — skip preview video when parts already exist.
+  let previewBlob: Blob | undefined
+  if (sealedParts.length === 0 && chunks.length > 0) {
+    const blob = new Blob(chunks, { type: mimeType })
+    if (blob.size > 64 && blob.size < 48 * 1024 * 1024) {
+      previewBlob = blob
+    }
+  }
+
+  return { ok: true, durationMs, previewBlob }
+}
+
+async function applyRewindTrim(keepMsRaw: number): Promise<{
+  ok: boolean
+  durationMs?: number
+  reason?: string
+}> {
+  if (!recorder && chunks.length === 0 && sealedParts.length === 0) {
+    return { ok: false, reason: 'not-recording' }
+  }
+
+  const sealedMs = partsDurationMs(sealedParts)
+  const total = sealedMs + activeElapsedMs()
+  const keepMs = Math.max(250, Math.min(Math.round(keepMsRaw), total))
+
+  let finalized: Awaited<ReturnType<typeof finalizeActiveRecorder>> = null
+  try {
+    finalized = await finalizeActiveRecorder()
+  } catch (err) {
+    return { ok: false, reason: errDetail(err, 'Could not pause take for trim.') }
+  }
+
+  const activeChunks = finalized?.chunks ?? []
+
+  try {
+    if (keepMs <= sealedMs) {
+      // Rewind into a previously sealed prefix — trim with ffmpeg.
+      const kept: RecordingPart[] = []
+      let remaining = keepMs
+      for (const part of sealedParts) {
+        if (remaining <= 0) break
+        if (remaining >= part.durationMs - 20) {
+          kept.push(part)
+          remaining -= part.durationMs
+        } else {
+          const trimmed = await trimBlobToSeconds(part.blob, remaining / 1000)
+          const measured = (await measureBlobDurationMs(trimmed)) ?? remaining
+          kept.push({ blob: trimmed, durationMs: measured })
+          remaining = 0
+        }
+      }
+      sealedParts = kept
+    } else {
+      // Keep all sealed parts; slice the active timeslice buffer.
+      const keepActive = keepMs - sealedMs
+      const sliced = sliceTimesliceChunks(activeChunks, keepActive, mimeType)
+      if (sliced) {
+        const measured = (await measureBlobDurationMs(sliced.blob)) ?? sliced.durationMs
+        sealedParts = [...sealedParts, { blob: sliced.blob, durationMs: measured }]
+      } else if (finalized && finalized.blob.size >= 64 && keepActive > 0) {
+        // Fallback: ffmpeg-trim the finalized active blob.
+        const trimmed = await trimBlobToSeconds(finalized.blob, keepActive / 1000)
+        const measured = (await measureBlobDurationMs(trimmed)) ?? keepActive
+        sealedParts = [...sealedParts, { blob: trimmed, durationMs: measured }]
+      }
+    }
+
+    const keptDuration = partsDurationMs(sealedParts)
+    await startRecorder({ continueSession: true })
+    rewindUiOpen = false
+    return { ok: true, durationMs: keptDuration }
+  } catch (err) {
+    // Best effort: try to resume capture so the user isn't stuck.
+    try {
+      if (!recorder && mixedStream) {
+        await startRecorder({ continueSession: true })
+      }
+    } catch {
+      /* ignore */
+    }
+    rewindUiOpen = false
+    return { ok: false, reason: errDetail(err, 'Could not trim take.') }
+  }
+}
+
+function cancelRewindTrim(): { ok: boolean; reason?: string } {
+  rewindUiOpen = false
+  if (!recorder) {
+    return { ok: false, reason: 'not-recording' }
+  }
+  return resumeRecording()
+}
+
+async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+  rewindUiOpen = false
+  const active = recorder
+  if (!active && sealedParts.length === 0) {
+    cleanupMedia()
+    return { ok: false, reason: 'not-recording' }
+  }
+
+  let activeDurationMs = activeElapsedMs()
+  let activeBlob: Blob | null = null
+
+  if (active) {
+    activeBlob = await new Promise<Blob>((resolve, reject) => {
+      const finish = () => resolve(new Blob(chunks, { type: mimeType }))
+      active.onstop = finish
+      active.onerror = () => reject(new Error('Recorder failed'))
+      try {
+        if (active.state !== 'inactive') active.stop()
+        else finish()
+      } catch (e) {
+        reject(e)
+      }
+    }).catch((err) => {
+      cleanupMedia()
+      throw err
+    })
+  }
+
+  recorder = null
+  chunks = []
+
+  const parts: RecordingPart[] = [...sealedParts]
+  if (activeBlob && activeBlob.size >= 64) {
+    const measured =
+      (await measureBlobDurationMs(activeBlob)) ?? Math.max(0, activeDurationMs)
+    parts.push({ blob: activeBlob, durationMs: measured })
+  }
+
+  const durationMs = partsDurationMs(parts)
+  sealedParts = []
+
+  if (parts.length === 0) {
+    cleanupMedia()
+    return { ok: false, reason: 'empty-recording' }
+  }
+
+  let blob: Blob
+  try {
+    blob = await concatRecordingParts(parts)
+  } catch (err) {
+    // Prefer last part (most recent take) if concat fails after a mid-take trim.
+    const fallback = parts[parts.length - 1]?.blob
+    if (fallback && fallback.size >= 64) {
+      console.warn('[MyPipCam offscreen] concat failed, saving last part only:', err)
+      blob = fallback
+    } else {
+      cleanupMedia()
+      return {
+        ok: false,
+        reason: errDetail(err, 'Could not assemble trimmed recording.'),
+      }
+    }
+  }
 
   cleanupMedia()
 
@@ -602,9 +950,9 @@ async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; re
 
   const record = await saveRecording({
     blob,
-    durationMs,
+    durationMs: Math.max(durationMs, 0),
     thumbnail,
-    mimeType,
+    mimeType: blob.type || mimeType,
   })
 
   return { ok: true, id: record.id }
@@ -763,6 +1111,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === 'OFFSCREEN_RESUME') {
     sendResponse(resumeRecording())
+    return false
+  }
+
+  if (message?.type === 'OFFSCREEN_REWIND_BEGIN') {
+    void (async () => {
+      try {
+        sendResponse(await beginRewindTrim())
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          reason: errDetail(err, 'Could not open rewind.'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'OFFSCREEN_REWIND_APPLY') {
+    void (async () => {
+      try {
+        const keepMs = Number(message.keepMs)
+        if (!Number.isFinite(keepMs) || keepMs < 0) {
+          sendResponse({ ok: false, reason: 'invalid-keepMs' })
+          return
+        }
+        sendResponse(await applyRewindTrim(keepMs))
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          reason: errDetail(err, 'Could not apply rewind trim.'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'OFFSCREEN_REWIND_CANCEL') {
+    sendResponse(cancelRewindTrim())
     return false
   }
 

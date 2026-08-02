@@ -206,6 +206,168 @@
       .err:empty {
         display: none;
       }
+
+      /* Expanded rewind & trim scrub panel (HUD window is resized by main.ts) */
+      body.is-rewind {
+        padding: 10px;
+        justify-content: stretch;
+        align-items: stretch;
+      }
+      body.is-rewind .dock {
+        display: none;
+      }
+      .rewind {
+        display: none;
+        flex: 1;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+        padding: 12px 14px 14px;
+        border-radius: 16px;
+        background: linear-gradient(165deg, #222524 0%, #141615 100%);
+        border: 1px solid var(--border);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+      body.is-rewind .rewind {
+        display: flex;
+      }
+      .rewind-title {
+        font: 750 14px/1.2 ui-sans-serif, system-ui, sans-serif;
+      }
+      .rewind-time {
+        font: 750 26px/1.1 ui-sans-serif, system-ui, sans-serif;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.03em;
+      }
+      .rewind-time span {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 600;
+        margin-left: 6px;
+      }
+      .rewind-preview {
+        display: none;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        max-height: 160px;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #0b0c0b;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .rewind-preview.is-visible {
+        display: block;
+      }
+      .rewind-preview video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .rewind-scrub-label {
+        font-size: 11px;
+        font-weight: 650;
+        color: var(--muted);
+      }
+      .rewind input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 28px;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+        accent-color: var(--primary);
+      }
+      .rewind input[type='range']::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(
+          90deg,
+          var(--primary) 0%,
+          var(--primary) var(--rewind-pct, 100%),
+          rgba(255, 255, 255, 0.16) var(--rewind-pct, 100%),
+          rgba(255, 255, 255, 0.16) 100%
+        );
+      }
+      .rewind input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        margin-top: -6px;
+        border-radius: 50%;
+        background: #fff;
+        border: 3px solid var(--primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      }
+      .rewind-ends {
+        display: flex;
+        justify-content: space-between;
+        font-variant-numeric: tabular-nums;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .rewind-jumps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .rewind-jumps span {
+        font-size: 10.5px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .rewind-jumps button {
+        border: none;
+        cursor: pointer;
+        padding: 7px 11px;
+        border-radius: 8px;
+        background: var(--btn);
+        color: var(--fg);
+        font: 650 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+      }
+      .rewind-jumps button:hover:not(:disabled) {
+        background: var(--btn-hover);
+      }
+      .rewind-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: auto;
+      }
+      .rewind-actions button {
+        border: none;
+        cursor: pointer;
+        padding: 11px 12px;
+        border-radius: 10px;
+        font: 700 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+        color: var(--fg);
+        background: var(--btn);
+      }
+      .rewind-actions button:hover:not(:disabled) {
+        background: var(--btn-hover);
+      }
+      .rewind-actions button.apply {
+        flex: 1;
+        background: var(--primary);
+        color: #fff;
+      }
+      .rewind-actions button.apply:hover:not(:disabled) {
+        background: #e85220;
+      }
+      .rewind-actions button:disabled,
+      .rewind-jumps button:disabled,
+      .rewind input[type='range']:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .rewind-hint {
+        font-size: 11px;
+        font-weight: 550;
+        color: var(--muted);
+        line-height: 1.35;
+      }
     </style>
   </head>
   <body>
@@ -242,16 +404,16 @@
           </svg>
         </button>
         <div class="divider" id="moreDivider" aria-hidden="true"></div>
-        <button type="button" class="icon" id="trim" title="Rewind &amp; trim" aria-label="Rewind and trim">
+        <button type="button" class="icon" id="trim" title="Rewind &amp; trim" aria-label="Rewind and trim — scrub, discard the tail, continue recording">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 14l-5-5 5-5" />
             <path d="M4 9h10a5 5 0 010 10H9" />
           </svg>
         </button>
         <button type="button" class="icon" id="restart" title="Restart" aria-label="Restart recording">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 12a9 9 0 109-9" />
-            <path d="M3 5v7h7" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M1 4v6h6" />
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
           </svg>
         </button>
         <button type="button" class="icon danger-ghost" id="discard" title="Discard" aria-label="Discard recording">
@@ -261,6 +423,31 @@
             <path d="M7 7l1 12h8l1-12" />
           </svg>
         </button>
+      </div>
+    </div>
+
+    <div class="rewind" id="rewind" role="dialog" aria-modal="true" aria-label="Rewind and trim">
+      <div class="rewind-title">Rewind &amp; trim</div>
+      <div class="rewind-time" id="rewindTime" aria-live="polite">0:00</div>
+      <div class="rewind-preview" id="rewindPreview">
+        <video id="rewindVideo" muted playsinline preload="auto" aria-label="Preview frame at scrub position"></video>
+      </div>
+      <div class="rewind-scrub-label">Drag to the exact moment</div>
+      <input type="range" id="rewindRange" min="0" max="1000" value="1000" step="1" aria-label="Trim point" />
+      <div class="rewind-ends">
+        <span>0:00</span>
+        <span id="rewindTotal">0:00</span>
+      </div>
+      <div class="rewind-jumps">
+        <span>Jump</span>
+        <button type="button" data-jump="5000">−5s</button>
+        <button type="button" data-jump="10000">−10s</button>
+        <button type="button" data-jump="20000">−20s</button>
+      </div>
+      <p class="rewind-hint">Keeps up to the scrub point, discards the rest, resumes the same take.</p>
+      <div class="rewind-actions">
+        <button type="button" id="rewindCancel">Cancel</button>
+        <button type="button" class="apply" id="rewindApply">Trim &amp; continue</button>
       </div>
     </div>
     <script type="module" src="./main.ts"></script>

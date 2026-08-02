@@ -5,6 +5,7 @@ import {
 } from './cameraFilters'
 import {
   DEFAULT_PIP_SETTINGS,
+  normalizeCaptureQuality,
   type PipSettings,
 } from './types'
 import { sanitizeCssColor } from './security'
@@ -25,6 +26,9 @@ export async function loadPipSettings(): Promise<PipSettings> {
     ...raw,
     borderColor: sanitizeCssColor(raw.borderColor, DEFAULT_PIP_SETTINGS.borderColor),
     cameraFilter,
+    // Older sync blobs omit the key — keep historical default (cursor on).
+    captureCursor: raw.captureCursor !== false,
+    captureQuality: normalizeCaptureQuality(raw.captureQuality),
   }
 }
 
@@ -40,6 +44,12 @@ export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipS
   }
   if (clean.cameraFilter !== undefined) {
     next.cameraFilter = await saveCameraFilter(clean.cameraFilter)
+  }
+  if (clean.captureQuality !== undefined) {
+    next.captureQuality = normalizeCaptureQuality(clean.captureQuality)
+  }
+  if (clean.captureCursor !== undefined) {
+    next.captureCursor = clean.captureCursor !== false
   }
   await chrome.storage.sync.set({ [KEY]: next })
   return next

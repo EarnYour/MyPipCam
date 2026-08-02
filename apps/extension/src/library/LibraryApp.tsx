@@ -5,9 +5,10 @@ import {
   downloadBlob,
   flushDriveUploads,
   flushPendingToFolder,
-  folderRootInteractive,
+  folderRootQuiet,
   getDriveUploadNotice,
   getRecording,
+  grantLibraryAccess,
   listLibrary,
   migrateIdbToFolder,
   recordingFilename,
@@ -214,6 +215,8 @@ export function LibraryApp() {
   const [driveUploadError, setDriveUploadError] = useState<string | null>(null)
   const [driveRetryBusy, setDriveRetryBusy] = useState(false)
   const [folderAccessNeeded, setFolderAccessNeeded] = useState(false)
+  /** Name left in chrome.storage but IndexedDB handle missing — must re-pick. */
+  const [folderHandleMissing, setFolderHandleMissing] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const showBanner = useCallback(
@@ -250,9 +253,10 @@ export function LibraryApp() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
+      // Never call requestPermission on load — it requires a user gesture and
+      // previously aborted this refresh before the Grant banner could render.
       if (await hasLibraryFolder()) {
-        // May no-op without a user gesture; grant banner handles re-prompt.
-        const root = await folderRootInteractive()
+        const root = await folderRootQuiet()
         if (root) {
           await flushPendingToFolder(root)
         }
@@ -268,6 +272,9 @@ export function LibraryApp() {
       setFolderName(listed.folder.folderName)
       setFolderAccessNeeded(
         listed.folder.hasHandle && listed.folder.permission !== 'granted',
+      )
+      setFolderHandleMissing(
+        !listed.folder.hasHandle && Boolean(listed.folder.folderName),
       )
       if (listed.driveError && listed.items.length === 0) {
         showBanner(listed.driveError, null, 'warn')
@@ -454,20 +461,32 @@ export function LibraryApp() {
     setFolderBusy(true)
     showBanner(null)
     try {
-      const root = await folderRootInteractive()
-      if (!root) {
-        showBanner('Folder access expired — Choose folder again in Settings.')
-        setFolderAccessNeeded(true)
+      if (!(await hasLibraryFolder())) {
+        showBanner('No saved folder — choose your library folder once.', null, 'warn')
+        setFolderAccessNeeded(false)
         setSettingsOpen(true)
         return
       }
+      const root = await grantLibraryAccess()
+      if (!root) {
+        // Handle is still stored — do not force a full re-pick.
+        showBanner(
+          `Could not access “${folderName || 'your folder'}”. Click Grant again and choose Allow (preferably “Allow on every visit”).`,
+          null,
+          'warn',
+        )
+        setFolderAccessNeeded(true)
+        return
+      }
       setFolderAccessNeeded(false)
+      await flushPendingToFolder(root)
       await refreshFolderName()
       await refresh()
+      showBanner(`Access restored to “${root.name}”.`)
     } finally {
       setFolderBusy(false)
     }
-  }, [refresh, refreshFolderName, showBanner])
+  }, [folderName, refresh, refreshFolderName, showBanner])
 
   const openDetail = useCallback((id: string) => {
     writeDetailIdToUrl(id)
@@ -915,12 +934,13 @@ export function LibraryApp() {
       )}
 
       {folderAccessNeeded && !showDetail && (
-        <div className="library-banner" role="status">
+        <div className="library-banner library-banner-warn" role="status">
           <div>
-            <strong>Folder access expired</strong>
+            <strong>Grant access to {folderName || 'your library folder'}</strong>
             <p className="muted" style={{ margin: '0.2rem 0 0' }}>
-              Chrome needs permission again to read “{folderName || 'your library folder'}”
-              (recordings on disk are still there). Grant access or choose the folder again.
+              Chrome remembered “{folderName || 'your folder'}” but needs a one-click permission
+              after restart (recordings on disk are still there). Prefer{' '}
+              <em>Allow on every visit</em> when prompted.
             </p>
           </div>
           <div className="row">
@@ -930,7 +950,9 @@ export function LibraryApp() {
               disabled={folderBusy}
               onClick={() => void onGrantFolderAccess()}
             >
-              {folderBusy ? 'Working…' : 'Grant folder access'}
+              {folderBusy
+                ? 'Working…'
+                : `Grant access to ${folderName || 'folder'}`}
             </button>
             <button
               type="button"
@@ -938,19 +960,43 @@ export function LibraryApp() {
               disabled={folderBusy}
               onClick={() => setSettingsOpen(true)}
             >
-              Choose folder again
+              Change folder…
             </button>
           </div>
         </div>
       )}
 
-      {!folderName && !folderAccessNeeded && !showDetail && (
+      {folderHandleMissing && !folderAccessNeeded && !showDetail && (
+        <div className="library-banner library-banner-warn" role="status">
+          <div>
+            <strong>Library folder handle missing</strong>
+            <p className="muted" style={{ margin: '0.2rem 0 0' }}>
+              Chrome forgot the directory handle for “{folderName}” (common after removing/reloading
+              the extension without a stable ID). Choose the same folder once — usually{' '}
+              <code>Movies/MyPipCam</code>.
+            </p>
+          </div>
+          <div className="row">
+            <button
+              type="button"
+              className="primary"
+              disabled={folderBusy}
+              onClick={() => void onChooseFolderFromBanner()}
+            >
+              {folderBusy ? 'Working…' : 'Choose folder again…'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!folderName && !folderAccessNeeded && !folderHandleMissing && !showDetail && (
         <div className="library-banner" role="status">
           <div>
             <strong>Choose a shared library folder</strong>
             <p className="muted" style={{ margin: '0.2rem 0 0' }}>
               Optional — recordings stay in this browser until you pick a folder. Suggested:{' '}
-              <code>Movies/MyPipCam</code>. Use the same folder in the Mac app.
+              <code>Movies/MyPipCam</code>. Use the same folder in the Mac app. You only need to
+              pick it once; later opens may ask for a one-click grant.
             </p>
           </div>
           <div className="row">
@@ -1108,10 +1154,12 @@ export function LibraryApp() {
               <h2>No recordings yet</h2>
               <p>
                 {folderAccessNeeded
-                  ? `Can’t read “${folderName || 'your folder'}” until you grant access. Recordings on disk will show up after you click Grant folder access.`
-                  : folderName
-                    ? `Nothing in “${folderName}” yet. Capture a clip and it will appear here and on disk.`
-                    : 'Capture your screen with a camera PiP, then manage clips here.'}
+                  ? `Can’t read “${folderName || 'your folder'}” until you grant access. Recordings on disk will show up after one click.`
+                  : folderHandleMissing
+                    ? `Chrome forgot the handle for “${folderName}”. Choose that folder again once.`
+                    : folderName
+                      ? `Nothing in “${folderName}” yet. Capture a clip and it will appear here and on disk.`
+                      : 'Capture your screen with a camera PiP, then manage clips here.'}
               </p>
               {folderAccessNeeded ? (
                 <button
@@ -1119,7 +1167,9 @@ export function LibraryApp() {
                   disabled={folderBusy}
                   onClick={() => void onGrantFolderAccess()}
                 >
-                  {folderBusy ? 'Working…' : 'Grant folder access'}
+                  {folderBusy
+                    ? 'Working…'
+                    : `Grant access to ${folderName || 'folder'}`}
                 </button>
               ) : (
                 <button className="primary" onClick={() => void openRecorderTab()}>
