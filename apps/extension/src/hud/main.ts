@@ -24,10 +24,23 @@ const trimBtn = document.getElementById('trim') as HTMLButtonElement
 const restartBtn = document.getElementById('restart') as HTMLButtonElement
 const cancelCountdownBtn = document.getElementById('cancelCountdown') as HTMLButtonElement
 const skipCountdownBtn = document.getElementById('skipCountdown') as HTMLButtonElement
+const rewindPanel = document.getElementById('rewind') as HTMLDivElement
+const rewindTimeEl = document.getElementById('rewindTime') as HTMLDivElement
+const rewindPreview = document.getElementById('rewindPreview') as HTMLDivElement
+const rewindVideo = document.getElementById('rewindVideo') as HTMLVideoElement
+const rewindRange = document.getElementById('rewindRange') as HTMLInputElement
+const rewindTotalEl = document.getElementById('rewindTotal') as HTMLSpanElement
+const rewindApplyBtn = document.getElementById('rewindApply') as HTMLButtonElement
+const rewindCancelBtn = document.getElementById('rewindCancel') as HTMLButtonElement
 
 const PAUSE_ICON =
   '<rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />'
 const PLAY_ICON = '<path d="M8 5v14l11-7-11-7z" />'
+
+const HUD_NARROW_W = 72
+const HUD_NARROW_H = 400
+const HUD_REWIND_W = 380
+const HUD_REWIND_H = 520
 
 let phase: 'countdown' | 'recording' | 'paused' | 'idle' = 'countdown'
 let countdownLeft = 3
@@ -38,6 +51,10 @@ let pauseStartedAt = 0
 let tickTimer: number | null = null
 let busy = false
 let localCountdownActive = false
+let rewindOpen = false
+let rewindDurationMs = 0
+let rewindKeepMs = 0
+let rewindPreviewUrl: string | null = null
 
 function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000))
@@ -61,8 +78,126 @@ function setBusy(next: boolean) {
     cancelCountdownBtn,
     skipCountdownBtn,
   ]) {
+    btn.disabled = next || rewindOpen
+  }
+  setRewindControlsBusy(next)
+}
+
+function setRewindControlsBusy(next: boolean) {
+  rewindApplyBtn.disabled = next
+  rewindCancelBtn.disabled = next
+  rewindRange.disabled = next
+  for (const btn of rewindPanel.querySelectorAll<HTMLButtonElement>('button[data-jump]')) {
     btn.disabled = next
   }
+}
+
+async function setHudWindowSize(width: number, height: number) {
+  try {
+    const win = await chrome.windows.getCurrent()
+    if (typeof win.id === 'number') {
+      await chrome.windows.update(win.id, { width, height })
+    }
+  } catch {
+    /* popup resize is best-effort */
+  }
+}
+
+function clearRewindPreview() {
+  rewindVideo.pause()
+  rewindVideo.removeAttribute('src')
+  rewindVideo.load()
+  rewindPreview.classList.remove('is-visible')
+  if (rewindPreviewUrl) {
+    URL.revokeObjectURL(rewindPreviewUrl)
+    rewindPreviewUrl = null
+  }
+}
+
+function updateRewindLabel() {
+  rewindTimeEl.innerHTML = `${formatDuration(rewindKeepMs)}<span>/ ${formatDuration(rewindDurationMs)}</span>`
+  const pct =
+    rewindDurationMs > 0
+      ? Math.max(0, Math.min(100, (rewindKeepMs / rewindDurationMs) * 100))
+      : 100
+  rewindRange.style.setProperty('--rewind-pct', `${pct}%`)
+}
+
+function seekRewindPreview() {
+  if (!rewindPreview.classList.contains('is-visible')) return
+  const t = rewindKeepMs / 1000
+  try {
+    rewindVideo.pause()
+    if (Number.isFinite(rewindVideo.duration) && rewindVideo.duration > 0) {
+      rewindVideo.currentTime = Math.min(
+        Math.max(0, t),
+        Math.max(0, rewindVideo.duration - 0.05),
+      )
+    } else {
+      rewindVideo.currentTime = Math.max(0, t)
+    }
+  } catch {
+    /* incomplete webm */
+  }
+}
+
+function onRewindScrub() {
+  if (!rewindOpen || busy) return
+  const v = Number(rewindRange.value)
+  if (!Number.isFinite(v)) return
+  rewindKeepMs = Math.max(0, Math.min(rewindDurationMs, Math.round(v)))
+  if (rewindKeepMs < 250 && rewindDurationMs >= 250) {
+    rewindKeepMs = 250
+    rewindRange.value = '250'
+  }
+  updateRewindLabel()
+  seekRewindPreview()
+}
+
+function nudgeRewind(deltaMs: number) {
+  if (!rewindOpen || busy) return
+  rewindKeepMs = Math.max(250, Math.min(rewindDurationMs, rewindKeepMs + deltaMs))
+  rewindRange.value = String(rewindKeepMs)
+  updateRewindLabel()
+  seekRewindPreview()
+}
+
+async function openRewindUi(durationMs: number, previewBlob?: Blob) {
+  rewindOpen = true
+  rewindDurationMs = Math.max(250, durationMs)
+  rewindKeepMs = rewindDurationMs
+  rewindRange.min = '0'
+  rewindRange.max = String(rewindDurationMs)
+  rewindRange.step = '1'
+  rewindRange.value = String(rewindKeepMs)
+  rewindTotalEl.textContent = formatDuration(rewindDurationMs)
+  updateRewindLabel()
+  clearRewindPreview()
+  if (previewBlob && previewBlob.size > 64) {
+    rewindPreviewUrl = URL.createObjectURL(previewBlob)
+    rewindVideo.src = rewindPreviewUrl
+    rewindPreview.classList.add('is-visible')
+    const onMeta = () => {
+      rewindVideo.removeEventListener('loadedmetadata', onMeta)
+      seekRewindPreview()
+    }
+    rewindVideo.addEventListener('loadedmetadata', onMeta)
+    rewindVideo.load()
+    rewindVideo.pause()
+    seekRewindPreview()
+  }
+  document.body.classList.add('is-rewind')
+  await setHudWindowSize(HUD_REWIND_W, HUD_REWIND_H)
+  showPaused()
+  setBusy(false)
+  window.setTimeout(() => rewindRange.focus(), 0)
+}
+
+async function closeRewindUi() {
+  rewindOpen = false
+  document.body.classList.remove('is-rewind')
+  clearRewindPreview()
+  await setHudWindowSize(HUD_NARROW_W, HUD_NARROW_H)
 }
 
 function setPauseUi(paused: boolean) {
@@ -307,43 +442,102 @@ pauseBtn.addEventListener('click', () => {
 })
 
 trimBtn.addEventListener('click', () => {
-  if (busy || phase === 'countdown') return
-  const ok = window.confirm(
-    'Rewind 20 seconds and continue?\n\nKeeps the take up to that point, discards the rest, and resumes recording.',
-  )
-  if (!ok) return
+  if (busy || phase === 'countdown' || rewindOpen) return
   setBusy(true)
+  setError('')
   void (async () => {
     try {
       const begin = (await chrome.runtime.sendMessage({
         type: 'BEGIN_LOOM_REWIND',
-      })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
+      })) as {
+        ok?: boolean
+        durationMs?: number
+        previewBlob?: Blob
+        reason?: string
+      } | undefined
       if (!begin?.ok || typeof begin.durationMs !== 'number') {
         setBusy(false)
         setError(begin?.reason?.trim() || 'Could not open rewind.')
         return
       }
-      const keepMs = Math.max(250, begin.durationMs - 20_000)
+      await openRewindUi(begin.durationMs, begin.previewBlob)
+    } catch (err) {
+      setBusy(false)
+      setError(err instanceof Error ? err.message : 'Could not open rewind.')
+    }
+  })()
+})
+
+rewindRange.addEventListener('input', onRewindScrub)
+rewindRange.addEventListener('change', onRewindScrub)
+
+for (const btn of rewindPanel.querySelectorAll<HTMLButtonElement>('button[data-jump]')) {
+  btn.addEventListener('click', () => {
+    const jump = Number(btn.dataset.jump)
+    if (Number.isFinite(jump)) nudgeRewind(-jump)
+  })
+}
+
+rewindApplyBtn.addEventListener('click', () => {
+  if (!rewindOpen || busy) return
+  setBusy(true)
+  setError('')
+  void (async () => {
+    try {
       const applied = (await chrome.runtime.sendMessage({
         type: 'APPLY_LOOM_REWIND',
-        keepMs,
+        keepMs: rewindKeepMs,
       })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
       if (!applied?.ok) {
         setBusy(false)
-        void chrome.runtime.sendMessage({ type: 'CANCEL_LOOM_REWIND' }).catch(() => undefined)
         setError(applied?.reason?.trim() || 'Could not trim take.')
         return
       }
       const kept =
-        typeof applied.durationMs === 'number' ? applied.durationMs : keepMs
+        typeof applied.durationMs === 'number' ? applied.durationMs : rewindKeepMs
+      await closeRewindUi()
       recordingStartedAt = Date.now() - kept
       pausedAccumMs = 0
+      pauseStartedAt = 0
+      phase = 'recording'
+      setRecDot('recording')
       setPauseUi(false)
       statusEl.textContent = 'Recording'
+      timerEl.textContent = formatDuration(kept)
       setBusy(false)
     } catch (err) {
       setBusy(false)
       setError(err instanceof Error ? err.message : 'Trim failed')
+    }
+  })()
+})
+
+rewindCancelBtn.addEventListener('click', () => {
+  if (!rewindOpen || busy) return
+  setBusy(true)
+  void (async () => {
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'CANCEL_LOOM_REWIND',
+      })) as { ok?: boolean; reason?: string } | undefined
+      await closeRewindUi()
+      if (res?.ok) {
+        if (pauseStartedAt) {
+          pausedAccumMs += Date.now() - pauseStartedAt
+          pauseStartedAt = 0
+        }
+        phase = 'recording'
+        setRecDot('recording')
+        statusEl.textContent = 'Recording'
+        setPauseUi(false)
+      } else {
+        setError(res?.reason?.trim() || 'Could not cancel rewind.')
+      }
+      setBusy(false)
+    } catch (err) {
+      await closeRewindUi()
+      setBusy(false)
+      setError(err instanceof Error ? err.message : 'Cancel failed')
     }
   })()
 })

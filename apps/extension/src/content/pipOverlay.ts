@@ -458,71 +458,172 @@ function overlayStyles(): string {
       opacity: 1;
     }
 
-    /* Mid-take rewind & trim panel (Loom-style punch-in) */
+    /* Mid-take rewind & trim — wide scrub panel (not a tiny flyout) */
+    .mpc-dock.is-rewind {
+      z-index: 2147483647 !important;
+    }
     .mpc-dock-rewind {
       position: absolute;
-      left: calc(100% + 10px);
+      left: calc(100% + 12px);
       top: 50%;
       transform: translateY(-50%);
-      width: min(280px, calc(100vw - 72px));
-      padding: 12px;
-      border-radius: 14px;
-      background: rgba(17, 19, 18, 0.97);
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      width: min(460px, calc(100vw - 80px));
+      min-width: 320px;
+      padding: 16px 18px 18px;
+      border-radius: 18px;
+      background: linear-gradient(165deg, rgba(28, 30, 29, 0.98) 0%, rgba(14, 15, 14, 0.99) 100%);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.58), 0 0 0 1px rgba(255,94,41,0.12);
       color: #fafaf7;
-      font: 600 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+      font: 600 12px/1.35 ui-sans-serif, system-ui, sans-serif;
       display: none;
       flex-direction: column;
-      gap: 10px;
-      z-index: 3;
+      gap: 12px;
+      z-index: 4;
       pointer-events: auto;
     }
     .mpc-dock-rewind.is-open { display: flex; }
     .mpc-dock-rewind-title {
       font-weight: 750;
-      font-size: 12px;
+      font-size: 15px;
       letter-spacing: 0.01em;
     }
     .mpc-dock-rewind-time {
       font-variant-numeric: tabular-nums;
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
+      font-size: 28px;
+      font-weight: 750;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
     }
     .mpc-dock-rewind-time span {
-      color: rgba(250,250,247,0.55);
-      font-size: 12px;
+      color: rgba(250,250,247,0.5);
+      font-size: 16px;
       font-weight: 600;
-      margin-left: 6px;
+      margin-left: 8px;
+      letter-spacing: -0.01em;
     }
-    .mpc-dock-rewind video {
+    .mpc-dock-rewind-preview {
+      position: relative;
       width: 100%;
-      max-height: 120px;
-      border-radius: 10px;
+      border-radius: 12px;
+      overflow: hidden;
       background: #0b0c0b;
-      object-fit: contain;
+      border: 1px solid rgba(255,255,255,0.08);
+      aspect-ratio: 16 / 9;
+      max-height: 200px;
       display: none;
     }
-    .mpc-dock-rewind video.is-visible { display: block; }
-    .mpc-dock-rewind input[type='range'] {
+    .mpc-dock-rewind-preview.is-visible { display: block; }
+    .mpc-dock-rewind-preview video {
       width: 100%;
-      accent-color: #ff5e29;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      background: #0b0c0b;
+    }
+    .mpc-dock-rewind-scrub {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 4px 4px;
+    }
+    .mpc-dock-rewind-scrub-label {
+      font-size: 11px;
+      font-weight: 650;
+      color: rgba(250,250,247,0.62);
+      letter-spacing: 0.02em;
+    }
+    .mpc-dock-rewind input[type='range'] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 28px;
+      margin: 0;
+      background: transparent;
       cursor: pointer;
+    }
+    .mpc-dock-rewind input[type='range']:focus {
+      outline: none;
+    }
+    .mpc-dock-rewind input[type='range']:focus-visible {
+      outline: 2px solid rgba(255,94,41,0.65);
+      outline-offset: 3px;
+      border-radius: 8px;
+    }
+    .mpc-dock-rewind input[type='range']::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        #ff5e29 0%,
+        #ff5e29 var(--mpc-rewind-pct, 100%),
+        rgba(255,255,255,0.16) var(--mpc-rewind-pct, 100%),
+        rgba(255,255,255,0.16) 100%
+      );
+    }
+    .mpc-dock-rewind input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      margin-top: -7px;
+      border-radius: 50%;
+      background: #fff;
+      border: 3px solid #ff5e29;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+      cursor: grab;
+    }
+    .mpc-dock-rewind input[type='range']:active::-webkit-slider-thumb {
+      cursor: grabbing;
+      transform: scale(1.08);
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.16);
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #ff5e29;
+    }
+    .mpc-dock-rewind input[type='range']::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      border: 3px solid #ff5e29;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+      cursor: grab;
+    }
+    .mpc-dock-rewind-ends {
+      display: flex;
+      justify-content: space-between;
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(250,250,247,0.45);
     }
     .mpc-dock-rewind-jumps {
       display: flex;
-      gap: 6px;
+      gap: 8px;
       flex-wrap: wrap;
+      align-items: center;
+    }
+    .mpc-dock-rewind-jumps-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: rgba(250,250,247,0.45);
+      margin-right: 2px;
     }
     .mpc-dock-rewind-jumps button {
       all: unset;
       box-sizing: border-box;
       cursor: pointer;
-      padding: 6px 9px;
-      border-radius: 8px;
+      padding: 7px 12px;
+      border-radius: 9px;
       background: rgba(255,255,255,0.08);
-      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      font: 650 12px/1.2 ui-sans-serif, system-ui, sans-serif;
       color: #fafaf7;
     }
     .mpc-dock-rewind-jumps button:hover {
@@ -530,38 +631,44 @@ function overlayStyles(): string {
     }
     .mpc-dock-rewind-actions {
       display: flex;
-      gap: 6px;
-      justify-content: flex-end;
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 2px;
     }
     .mpc-dock-rewind-actions button {
       all: unset;
       box-sizing: border-box;
       cursor: pointer;
-      padding: 7px 11px;
-      border-radius: 8px;
-      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      padding: 11px 14px;
+      border-radius: 11px;
+      font: 700 13px/1.2 ui-sans-serif, system-ui, sans-serif;
       color: #fafaf7;
       background: rgba(255,255,255,0.08);
+      text-align: center;
     }
     .mpc-dock-rewind-actions button:hover {
       background: rgba(255,255,255,0.14);
     }
     .mpc-dock-rewind-actions button.mpc-rewind-apply {
+      flex: 1;
       background: #ff5e29;
       color: #fff;
+      box-shadow: 0 4px 14px rgba(255,94,41,0.35);
     }
     .mpc-dock-rewind-actions button.mpc-rewind-apply:hover {
       background: #e85220;
     }
     .mpc-dock-rewind-actions button:disabled,
-    .mpc-dock-rewind-jumps button:disabled {
+    .mpc-dock-rewind-jumps button:disabled,
+    .mpc-dock-rewind input[type='range']:disabled {
       opacity: 0.45;
       cursor: default;
     }
     .mpc-dock-rewind-hint {
-      color: rgba(250,250,247,0.65);
+      color: rgba(250,250,247,0.62);
       font-weight: 550;
-      font-size: 10.5px;
+      font-size: 11.5px;
+      line-height: 1.4;
     }
 
     /* Compact confirm / toast to the right of the dock (avoids window.confirm) */
@@ -1015,8 +1122,11 @@ class TabOverlay {
   private toastEl: HTMLDivElement
   private rewindEl: HTMLDivElement
   private rewindTimeEl: HTMLDivElement
+  private rewindPreviewWrap: HTMLDivElement
   private rewindVideo: HTMLVideoElement
   private rewindRange: HTMLInputElement
+  private rewindEndStartEl: HTMLSpanElement
+  private rewindEndTotalEl: HTMLSpanElement
   private rewindHintEl: HTMLDivElement
   private rewindApplyBtn: HTMLButtonElement
   private rewindCancelBtn: HTMLButtonElement
@@ -1299,20 +1409,45 @@ class TabOverlay {
     rewindTitle.textContent = 'Rewind & trim'
     this.rewindTimeEl = document.createElement('div')
     this.rewindTimeEl.className = 'mpc-dock-rewind-time'
+    this.rewindTimeEl.setAttribute('aria-live', 'polite')
     this.rewindTimeEl.textContent = '0:00'
+    this.rewindPreviewWrap = document.createElement('div')
+    this.rewindPreviewWrap.className = 'mpc-dock-rewind-preview'
     this.rewindVideo = document.createElement('video')
     this.rewindVideo.muted = true
     this.rewindVideo.playsInline = true
-    this.rewindVideo.preload = 'metadata'
+    this.rewindVideo.preload = 'auto'
+    this.rewindVideo.setAttribute('aria-label', 'Preview frame at scrub position')
+    this.rewindPreviewWrap.appendChild(this.rewindVideo)
+    const scrub = document.createElement('div')
+    scrub.className = 'mpc-dock-rewind-scrub'
+    const scrubLabel = document.createElement('div')
+    scrubLabel.className = 'mpc-dock-rewind-scrub-label'
+    scrubLabel.textContent = 'Drag to the exact moment — then trim & continue'
     this.rewindRange = document.createElement('input')
     this.rewindRange.type = 'range'
     this.rewindRange.min = '0'
     this.rewindRange.max = '1000'
     this.rewindRange.value = '1000'
+    this.rewindRange.step = '1'
     this.rewindRange.dataset.mpcAction = 'rewind-scrub'
+    this.rewindRange.setAttribute('aria-label', 'Trim point')
     this.rewindRange.addEventListener('input', () => this.onRewindScrub())
+    this.rewindRange.addEventListener('change', () => this.onRewindScrub())
+    const ends = document.createElement('div')
+    ends.className = 'mpc-dock-rewind-ends'
+    this.rewindEndStartEl = document.createElement('span')
+    this.rewindEndStartEl.textContent = '0:00'
+    this.rewindEndTotalEl = document.createElement('span')
+    this.rewindEndTotalEl.textContent = '0:00'
+    ends.append(this.rewindEndStartEl, this.rewindEndTotalEl)
+    scrub.append(scrubLabel, this.rewindRange, ends)
     const jumps = document.createElement('div')
     jumps.className = 'mpc-dock-rewind-jumps'
+    const jumpsLabel = document.createElement('span')
+    jumpsLabel.className = 'mpc-dock-rewind-jumps-label'
+    jumpsLabel.textContent = 'Jump'
+    jumps.appendChild(jumpsLabel)
     for (const sec of [5, 10, 20] as const) {
       const btn = document.createElement('button')
       btn.type = 'button'
@@ -1325,7 +1460,7 @@ class TabOverlay {
     this.rewindHintEl = document.createElement('div')
     this.rewindHintEl.className = 'mpc-dock-rewind-hint'
     this.rewindHintEl.textContent =
-      'Discard everything after this point, then keep recording the same take.'
+      'Keeps everything up to the scrub point, discards the rest, and resumes the same take.'
     const rewindActions = document.createElement('div')
     rewindActions.className = 'mpc-dock-rewind-actions'
     this.rewindCancelBtn = document.createElement('button')
@@ -1341,8 +1476,8 @@ class TabOverlay {
     this.rewindEl.append(
       rewindTitle,
       this.rewindTimeEl,
-      this.rewindVideo,
-      this.rewindRange,
+      this.rewindPreviewWrap,
+      scrub,
       jumps,
       this.rewindHintEl,
       rewindActions,
@@ -2046,7 +2181,7 @@ class TabOverlay {
       this.showRewindPanel(res.durationMs, res.previewBlob)
       this.rewindBusy = false
       this.setDockBusy(false)
-      this.showDockToast('Pick where to continue — then Trim & continue.')
+      this.showDockToast('Drag the scrubber to the mistake, then Trim & continue.')
     } catch (err) {
       this.rewindBusy = false
       this.setDockBusy(false)
@@ -2061,27 +2196,40 @@ class TabOverlay {
   private showRewindPanel(durationMs: number, previewBlob?: Blob) {
     this.clearRewindPreview()
     this.rewindOpen = true
+    this.dock.classList.add('is-rewind')
     this.rewindDurationMs = Math.max(250, durationMs)
     this.rewindKeepMs = this.rewindDurationMs
+    this.rewindRange.min = '0'
     this.rewindRange.max = String(this.rewindDurationMs)
+    this.rewindRange.step = '1'
     this.rewindRange.value = String(this.rewindKeepMs)
+    this.rewindEndTotalEl.textContent = formatDuration(this.rewindDurationMs)
     this.updateRewindTimeLabel()
     if (previewBlob && previewBlob.size > 64) {
       this.rewindPreviewUrl = URL.createObjectURL(previewBlob)
       this.rewindVideo.src = this.rewindPreviewUrl
-      this.rewindVideo.classList.add('is-visible')
-      void this.rewindVideo.play().catch(() => undefined)
+      this.rewindPreviewWrap.classList.add('is-visible')
+      const onMeta = () => {
+        this.rewindVideo.removeEventListener('loadedmetadata', onMeta)
+        this.seekRewindPreview()
+      }
+      this.rewindVideo.addEventListener('loadedmetadata', onMeta)
+      this.rewindVideo.load()
+      // Frame scrub — pause at the selected time (do not autoplay).
+      this.rewindVideo.pause()
       this.seekRewindPreview()
     } else {
-      this.rewindVideo.classList.remove('is-visible')
+      this.rewindPreviewWrap.classList.remove('is-visible')
     }
     this.rewindEl.classList.add('is-open')
-    this.rewindApplyBtn.focus()
+    // Primary interaction is the slider — focus it for keyboard + discoverability.
+    window.setTimeout(() => this.rewindRange.focus(), 0)
   }
 
   private hideRewindPanel() {
     this.rewindOpen = false
     this.rewindBusy = false
+    this.dock.classList.remove('is-rewind')
     this.rewindEl.classList.remove('is-open')
     this.clearRewindPreview()
   }
@@ -2090,7 +2238,7 @@ class TabOverlay {
     this.rewindVideo.pause()
     this.rewindVideo.removeAttribute('src')
     this.rewindVideo.load()
-    this.rewindVideo.classList.remove('is-visible')
+    this.rewindPreviewWrap.classList.remove('is-visible')
     if (this.rewindPreviewUrl) {
       URL.revokeObjectURL(this.rewindPreviewUrl)
       this.rewindPreviewUrl = null
@@ -2101,12 +2249,23 @@ class TabOverlay {
     const keep = formatDuration(this.rewindKeepMs)
     const total = formatDuration(this.rewindDurationMs)
     this.rewindTimeEl.innerHTML = `${keep}<span>/ ${total}</span>`
+    const pct =
+      this.rewindDurationMs > 0
+        ? Math.max(0, Math.min(100, (this.rewindKeepMs / this.rewindDurationMs) * 100))
+        : 100
+    this.rewindRange.style.setProperty('--mpc-rewind-pct', `${pct}%`)
   }
 
   private onRewindScrub() {
+    if (!this.rewindOpen || this.rewindBusy) return
     const v = Number(this.rewindRange.value)
     if (!Number.isFinite(v)) return
-    this.rewindKeepMs = Math.max(250, Math.min(this.rewindDurationMs, v))
+    this.rewindKeepMs = Math.max(0, Math.min(this.rewindDurationMs, Math.round(v)))
+    // Keep a tiny floor so apply never seals an empty take.
+    if (this.rewindKeepMs < 250 && this.rewindDurationMs >= 250) {
+      this.rewindKeepMs = 250
+      this.rewindRange.value = '250'
+    }
     this.updateRewindTimeLabel()
     this.seekRewindPreview()
   }
@@ -2123,11 +2282,15 @@ class TabOverlay {
   }
 
   private seekRewindPreview() {
-    if (!this.rewindVideo.classList.contains('is-visible')) return
+    if (!this.rewindPreviewWrap.classList.contains('is-visible')) return
     const t = this.rewindKeepMs / 1000
     try {
+      this.rewindVideo.pause()
       if (Number.isFinite(this.rewindVideo.duration) && this.rewindVideo.duration > 0) {
-        this.rewindVideo.currentTime = Math.min(t, Math.max(0, this.rewindVideo.duration - 0.05))
+        this.rewindVideo.currentTime = Math.min(
+          Math.max(0, t),
+          Math.max(0, this.rewindVideo.duration - 0.05),
+        )
       } else {
         this.rewindVideo.currentTime = Math.max(0, t)
       }
