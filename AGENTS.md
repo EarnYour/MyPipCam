@@ -200,7 +200,7 @@ After setup, confirm:
 ## Agent quick start (copy-paste)
 
 ```bash
-git clone https://github.com/swmartinezdot33/MyPipCam.git
+git clone https://github.com/EarnYour/MyPipCam.git
 cd MyPipCam/apps/extension
 npm install
 cp .env.example .env.local

@@ -14,7 +14,7 @@ Please **do not** open a public GitHub issue for security vulnerabilities.
 
 Prefer one of:
 
-1. **GitHub private vulnerability advisory** — use [Report a vulnerability](https://github.com/swmartinezdot33/MyPipCam/security/advisories/new) on this repository (update the org/repo path if you are looking at a fork).
+1. **GitHub private vulnerability advisory** — use [Report a vulnerability](https://github.com/EarnYour/MyPipCam/security/advisories/new) on this repository (update the org/repo path if you are looking at a fork).
 2. **Steward contact** — [mypipcam.earnyour.com](https://mypipcam.earnyour.com) or [earnyour.com](https://earnyour.com) (EarnYour Marketing). Mention “MyPipCam security” so the report is routed correctly.
 
 Include:
