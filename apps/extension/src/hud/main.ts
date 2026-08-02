@@ -216,9 +216,18 @@ async function syncFromBackground() {
 stopBtn.addEventListener('click', () => {
   if (busy) return
   setBusy(true)
+  // Wait for SW save + library open before closing — closing early used to
+  // drop the message port mid-stop and skip openLibraryTab.
   void chrome.runtime
     .sendMessage({ type: 'STOP_LOOM_RECORDING' })
-    .then(() => window.close())
+    .then((res: { ok?: boolean; reason?: string } | undefined) => {
+      if (res && res.ok === false) {
+        setBusy(false)
+        setError(res.reason?.trim() || 'Could not stop recording.')
+        return
+      }
+      window.close()
+    })
     .catch((err: unknown) => {
       setBusy(false)
       setError(err instanceof Error ? err.message : 'Stop failed')

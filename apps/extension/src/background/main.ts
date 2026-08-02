@@ -1073,7 +1073,9 @@ async function stopLoomRecording(opts?: {
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
-  await closeHudWindow()
+  // Keep the HUD (often the STOP_LOOM_RECORDING sender) alive until save +
+  // navigation finish. Closing it first drops the message port and lets MV3
+  // suspend the SW before openLibraryTab / openEditorTab runs.
 
   // Always tear down page chrome first so Stop never leaves a stuck dock/PiP.
   await stopOverlay(tabId)
@@ -1093,6 +1095,7 @@ async function stopLoomRecording(opts?: {
       /* ignore */
     }
     await closeOffscreen()
+    await closeHudWindow()
     return { ok: true }
   }
 
@@ -1110,6 +1113,7 @@ async function stopLoomRecording(opts?: {
         /* ignore */
       }
       await closeOffscreen()
+      await closeHudWindow()
       // Treat empty/not-recording as a soft success after teardown — capture is dead.
       if (
         result?.reason === 'not-recording' ||
@@ -1125,27 +1129,35 @@ async function stopLoomRecording(opts?: {
 
     await closeOffscreen()
 
-    // Upload in the SW after offscreen is closed — chrome.identity is reliable here
-    // and avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP.
+    // Open Library / Editor immediately after local save — never wait on Drive.
+    if (result.id && opts?.openEditor) {
+      try {
+        await openEditorTab(result.id, 'trim')
+      } catch (err) {
+        console.warn('[MyPipCam] openEditorTab after stop failed:', err)
+        try {
+          await openLibraryTab(result.id)
+        } catch (libErr) {
+          console.warn('[MyPipCam] openLibraryTab fallback after stop failed:', libErr)
+        }
+      }
+    } else if (result.id) {
+      try {
+        await openLibraryTab(result.id)
+      } catch (err) {
+        console.warn('[MyPipCam] openLibraryTab after stop failed:', err)
+      }
+    }
+
+    // Upload in the SW after navigation — chrome.identity is reliable here and
+    // avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP. Fire-and-forget.
     if (result.id && isSafeRecordingId(result.id)) {
       void runDriveAutoUploadById(result.id).catch((err) => {
         console.error('[MyPipCam] Drive auto-upload failed:', err)
       })
     }
 
-    if (result.id && opts?.openEditor) {
-      try {
-        await openEditorTab(result.id, 'trim')
-      } catch {
-        await openLibraryTab(result.id)
-      }
-    } else {
-      const settings = await loadPipSettings()
-      if (settings.openLibraryOnFinish && result.id) {
-        await openLibraryTab(result.id)
-      }
-    }
-
+    await closeHudWindow()
     return { ok: true, id: result.id }
   } catch (err) {
     try {
@@ -1154,6 +1166,7 @@ async function stopLoomRecording(opts?: {
       /* ignore */
     }
     await closeOffscreen()
+    await closeHudWindow()
     return {
       ok: false,
       reason: errMessage(err, 'Could not stop recording.'),
@@ -1819,7 +1832,7 @@ function dispatchExtensionMessage(
           openEditor: Boolean(message.openEditor),
           fallbackTabId: sender.tab?.id,
         })
-        sendResponse(result)
+        replySafe(sendResponse, result)
       } catch (err) {
         // Last-resort teardown so Stop never leaves capture hanging.
         try {
@@ -1827,7 +1840,7 @@ function dispatchExtensionMessage(
         } catch {
           /* ignore */
         }
-        sendResponse({
+        replySafe(sendResponse, {
           ok: false,
           reason: errMessage(err, 'Could not stop recording.'),
         })

@@ -27,6 +27,23 @@ export async function openLibraryTab(
   if (openSettings) params.set('settings', '1')
   const qs = params.toString()
   const url = qs ? `${base}?${qs}` : base
+
+  // Prefer navigating an existing library tab so Stop & save feels instant.
+  try {
+    const pattern = `chrome-extension://${chrome.runtime.id}/src/library/*`
+    const existing = await chrome.tabs.query({ url: pattern })
+    const tab = existing.find((t) => typeof t.id === 'number')
+    if (tab?.id != null) {
+      await chrome.tabs.update(tab.id, { url, active: true })
+      if (tab.windowId != null) {
+        await chrome.windows.update(tab.windowId, { focused: true })
+      }
+      return tab
+    }
+  } catch {
+    /* fall through to create */
+  }
+
   return chrome.tabs.create({ url, active: true })
 }
 
