@@ -22,7 +22,7 @@ import {
 const INSTALL_KEY = '__mypipcamPipOverlayInstalled'
 const DISPATCHER_KEY = '__mypipcamPipOverlayDispatcher'
 const HANDLER_KEY = '__mypipcamPipOverlayHandle'
-const INSTALL_VERSION = 3
+const INSTALL_VERSION = 4
 type OverlayMessageHandler = (
   message: any,
   sender: chrome.runtime.MessageSender,
@@ -906,7 +906,7 @@ class TabOverlay {
   private dragging = false
   private menuOpen = false
   private camReady = false
-  private confirmAction: null | 'restart' | 'trim' = null
+  private confirmAction: null | 'restart' | 'trim' | 'discard' = null
   private confirmResolver: ((ok: boolean) => void) | null = null
 
   constructor(initial: BubbleState) {
@@ -1047,6 +1047,7 @@ class TabOverlay {
     this.dockHead = document.createElement('button')
     this.dockHead.type = 'button'
     this.dockHead.className = 'mpc-dock-head'
+    this.dockHead.dataset.mpcAction = 'toggle-expand'
     this.dockHead.title = 'More recording controls'
     this.dockHead.setAttribute('aria-expanded', 'false')
     this.dockHead.setAttribute('aria-label', 'Expand recording controls')
@@ -1071,6 +1072,7 @@ class TabOverlay {
     this.stopBtn = document.createElement('button')
     this.stopBtn.type = 'button'
     this.stopBtn.className = 'mpc-dock-btn mpc-stop'
+    this.stopBtn.dataset.mpcAction = 'stop'
     this.stopBtn.title = 'Stop & save'
     this.stopBtn.setAttribute('aria-label', 'Stop and save')
     this.stopBtn.innerHTML = iconStop()
@@ -1079,6 +1081,7 @@ class TabOverlay {
     this.pauseBtn = document.createElement('button')
     this.pauseBtn.type = 'button'
     this.pauseBtn.className = 'mpc-dock-btn'
+    this.pauseBtn.dataset.mpcAction = 'pause'
     this.pauseBtn.title = 'Pause'
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
     this.pauseBtn.innerHTML = iconPause()
@@ -1090,6 +1093,7 @@ class TabOverlay {
     this.trimBtn = document.createElement('button')
     this.trimBtn.type = 'button'
     this.trimBtn.className = 'mpc-dock-btn mpc-trim'
+    this.trimBtn.dataset.mpcAction = 'trim'
     this.trimBtn.title = 'Rewind & Trim'
     this.trimBtn.setAttribute('aria-label', 'Rewind and trim — stop and open editor')
     this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
@@ -1097,6 +1101,7 @@ class TabOverlay {
     this.restartBtn = document.createElement('button')
     this.restartBtn.type = 'button'
     this.restartBtn.className = 'mpc-dock-btn'
+    this.restartBtn.dataset.mpcAction = 'restart'
     this.restartBtn.title = 'Restart'
     this.restartBtn.setAttribute('aria-label', 'Restart recording')
     this.restartBtn.innerHTML = iconRestart()
@@ -1104,6 +1109,7 @@ class TabOverlay {
     this.discardBtn = document.createElement('button')
     this.discardBtn.type = 'button'
     this.discardBtn.className = 'mpc-dock-btn mpc-discard'
+    this.discardBtn.dataset.mpcAction = 'discard'
     this.discardBtn.title = 'Discard'
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
     this.discardBtn.innerHTML = iconTrash()
@@ -1122,10 +1128,12 @@ class TabOverlay {
     confirmActions.className = 'mpc-dock-confirm-actions'
     this.confirmCancelBtn = document.createElement('button')
     this.confirmCancelBtn.type = 'button'
+    this.confirmCancelBtn.dataset.mpcAction = 'confirm-cancel'
     this.confirmCancelBtn.textContent = 'Cancel'
     this.confirmOkBtn = document.createElement('button')
     this.confirmOkBtn.type = 'button'
     this.confirmOkBtn.className = 'mpc-confirm-ok'
+    this.confirmOkBtn.dataset.mpcAction = 'confirm-ok'
     this.confirmOkBtn.textContent = 'Confirm'
     confirmActions.append(this.confirmCancelBtn, this.confirmOkBtn)
     this.confirmEl.append(this.confirmTitle, this.confirmBody, confirmActions)
@@ -1175,47 +1183,16 @@ class TabOverlay {
     dragTarget.addEventListener('pointerdown', (e) => this.onMoveDown(e))
     this.bubble.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
 
-    this.dockHead.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      this.setDockExpanded(!this.dockExpanded)
-    })
-    this.stopBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      void this.requestStop()
-    })
-    this.pauseBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      void this.togglePause()
-    })
-    this.trimBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      void this.requestTrimAndStop()
-    })
-    this.restartBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      void this.requestRestart()
-    })
-    this.discardBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      void this.requestDiscard(false)
-    })
-    this.confirmCancelBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      this.resolveConfirm(false)
-    })
-    this.confirmOkBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      this.resolveConfirm(true)
-    })
-
+    /*
+     * Delegate dock actions on pointerdown (not click). During tabCapture,
+     * document-capture outside-dismiss + layout changes from collapse can
+     * swallow click; pointerdown matches the bubble menu pattern and stays
+     * reliable for both collapsed and expanded controls.
+     */
+    this.dock.addEventListener('pointerdown', this.onDockPointerDown)
+    // Bubble / overlay chrome outside the dock — listener is inside the closed
+    // shadow, so composedPath() still includes dock/menu nodes.
+    this.root.addEventListener('pointerdown', this.onOverlayPointerDown)
     document.addEventListener('pointerdown', this.onDocPointerDown, true)
 
     this.apply()
@@ -1261,20 +1238,95 @@ class TabOverlay {
     )
   }
 
+  /**
+   * Outside the overlay host only. Closed shadow roots omit shadow descendants
+   * from composedPath() for listeners outside the tree — never use path.includes
+   * (dock/confirm) here or every press looks "outside" and collapses the dock
+   * on pointerdown (hiding .mpc-dock-more before click can fire).
+   */
   private onDocPointerDown = (e: PointerEvent) => {
-    // Closed shadow retargets target to the host — use composedPath.
+    const host = overlayMount?.host
+    if (
+      host &&
+      (e.target === host || (e.target instanceof Node && host.contains(e.target)))
+    ) {
+      return
+    }
+    if (this.menuOpen) this.closeMenu()
+    if (this.confirmAction) {
+      this.resolveConfirm(false)
+      return
+    }
+    if (this.dockExpanded) this.setDockExpanded(false)
+  }
+
+  /** Inside closed shadow — composedPath includes dock / menu / confirm nodes. */
+  private onOverlayPointerDown = (e: PointerEvent) => {
     const path = e.composedPath()
     if (this.menuOpen && this.menu && this.menuBtn) {
       if (!path.includes(this.menu) && !path.includes(this.menuBtn)) {
         this.closeMenu()
       }
     }
-    if (this.confirmAction && !path.includes(this.confirmEl) && !path.includes(this.dock)) {
-      this.resolveConfirm(false)
+    if (this.confirmAction) {
+      if (!path.includes(this.confirmEl)) this.resolveConfirm(false)
       return
     }
-    if (this.dockExpanded && !this.confirmAction && !path.includes(this.dock)) {
+    if (this.dockExpanded && !path.includes(this.dock)) {
       this.setDockExpanded(false)
+    }
+  }
+
+  private onDockPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    const raw = e.target
+    if (!(raw instanceof Element)) return
+    const btn = raw.closest('button[data-mpc-action]')
+    if (!(btn instanceof HTMLButtonElement) || !this.dock.contains(btn)) return
+    if (btn.disabled) return
+
+    const action = btn.dataset.mpcAction
+    if (!action) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    // Pending confirm must not soft-lock other dock buttons (Stop/Pause/…).
+    if (
+      this.confirmAction &&
+      action !== 'confirm-ok' &&
+      action !== 'confirm-cancel'
+    ) {
+      this.resolveConfirm(false)
+    }
+
+    switch (action) {
+      case 'toggle-expand':
+        this.setDockExpanded(!this.dockExpanded)
+        break
+      case 'stop':
+        void this.requestStop()
+        break
+      case 'pause':
+        void this.togglePause()
+        break
+      case 'trim':
+        void this.requestTrimAndStop()
+        break
+      case 'restart':
+        void this.requestRestart()
+        break
+      case 'discard':
+        void this.requestDiscard(false)
+        break
+      case 'confirm-ok':
+        this.resolveConfirm(true)
+        break
+      case 'confirm-cancel':
+        this.resolveConfirm(false)
+        break
+      default:
+        break
     }
   }
 
@@ -1794,7 +1846,7 @@ class TabOverlay {
   }
 
   private askDockConfirm(
-    action: 'restart' | 'trim',
+    action: 'restart' | 'trim' | 'discard',
     title: string,
     body: string,
   ): Promise<boolean> {
@@ -1803,7 +1855,8 @@ class TabOverlay {
     this.confirmAction = action
     this.confirmTitle.textContent = title
     this.confirmBody.textContent = body
-    this.confirmOkBtn.textContent = action === 'restart' ? 'Restart' : 'Trim'
+    this.confirmOkBtn.textContent =
+      action === 'restart' ? 'Restart' : action === 'trim' ? 'Trim' : 'Discard'
     this.confirmEl.classList.add('is-open')
     this.confirmEl.setAttribute('aria-label', title)
     this.confirmOkBtn.focus()
@@ -1814,11 +1867,14 @@ class TabOverlay {
 
   private resolveConfirm(ok: boolean) {
     const resolver = this.confirmResolver
-    this.hideConfirm()
+    this.confirmAction = null
+    this.confirmResolver = null
+    this.confirmEl.classList.remove('is-open')
     resolver?.(ok)
   }
 
   private hideConfirm() {
+    // Drop pending confirm without resolving (caller is replacing/tearing down).
     this.confirmAction = null
     this.confirmResolver = null
     this.confirmEl.classList.remove('is-open')
@@ -1851,16 +1907,30 @@ class TabOverlay {
 
   private async requestDiscard(fromCountdown: boolean) {
     if (this.restarting && !fromCountdown) return
+    if (this.stopping || this.confirmAction) return
+    if (!fromCountdown && this.state.phase !== 'countdown') {
+      this.setDockExpanded(true)
+      const ok = await this.askDockConfirm(
+        'discard',
+        'Discard recording?',
+        'This take will be deleted and not saved.',
+      )
+      if (!ok) return
+    }
     if (this.countdownId != null) {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
+    this.stopping = true
+    this.setDockBusy(true)
     try {
       await chrome.runtime.sendMessage({
         type: 'DISCARD_LOOM_RECORDING',
         fromCountdown,
       })
     } catch {
+      this.stopping = false
+      this.setDockBusy(false)
       this.dispose()
     }
   }
@@ -2074,6 +2144,8 @@ class TabOverlay {
     if (this.toastTimerId != null) window.clearTimeout(this.toastTimerId)
     this.clearCollapseTimer()
     this.hideConfirm()
+    this.dock.removeEventListener('pointerdown', this.onDockPointerDown)
+    this.root.removeEventListener('pointerdown', this.onOverlayPointerDown)
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
     window.removeEventListener('message', this.onPipMessage)
     void chrome.runtime.sendMessage({
