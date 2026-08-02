@@ -47,7 +47,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         let recordItem = NSMenuItem(
-            title: "Record to Cloud…",
+            title: "Record…",
             action: #selector(toggleRecord),
             keyEquivalent: "r"
         )
@@ -143,7 +143,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let stamp = String(format: "%d:%02d", s / 60, s % 60)
             recordItem?.title = "Stop Recording (\(stamp))"
         } else {
-            recordItem?.title = "Record to Cloud…"
+            recordItem?.title = "Record…"
         }
     }
 

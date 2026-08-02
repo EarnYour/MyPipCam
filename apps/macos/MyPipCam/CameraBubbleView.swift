@@ -181,7 +181,7 @@ struct CameraBubbleView: View {
                     Task { await recording.stopRecording(reveal: true) }
                 }
             } else {
-                Button("Record to Cloud…") {
+                Button("Record…") {
                     recording.openSetup()
                 }
             }
@@ -229,7 +229,7 @@ struct CameraBubbleView: View {
                             : .white
                     )
             }
-            .help(recording.isRecording ? "Stop recording" : "Record to Cloud")
+            .help(recording.isRecording ? "Stop recording" : "Record")
 
             Menu {
                 ForEach(camera.devices, id: \.uniqueID) { device in
@@ -323,7 +323,7 @@ struct CameraBubbleView: View {
                 Task { await recording.stopRecording(reveal: true) }
             }
         } else {
-            Button("Record to Cloud…") {
+            Button("Record…") {
                 recording.openSetup()
             }
         }
