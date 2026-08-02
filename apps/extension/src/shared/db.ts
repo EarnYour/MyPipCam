@@ -202,7 +202,15 @@ async function tryDriveUploadAfterSave(record: RecordingRecord): Promise<void> {
 
 export async function updateRecordingDriveMeta(
   id: string,
-  patch: Pick<RecordingMeta, 'driveFileId' | 'driveWebViewLink' | 'driveShared'>,
+  patch: Pick<
+    RecordingMeta,
+    | 'driveFileId'
+    | 'driveWebViewLink'
+    | 'driveShared'
+    | 'shareId'
+    | 'shareViewCount'
+    | 'shareLastViewedAt'
+  >,
 ): Promise<void> {
   const root = await folderRootQuiet()
   if (root) {
@@ -221,6 +229,13 @@ export async function updateRecordingDriveMeta(
     driveFileId: patch.driveFileId ?? rec.driveFileId,
     driveWebViewLink: patch.driveWebViewLink ?? rec.driveWebViewLink,
     driveShared: patch.driveShared ?? rec.driveShared,
+    shareId: patch.shareId ?? rec.shareId,
+    shareViewCount:
+      patch.shareViewCount !== undefined ? patch.shareViewCount : rec.shareViewCount,
+    shareLastViewedAt:
+      patch.shareLastViewedAt !== undefined
+        ? patch.shareLastViewedAt
+        : rec.shareLastViewedAt,
   })
 }
 

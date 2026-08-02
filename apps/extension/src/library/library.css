@@ -20,6 +20,25 @@ body {
   flex-direction: column;
 }
 
+.recording-card-clickable {
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.recording-card-clickable:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.recording-card-clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .recording-card.highlight {
   outline: 2px solid var(--color-primary);
 }
@@ -93,50 +112,129 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  justify-content: flex-end;
 }
 
 .card-actions button {
-  padding: 0.4rem 0.65rem;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
 }
 
-.player-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(17, 19, 18, 0.72);
-  display: grid;
-  place-items: center;
-  z-index: 40;
-  padding: 1rem;
+.card-action-delete {
+  opacity: 0.72;
 }
 
-.player-modal-inner {
-  width: min(960px, 100%);
-  background: var(--color-bg-secondary);
-  color: var(--color-on-dark);
-  border-radius: var(--radius);
-  border: 1px solid color-mix(in srgb, var(--color-on-dark) 12%, transparent);
-  overflow: hidden;
+.recording-card-clickable:hover .card-action-delete {
+  opacity: 1;
 }
 
-.player-modal-inner video {
-  width: 100%;
-  max-height: 70vh;
-  background: #000;
-  display: block;
-}
-
-.player-modal-bar {
+/* Loom-style recording detail */
+.recording-detail {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+.detail-toolbar {
+  display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
 }
 
-.player-modal-bar button:not(.primary):not(.danger) {
-  background: var(--bg-soft);
-  color: var(--color-on-dark);
+.detail-player {
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 16%, transparent);
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+}
+
+.detail-player video {
+  width: 100%;
+  height: 100%;
+  max-height: min(70vh, 640px);
+  background: #000;
+  display: block;
+  object-fit: contain;
+}
+
+.detail-player-placeholder {
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0 0.15rem 1.5rem;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.detail-title .inline-rename-btn {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.detail-title.inline-rename-input {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+}
+
+.detail-views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.85rem;
+  min-height: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.detail-views-count {
+  font-weight: 600;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.detail-actions .button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.95rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-border) 8%, var(--color-bg));
+  color: var(--color-text);
+  text-decoration: none;
+  font: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.detail-actions .button-link:hover {
+  background: color-mix(in srgb, var(--color-secondary) 28%, var(--color-bg));
 }
 
 .search-row {
@@ -265,13 +363,55 @@ body {
   margin: 0 0 1rem;
   padding: 0.85rem 1rem;
   border-radius: var(--radius);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, #111312);
+  color: #fafaf7;
+}
+
+.library-banner strong {
+  color: #fafaf7;
+}
+
+.library-banner .muted,
+.library-banner code {
+  color: rgba(250, 250, 247, 0.72);
+}
+
+.library-banner a {
+  color: var(--color-primary);
+}
+
+.library-banner button:not(.primary):not(.danger) {
+  background: var(--bg-soft);
+  color: #fafaf7;
+  border: 1px solid color-mix(in srgb, #fafaf7 28%, transparent);
+}
+
+.library-banner button:not(.primary):not(.danger):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-secondary) 22%, var(--bg-soft));
+}
+
+.library-banner button.ghost {
+  background: transparent;
+  color: #fafaf7;
+  border: 1px solid color-mix(in srgb, #fafaf7 35%, transparent);
+}
+
+.library-banner button.ghost:hover:not(:disabled) {
+  color: #fafaf7;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-primary);
+}
+
+.library-banner button.primary {
+  background: var(--color-primary);
+  color: #fff;
 }
 
 .library-banner-ok {
-  border-color: color-mix(in srgb, var(--color-secondary) 40%, transparent);
-  background: color-mix(in srgb, var(--color-secondary) 12%, var(--color-bg-secondary));
+  border-color: color-mix(in srgb, var(--color-secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 14%, #111312);
+  color: #fafaf7;
 }
 
 .folder-status {
@@ -343,6 +483,20 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.views-badge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  margin: 0.15rem 0 0.55rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.views-badge-sub {
+  opacity: 0.85;
 }
 
 .settings-panel code {

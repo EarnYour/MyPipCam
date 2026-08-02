@@ -33,6 +33,9 @@ type DiskMeta = {
   driveFileId?: string
   driveWebViewLink?: string
   driveShared?: boolean
+  shareId?: string
+  shareViewCount?: number
+  shareLastViewedAt?: string | null
 }
 
 interface HandleDB extends DBSchema {
@@ -73,6 +76,9 @@ function toDiskMeta(rec: RecordingMeta | RecordingRecord): DiskMeta {
   if (rec.driveFileId) meta.driveFileId = rec.driveFileId
   if (rec.driveWebViewLink) meta.driveWebViewLink = rec.driveWebViewLink
   if (rec.driveShared != null) meta.driveShared = rec.driveShared
+  if (rec.shareId) meta.shareId = rec.shareId
+  if (rec.shareViewCount != null) meta.shareViewCount = rec.shareViewCount
+  if (rec.shareLastViewedAt !== undefined) meta.shareLastViewedAt = rec.shareLastViewedAt
   return meta
 }
 
@@ -286,13 +292,26 @@ async function readRecordingFromDir(
     driveFileId: meta.driveFileId,
     driveWebViewLink: meta.driveWebViewLink,
     driveShared: meta.driveShared,
+    shareId: meta.shareId,
+    shareViewCount: meta.shareViewCount,
+    shareLastViewedAt: meta.shareLastViewedAt,
   }
 }
 
-/** Patch Drive fields in meta.json without rewriting the video blob. */
+export type DriveShareMetaPatch = Pick<
+  RecordingMeta,
+  | 'driveFileId'
+  | 'driveWebViewLink'
+  | 'driveShared'
+  | 'shareId'
+  | 'shareViewCount'
+  | 'shareLastViewedAt'
+>
+
+/** Patch Drive / share fields in meta.json without rewriting the video blob. */
 export async function updateDriveMetaInFolder(
   id: string,
-  patch: Pick<RecordingMeta, 'driveFileId' | 'driveWebViewLink' | 'driveShared'>,
+  patch: DriveShareMetaPatch,
   root?: FileSystemDirectoryHandle,
 ): Promise<void> {
   if (!isSafeRecordingId(id)) throw new Error('Invalid recording id')
@@ -309,6 +328,9 @@ export async function updateDriveMetaInFolder(
   if (patch.driveFileId !== undefined) next.driveFileId = patch.driveFileId
   if (patch.driveWebViewLink !== undefined) next.driveWebViewLink = patch.driveWebViewLink
   if (patch.driveShared !== undefined) next.driveShared = patch.driveShared
+  if (patch.shareId !== undefined) next.shareId = patch.shareId
+  if (patch.shareViewCount !== undefined) next.shareViewCount = patch.shareViewCount
+  if (patch.shareLastViewedAt !== undefined) next.shareLastViewedAt = patch.shareLastViewedAt
 
   await writeTextFile(dir, 'meta.json', JSON.stringify(next, null, 2) + '\n')
 }

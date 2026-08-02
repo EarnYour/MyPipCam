@@ -25,6 +25,12 @@ export type RecordingMeta = {
   driveFileId?: string
   driveWebViewLink?: string
   driveShared?: boolean
+  /** MyPipCam watch-page share id (`mypipcam.earnyour.com/w/{shareId}`). */
+  shareId?: string
+  /** Cached view count from the share API (refreshed on Library load). */
+  shareViewCount?: number
+  /** ISO timestamp of last watch-page open. */
+  shareLastViewedAt?: string | null
   /** Present only when the item exists on Drive but not locally (other device). */
   driveOnly?: boolean
 }
