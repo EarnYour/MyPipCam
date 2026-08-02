@@ -1,4 +1,5 @@
 import {
+  canvasBorderLineWidth,
   captureQualitySize,
   cursorCaptureConstraint,
   normalizeCaptureQuality,
@@ -82,6 +83,7 @@ function drawBubbleCover(
   radius: number,
   mirror: boolean,
   borderColor: string,
+  borderWidth: number,
   shadow: boolean,
   shape: BubbleShape = 'circle',
   filterCss = 'none',
@@ -92,6 +94,7 @@ function drawBubbleCover(
   const left = cx - radius
   const top = cy - radius
   const cornerR = shape === 'square' ? size * SQUARE_CORNER_FRACTION : radius
+  const strokeW = canvasBorderLineWidth(borderWidth, radius)
 
   ctx.save()
   if (shadow) {
@@ -127,7 +130,7 @@ function drawBubbleCover(
   ctx.filter = 'none'
   ctx.restore()
 
-  if (borderColor !== 'transparent') {
+  if (borderColor !== 'transparent' && strokeW > 0) {
     ctx.save()
     if (shape === 'square') {
       roundedRectPath(ctx, left, top, size, size, cornerR)
@@ -136,7 +139,7 @@ function drawBubbleCover(
       ctx.arc(cx, cy, radius, 0, Math.PI * 2)
     }
     ctx.strokeStyle = borderColor
-    ctx.lineWidth = Math.max(3, radius * 0.06)
+    ctx.lineWidth = strokeW
     ctx.stroke()
     ctx.restore()
   }
@@ -323,6 +326,7 @@ export async function startCapture(settings: PipSettings): Promise<{
         radius,
         liveSettings.mirror,
         liveSettings.borderColor,
+        liveSettings.borderWidth,
         liveSettings.shadow,
         liveSettings.bubbleShape === 'square' ? 'square' : 'circle',
         cameraFilterCss(liveSettings.cameraFilter),

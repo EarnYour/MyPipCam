@@ -6,7 +6,12 @@ import {
   loadPipSettings,
   savePipSettings,
 } from '../shared/settings'
-import { BORDER_PRESETS, formatDuration, type PipSettings } from '../shared/types'
+import {
+  BORDER_PRESETS,
+  BORDER_WIDTH_OPTIONS,
+  formatDuration,
+  type PipSettings,
+} from '../shared/types'
 import {
   captureThumbnail,
   createRecorder,
@@ -77,6 +82,7 @@ export function RecorderApp() {
         size: bubbleApiRef.current?.getBubbleRect().size ?? next.bubbleSize,
         mirror: next.mirror,
         borderColor: next.borderColor,
+        borderWidth: next.borderWidth,
         shadow: next.shadow,
         bubbleShape: next.bubbleShape,
         backgroundEffect: next.backgroundEffect,
@@ -103,6 +109,7 @@ export function RecorderApp() {
           size: rect?.size ?? next.bubbleSize,
           mirror: next.mirror,
           borderColor: next.borderColor,
+          borderWidth: next.borderWidth,
           shadow: next.shadow,
           bubbleShape: next.bubbleShape,
           backgroundEffect: next.backgroundEffect,
@@ -212,6 +219,7 @@ export function RecorderApp() {
             size: rect.size,
             mirror: settings.mirror,
             borderColor: settings.borderColor,
+            borderWidth: settings.borderWidth,
             shadow: settings.shadow,
             bubbleShape: settings.bubbleShape,
             backgroundEffect: settings.backgroundEffect,
@@ -309,6 +317,7 @@ export function RecorderApp() {
       size,
       mirror: settings.mirror,
       borderColor: settings.borderColor,
+      borderWidth: settings.borderWidth,
       shadow: settings.shadow,
       bubbleShape: settings.bubbleShape,
       backgroundEffect: settings.backgroundEffect,
@@ -420,6 +429,19 @@ export function RecorderApp() {
               />
             ))}
           </div>
+
+          <label className="hud-size" title="Border thickness">
+            <span>Border</span>
+            <input
+              type="range"
+              min={0}
+              max={16}
+              step={1}
+              value={settings.borderWidth}
+              disabled={phase === 'saving'}
+              onChange={(e) => void patchSettings({ borderWidth: Number(e.target.value) })}
+            />
+          </label>
 
           <div className="hud-swatches" title="Bubble shape" role="radiogroup" aria-label="Bubble shape">
             <button
@@ -575,6 +597,30 @@ export function RecorderApp() {
                     }}
                   />
                 </label>
+                <label style={{ marginTop: 8 }}>
+                  Thickness ({settings.borderWidth}px)
+                  <input
+                    type="range"
+                    min={0}
+                    max={16}
+                    step={1}
+                    value={settings.borderWidth}
+                    onChange={(e) => void patchSettings({ borderWidth: Number(e.target.value) })}
+                  />
+                </label>
+                <div className="swatches" style={{ marginTop: 6 }} role="radiogroup" aria-label="Border thickness presets">
+                  {BORDER_WIDTH_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`swatch shape-swatch ${settings.borderWidth === opt.id ? 'active' : ''}`}
+                      title={opt.label}
+                      onClick={() => void patchSettings({ borderWidth: opt.id })}
+                    >
+                      {opt.label.slice(0, 1)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="toggles">

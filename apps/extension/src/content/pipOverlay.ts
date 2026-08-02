@@ -71,6 +71,7 @@ type BubbleState = {
   shape: BubbleShape
   mirror: boolean
   borderColor: string
+  borderWidth: number
   shadow: boolean
   backgroundEffect: BackgroundEffect
   cameraFilter: CameraFilterId
@@ -78,6 +79,11 @@ type BubbleState = {
   recordMode: RecordMode
   cameraDeviceId: string | null
   phase: 'countdown' | 'recording' | 'paused'
+}
+
+function normalizeBorderWidth(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 3
+  return Math.min(16, Math.max(0, Math.round(value)))
 }
 
 const HOST_ID = 'mypipcam-tab-overlay-root'
@@ -180,7 +186,7 @@ function overlayStyles(): string {
       z-index: 2147483647 !important;
       user-select: none;
       -webkit-user-select: none;
-      border: 3px solid #fff;
+      border: 3px solid #fff; /* thickness overridden via inline style */
       background: #111312 !important;
       opacity: 1 !important;
       visibility: visible !important;
@@ -1167,6 +1173,7 @@ class TabOverlay {
     this.state = {
       ...initial,
       borderColor: sanitizeCssColor(initial.borderColor),
+      borderWidth: normalizeBorderWidth(initial.borderWidth),
       // Clamp size so Tab+Cam never mounts a zero/near-zero bubble.
       size: clamp(initial.size || 0.18, SIZE_MIN, SIZE_MAX),
       x: clamp(initial.x ?? 0.82, 0.05, 0.95),
@@ -1249,6 +1256,15 @@ class TabOverlay {
       const effectBlur = document.createElement('button')
       effectBlur.type = 'button'
       effectBlur.textContent = 'BG: Blur'
+      const borderThin = document.createElement('button')
+      borderThin.type = 'button'
+      borderThin.textContent = 'Border: Thin'
+      const borderMed = document.createElement('button')
+      borderMed.type = 'button'
+      borderMed.textContent = 'Border: Med'
+      const borderThick = document.createElement('button')
+      borderThick.type = 'button'
+      borderThick.textContent = 'Border: Thick'
       this.menu.append(
         sizeSm,
         sizeMd,
@@ -1257,6 +1273,9 @@ class TabOverlay {
         shapeSquare,
         effectNone,
         effectBlur,
+        borderThin,
+        borderMed,
+        borderThick,
       )
 
       // pointerdown (not click): document capture closeMenu + drag surface can
@@ -1275,6 +1294,9 @@ class TabOverlay {
       bindMenuAction(shapeSquare, () => this.setShape('square'))
       bindMenuAction(effectNone, () => this.setBackgroundEffect('none'))
       bindMenuAction(effectBlur, () => this.setBackgroundEffect('blur'))
+      bindMenuAction(borderThin, () => this.setBorderWidth(2))
+      bindMenuAction(borderMed, () => this.setBorderWidth(5))
+      bindMenuAction(borderThick, () => this.setBorderWidth(8))
       this.menuBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -1816,6 +1838,9 @@ class TabOverlay {
     }
     if (next.borderColor != null) {
       next.borderColor = sanitizeCssColor(next.borderColor)
+    }
+    if (next.borderWidth != null) {
+      next.borderWidth = normalizeBorderWidth(next.borderWidth)
     }
     if (next.cameraFilter != null) {
       next.cameraFilter = normalizeCameraFilter(next.cameraFilter)
@@ -2574,6 +2599,9 @@ class TabOverlay {
       this.bubble.style.setProperty('opacity', '1', 'important')
       this.bubble.style.setProperty('visibility', 'visible', 'important')
     }
+    const bw = normalizeBorderWidth(this.state.borderWidth)
+    this.bubble.style.borderWidth = `${bw}px`
+    this.bubble.style.borderStyle = bw > 0 ? 'solid' : 'none'
     this.bubble.style.borderColor =
       this.state.borderColor === 'transparent' ? 'rgba(255,255,255,0.55)' : this.state.borderColor
     this.bubble.style.boxShadow = this.state.shadow
@@ -2645,6 +2673,20 @@ class TabOverlay {
       void chrome.runtime.sendMessage({
         type: 'LOOM_BUBBLE_EFFECT',
         backgroundEffect: effect,
+      })
+    } catch {
+      /* SW asleep — local visual already updated */
+    }
+    this.closeMenu()
+  }
+
+  private setBorderWidth(width: number) {
+    this.state.borderWidth = normalizeBorderWidth(width)
+    this.apply()
+    try {
+      void chrome.runtime.sendMessage({
+        type: 'LOOM_BUBBLE_BORDER',
+        borderWidth: this.state.borderWidth,
       })
     } catch {
       /* SW asleep — local visual already updated */
@@ -2808,6 +2850,7 @@ window[HANDLER_KEY] = (message, _sender, sendResponse) => {
         shape: message.bubbleShape === 'square' ? 'square' : 'circle',
         mirror: message.mirror ?? true,
         borderColor: sanitizeCssColor(message.borderColor ?? '#ffffff'),
+        borderWidth: normalizeBorderWidth(message.borderWidth),
         shadow: message.shadow ?? true,
         backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
         cameraFilter: normalizeCameraFilter(message.cameraFilter),
@@ -2949,6 +2992,9 @@ window[HANDLER_KEY] = (message, _sender, sendResponse) => {
     }
     if (typeof message.mirror === 'boolean') patch.mirror = message.mirror
     if (message.borderColor != null) patch.borderColor = message.borderColor
+    if (typeof message.borderWidth === 'number' && Number.isFinite(message.borderWidth)) {
+      patch.borderWidth = message.borderWidth
+    }
     if (typeof message.shadow === 'boolean') patch.shadow = message.shadow
     if (message.cameraDeviceId === null || typeof message.cameraDeviceId === 'string') {
       patch.cameraDeviceId = message.cameraDeviceId

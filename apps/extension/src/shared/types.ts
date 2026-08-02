@@ -93,6 +93,11 @@ export type PipSettings = {
   bubbleSize: number
   bubbleShape: BubbleShape
   borderColor: string
+  /**
+   * Camera bubble border thickness in CSS pixels (0 = no border).
+   * Applied on the live overlay / advanced preview; advanced compositor scales with bubble radius.
+   */
+  borderWidth: number
   shadow: boolean
   mirror: boolean
   /** Person-sharp background blur (MediaPipe selfie segmenter). */
@@ -148,6 +153,34 @@ export function captureQualitySize(quality: CaptureQuality): { width: number; he
     : { width: 3840, height: 2160 }
 }
 
+/** Border thickness presets (CSS px) shown in Effects / overlay / advanced recorder. */
+export const BORDER_WIDTH_OPTIONS = [
+  { id: 0, label: 'None' },
+  { id: 2, label: 'Thin' },
+  { id: 3, label: 'Default' },
+  { id: 5, label: 'Medium' },
+  { id: 8, label: 'Thick' },
+] as const
+
+export const BORDER_WIDTH_MIN = 0
+export const BORDER_WIDTH_MAX = 16
+
+/** Clamp / coerce stored border thickness (CSS px). Missing → default 3. */
+export function normalizeBorderWidth(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 3
+  return Math.min(BORDER_WIDTH_MAX, Math.max(BORDER_WIDTH_MIN, Math.round(value)))
+}
+
+/**
+ * Canvas stroke width for advanced compositor — scales with bubble radius so
+ * CSS px on a typical on-screen bubble (~180px) roughly matches the recording.
+ */
+export function canvasBorderLineWidth(borderWidth: number, radius: number): number {
+  const w = normalizeBorderWidth(borderWidth)
+  if (w <= 0) return 0
+  return w * Math.max(1, radius * 0.02)
+}
+
 export const DEFAULT_PIP_SETTINGS: PipSettings = {
   cameraDeviceId: null,
   micDeviceId: null,
@@ -157,6 +190,7 @@ export const DEFAULT_PIP_SETTINGS: PipSettings = {
   bubbleSize: 0.18,
   bubbleShape: 'circle',
   borderColor: '#ffffff',
+  borderWidth: 3,
   shadow: true,
   mirror: true,
   backgroundEffect: 'none',

@@ -28,7 +28,7 @@ import {
   isTrustedExtensionSender,
   sanitizeCssColor,
 } from '../shared/security'
-import type { RecordMode } from '../shared/types'
+import { normalizeBorderWidth, type RecordMode } from '../shared/types'
 
 /** Short-lived tokens allowing the WAR PiP iframe to start the camera. */
 const PIP_TOKEN_TTL_MS = 10 * 60 * 1000
@@ -896,6 +896,7 @@ async function startLoomRecording(
         size: settings.bubbleSize,
         mirror: settings.mirror,
         borderColor: settings.borderColor,
+        borderWidth: settings.borderWidth,
         shadow: settings.shadow,
         bubbleShape: settings.bubbleShape,
         backgroundEffect: settings.backgroundEffect,
@@ -2177,6 +2178,39 @@ function dispatchExtensionMessage(
     return true
   }
 
+  if (message?.type === 'LOOM_BUBBLE_BORDER') {
+    const patch: {
+      borderColor?: string
+      borderWidth?: number
+      shadow?: boolean
+      mirror?: boolean
+    } = {}
+    if (message.borderColor != null) {
+      patch.borderColor = sanitizeCssColor(message.borderColor)
+    }
+    if (typeof message.borderWidth === 'number' && Number.isFinite(message.borderWidth)) {
+      patch.borderWidth = normalizeBorderWidth(message.borderWidth)
+    }
+    if (typeof message.shadow === 'boolean') patch.shadow = message.shadow
+    if (typeof message.mirror === 'boolean') patch.mirror = message.mirror
+    void (async () => {
+      if (Object.keys(patch).length > 0) await savePipSettings(patch)
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId && Object.keys(patch).length > 0) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            ...patch,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true, ...patch })
+    })()
+    return true
+  }
+
   if (message?.type === 'LOOM_TAB_ENDED') {
     void stopLoomRecording()
     sendResponse({ ok: true })
@@ -2206,6 +2240,7 @@ function dispatchExtensionMessage(
           size: message.size,
           mirror: message.mirror,
           borderColor: sanitizeCssColor(message.borderColor),
+          borderWidth: normalizeBorderWidth(message.borderWidth),
           shadow: message.shadow,
           bubbleShape: message.bubbleShape,
           backgroundEffect: message.backgroundEffect,
@@ -2244,6 +2279,10 @@ function dispatchExtensionMessage(
           size: message.size,
           mirror: message.mirror,
           borderColor: sanitizeCssColor(message.borderColor),
+          borderWidth:
+            typeof message.borderWidth === 'number'
+              ? normalizeBorderWidth(message.borderWidth)
+              : undefined,
           shadow: message.shadow,
           bubbleShape: message.bubbleShape,
           backgroundEffect: message.backgroundEffect,

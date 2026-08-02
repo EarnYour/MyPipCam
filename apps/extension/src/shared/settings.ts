@@ -5,12 +5,52 @@ import {
 } from './cameraFilters'
 import {
   DEFAULT_PIP_SETTINGS,
+  normalizeBorderWidth,
   normalizeCaptureQuality,
+  type BubbleShape,
   type PipSettings,
 } from './types'
 import { sanitizeCssColor } from './security'
 
 const KEY = 'pipSettings'
+
+function clampNorm(n: unknown, min: number, max: number, fallback: number): number {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
+}
+
+function normalizeBubbleShape(value: unknown): BubbleShape {
+  return value === 'square' ? 'square' : 'circle'
+}
+
+function normalizeLoaded(raw: PipSettings): PipSettings {
+  return {
+    ...raw,
+    cameraDeviceId:
+      raw.cameraDeviceId === null || typeof raw.cameraDeviceId === 'string'
+        ? raw.cameraDeviceId
+        : null,
+    micDeviceId:
+      raw.micDeviceId === null || typeof raw.micDeviceId === 'string' ? raw.micDeviceId : null,
+    recordMode:
+      raw.recordMode === 'screen' || raw.recordMode === 'cam' || raw.recordMode === 'screen-cam'
+        ? raw.recordMode
+        : DEFAULT_PIP_SETTINGS.recordMode,
+    bubbleX: clampNorm(raw.bubbleX, 0.05, 0.95, DEFAULT_PIP_SETTINGS.bubbleX),
+    bubbleY: clampNorm(raw.bubbleY, 0.05, 0.95, DEFAULT_PIP_SETTINGS.bubbleY),
+    bubbleSize: clampNorm(raw.bubbleSize, 0.1, 0.35, DEFAULT_PIP_SETTINGS.bubbleSize),
+    bubbleShape: normalizeBubbleShape(raw.bubbleShape),
+    borderColor: sanitizeCssColor(raw.borderColor, DEFAULT_PIP_SETTINGS.borderColor),
+    borderWidth: normalizeBorderWidth(raw.borderWidth),
+    shadow: raw.shadow !== false,
+    mirror: raw.mirror !== false,
+    backgroundEffect: raw.backgroundEffect === 'blur' ? 'blur' : 'none',
+    openLibraryOnFinish: raw.openLibraryOnFinish !== false,
+    // Older sync blobs omit the key — keep historical default (cursor on).
+    captureCursor: raw.captureCursor !== false,
+    captureQuality: normalizeCaptureQuality(raw.captureQuality),
+  }
+}
 
 export async function loadPipSettings(): Promise<PipSettings> {
   const [result, localFilter] = await Promise.all([
@@ -22,14 +62,7 @@ export async function loadPipSettings(): Promise<PipSettings> {
   const cameraFilter = isCameraFilterId(localFilter.cameraFilter)
     ? localFilter.cameraFilter
     : normalizeCameraFilter(raw.cameraFilter)
-  return {
-    ...raw,
-    borderColor: sanitizeCssColor(raw.borderColor, DEFAULT_PIP_SETTINGS.borderColor),
-    cameraFilter,
-    // Older sync blobs omit the key — keep historical default (cursor on).
-    captureCursor: raw.captureCursor !== false,
-    captureQuality: normalizeCaptureQuality(raw.captureQuality),
-  }
+  return normalizeLoaded({ ...raw, cameraFilter })
 }
 
 export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipSettings> {
@@ -41,6 +74,33 @@ export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipS
   const next = { ...current, ...clean }
   if (clean.borderColor !== undefined) {
     next.borderColor = sanitizeCssColor(clean.borderColor, current.borderColor)
+  }
+  if (clean.borderWidth !== undefined) {
+    next.borderWidth = normalizeBorderWidth(clean.borderWidth)
+  }
+  if (clean.bubbleShape !== undefined) {
+    next.bubbleShape = normalizeBubbleShape(clean.bubbleShape)
+  }
+  if (clean.bubbleX !== undefined) {
+    next.bubbleX = clampNorm(clean.bubbleX, 0.05, 0.95, current.bubbleX)
+  }
+  if (clean.bubbleY !== undefined) {
+    next.bubbleY = clampNorm(clean.bubbleY, 0.05, 0.95, current.bubbleY)
+  }
+  if (clean.bubbleSize !== undefined) {
+    next.bubbleSize = clampNorm(clean.bubbleSize, 0.1, 0.35, current.bubbleSize)
+  }
+  if (clean.backgroundEffect !== undefined) {
+    next.backgroundEffect = clean.backgroundEffect === 'blur' ? 'blur' : 'none'
+  }
+  if (clean.shadow !== undefined) {
+    next.shadow = clean.shadow !== false
+  }
+  if (clean.mirror !== undefined) {
+    next.mirror = clean.mirror !== false
+  }
+  if (clean.openLibraryOnFinish !== undefined) {
+    next.openLibraryOnFinish = clean.openLibraryOnFinish !== false
   }
   if (clean.cameraFilter !== undefined) {
     next.cameraFilter = await saveCameraFilter(clean.cameraFilter)
