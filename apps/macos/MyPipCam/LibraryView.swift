@@ -114,6 +114,7 @@ struct LibraryView: View {
     @State private var isRenaming = false
     @State private var confirmDelete = false
     @State private var isPreparingPlayback = false
+    @State private var prepareTask: Task<Void, Never>?
 
     private var selected: FolderRecording? {
         store.recordings.first { $0.id == selection }
@@ -341,22 +342,33 @@ struct LibraryView: View {
         selection = item.id
         stopPlayback()
         isPreparingPlayback = true
-        Task {
-            defer { isPreparingPlayback = false }
+        prepareTask = Task {
+            // Only the live task owns the flag. A superseded one still resumes
+            // when its copy finishes (cancelling doesn't abort the copy), and
+            // clearing the flag there would unlock the UI mid-prepare.
+            defer { if !Task.isCancelled { isPreparingPlayback = false } }
             do {
                 let url = try await store.scopedVideoURL(for: item.id)
-                // The user may have switched clips while the copy was running.
-                guard selected?.id == item.id else { return }
+                // The user may have switched clips — or closed the window —
+                // while the copy was running.
+                guard !Task.isCancelled, selected?.id == item.id else { return }
                 let avPlayer = AVPlayer(url: url)
                 player = avPlayer
                 avPlayer.play()
             } catch {
+                guard !Task.isCancelled else { return }
                 presentAlert(title: "Playback Failed", message: error.localizedDescription)
             }
         }
     }
 
     private func stopPlayback() {
+        // Cancel any in-flight prepare too: the window is retained after close
+        // (isReleasedWhenClosed = false), so a task that finished afterwards
+        // would start audio for a window nobody can see.
+        prepareTask?.cancel()
+        prepareTask = nil
+        isPreparingPlayback = false
         player?.pause()
         player = nil
     }
