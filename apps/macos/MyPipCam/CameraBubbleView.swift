@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CameraBubbleView: View {
@@ -6,7 +7,11 @@ struct CameraBubbleView: View {
     @ObservedObject var loginItem: LoginItemManager
     @State private var showControls = false
     @State private var showBorderPopover = false
+    @State private var dismissMonitors: [Any] = []
     var onQuit: () -> Void
+
+    /// Extra space around the bubble so the soft circular shadow isn't clipped.
+    static let shadowPadding: CGFloat = 48
 
     private var bubbleSize: CGFloat {
         CGFloat(settings.bubbleSize)
@@ -17,35 +22,61 @@ struct CameraBubbleView: View {
             bubble
                 .frame(width: bubbleSize, height: bubbleSize)
 
-            if showControls {
-                controlsBar
-                    .offset(y: bubbleSize * 0.28)
-                    .transition(.opacity)
+            Group {
+                if showControls {
+                    controlsBar
+                } else {
+                    dotsButton
+                }
             }
+            .offset(y: bubbleSize * 0.28)
+            .animation(.easeInOut(duration: 0.18), value: showControls)
         }
-        .frame(width: bubbleSize + 28, height: bubbleSize + 28)
+        .frame(
+            width: bubbleSize + Self.shadowPadding,
+            height: bubbleSize + Self.shadowPadding
+        )
         .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showControls = hovering
-            }
-        }
         .contextMenu { menuContent }
         .onAppear {
             Task { await camera.requestAccessAndStart() }
+        }
+        .onChange(of: showControls) { _, expanded in
+            if expanded {
+                installDismissMonitors()
+            } else {
+                removeDismissMonitors()
+            }
+        }
+        .onChange(of: showBorderPopover) { _, open in
+            // Keep controls open while the border popover is up.
+            if open {
+                showControls = true
+            }
+        }
+        .onDisappear {
+            removeDismissMonitors()
         }
     }
 
     private var bubble: some View {
         ZStack {
-            // Soft circular shadow drawn as a blurred circle — avoids
+            // Soft circular shadow drawn as blurred circles — avoids
             // the square shadow cast by AVCaptureVideoPreviewLayer.
             if settings.showShadow {
+                // Wide ambient falloff
                 Circle()
-                    .fill(Color.black.opacity(0.32))
-                    .frame(width: bubbleSize * 0.96, height: bubbleSize * 0.96)
-                    .blur(radius: 5)
-                    .offset(y: 3)
+                    .fill(Color.black.opacity(0.42))
+                    .frame(width: bubbleSize * 0.98, height: bubbleSize * 0.98)
+                    .blur(radius: 14)
+                    .offset(y: 8)
+
+                // Tighter contact shadow for Loom-like presence
+                Circle()
+                    .fill(Color.black.opacity(0.55))
+                    .frame(width: bubbleSize * 0.94, height: bubbleSize * 0.94)
+                    .blur(radius: 7)
+                    .offset(y: 5)
             }
 
             ZStack {
@@ -82,8 +113,44 @@ struct CameraBubbleView: View {
         .background(Color(red: 0.12, green: 0.13, blue: 0.16))
     }
 
+    /// Faint always-visible affordance — click to reveal the full toolbar.
+    private var dotsButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showControls = true
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: 28, height: 18)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.38))
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Show controls")
+        .accessibilityLabel("Show controls")
+    }
+
     private var controlsBar: some View {
         HStack(spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showControls = false
+                    showBorderPopover = false
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .help("Hide controls")
+
             Menu {
                 ForEach(camera.devices, id: \.uniqueID) { device in
                     Button {
@@ -141,6 +208,7 @@ struct CameraBubbleView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
+        .transition(.opacity)
     }
 
     @ViewBuilder
@@ -165,6 +233,7 @@ struct CameraBubbleView: View {
             }
             Divider()
             Button("Custom Hex…") {
+                showControls = true
                 showBorderPopover = true
             }
         }
@@ -189,5 +258,70 @@ struct CameraBubbleView: View {
             get: { loginItem.isEnabled },
             set: { loginItem.setEnabled($0) }
         )
+    }
+
+    // MARK: - Dismiss monitors (Escape / click outside)
+
+    private func installDismissMonitors() {
+        removeDismissMonitors()
+
+        let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+            // Escape
+            if event.keyCode == 53 {
+                dismissControls()
+                return nil
+            }
+            return event
+        }
+
+        // Clicks in other apps / outside this panel
+        let globalMouse = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [self] _ in
+            guard !showBorderPopover else { return }
+            dismissControls()
+        }
+
+        // Clicks elsewhere in this app (e.g. menu bar), but not on the bubble panel
+        let localMouse = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [self] event in
+            guard !showBorderPopover else { return event }
+            if event.window !== (event.window as NSWindow?), false {
+                return event
+            }
+            // Only dismiss when the click isn't on our bubble's window.
+            // Events targeting the bubble panel should keep controls interactive.
+            if let window = event.window, window.contentView is NSHostingView<CameraBubbleView> {
+                return event
+            }
+            // Menu / popover windows spawned from the bubble should not dismiss.
+            if let window = event.window, window != window.contentView?.window {
+                return event
+            }
+            if event.window == nil || !(event.window is BubblePanel) {
+                // Delay so button actions inside the bar still fire first when appropriate.
+                DispatchQueue.main.async {
+                    if !self.showBorderPopover {
+                        self.dismissControls()
+                    }
+                }
+            }
+            return event
+        }
+
+        dismissMonitors = [keyMonitor, globalMouse, localMouse].compactMap { $0 }
+    }
+
+    private func removeDismissMonitors() {
+        for monitor in dismissMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        dismissMonitors = []
+    }
+
+    private func dismissControls() {
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showControls = false
+                showBorderPopover = false
+            }
+        }
     }
 }
