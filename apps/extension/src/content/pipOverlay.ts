@@ -3,6 +3,8 @@
  * - Freely draggable circular camera bubble (extension-origin iframe)
  * - Left-edge vertical control dock (timer / stop / pause / restart / discard)
  * - Center-screen 3→2→1 countdown before capture begins
+ *
+ * Mounted in a closed Shadow DOM under a fixed max-z host (no Popover API).
  */
 
 import {
@@ -54,6 +56,12 @@ let hostReattachObserver: MutationObserver | null = null
 
 function overlayStyles(): string {
   return `
+    /*
+     * Host is a plain fixed full-viewport shell (no Popover API).
+     * Popover left the host stuck under UA [popover]:not(:popover-open) {
+     * display:none !important } which author CSS cannot override — silent
+     * "Sharing this tab" with zero countdown/dock/bubble.
+     */
     :host {
       all: initial !important;
       position: fixed !important;
@@ -74,20 +82,6 @@ function overlayStyles(): string {
       pointer-events: none !important;
       z-index: 2147483647 !important;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
-    }
-    /* Popover UA stylesheet uses fit-content + margin:auto — force full viewport. */
-    :host([popover]) {
-      position: fixed !important;
-      inset: 0 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-      max-width: none !important;
-      max-height: none !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: none !important;
-      overflow: visible !important;
-      background: transparent !important;
     }
     * { box-sizing: border-box; }
 
@@ -419,25 +413,14 @@ function applyHostInlineStyles(host: HTMLElement) {
   for (const [k, v] of props) host.style.setProperty(k, v, 'important')
 }
 
-function promoteToTopLayer(host: HTMLElement) {
-  try {
-    if (!('showPopover' in host) || typeof host.showPopover !== 'function') return
-    host.setAttribute('popover', 'manual')
-    applyHostInlineStyles(host)
-    host.showPopover()
-  } catch {
-    /* Popover unavailable or already open — fixed + max z-index still applies. */
-  }
-}
-
 function watchHostAttached(host: HTMLElement) {
   hostReattachObserver?.disconnect()
   hostReattachObserver = new MutationObserver(() => {
     if (host.isConnected) return
     const parent = document.body ?? document.documentElement
     if (!parent) return
+    applyHostInlineStyles(host)
     parent.appendChild(host)
-    promoteToTopLayer(host)
   })
   hostReattachObserver.observe(document.documentElement, {
     childList: true,
@@ -447,17 +430,29 @@ function watchHostAttached(host: HTMLElement) {
 
 function ensureMount(): OverlayMount {
   if (overlayMount?.host.isConnected) {
-    promoteToTopLayer(overlayMount.host)
+    applyHostInlineStyles(overlayMount.host)
     return overlayMount
   }
 
-  document.getElementById(HOST_ID)?.remove()
+  // Drop any leftover host (including a stuck popover="manual" from older builds).
+  const stale = document.getElementById(HOST_ID)
+  if (stale) {
+    try {
+      stale.removeAttribute('popover')
+    } catch {
+      /* ignore */
+    }
+    stale.remove()
+  }
 
   const host = document.createElement('div')
   host.id = HOST_ID
   host.setAttribute('data-mypipcam', 'overlay')
+  // Never use the Popover API here — see overlayStyles() comment.
+  host.removeAttribute('popover')
   applyHostInlineStyles(host)
 
+  // Closed shadow: page CSS cannot hide/move our countdown/dock/bubble.
   const shadow = host.attachShadow({ mode: 'closed' })
   const style = document.createElement('style')
   style.textContent = overlayStyles()
@@ -466,8 +461,10 @@ function ensureMount(): OverlayMount {
   shadow.append(style, layer)
 
   const parent = document.body ?? document.documentElement
+  if (!parent) {
+    throw new Error('Page has no document.body — cannot mount recording overlay')
+  }
   parent.appendChild(host)
-  promoteToTopLayer(host)
   watchHostAttached(host)
 
   overlayMount = { host, layer, shadow }
@@ -481,14 +478,6 @@ function ensureRoot(): HTMLDivElement {
 function removeRoot() {
   hostReattachObserver?.disconnect()
   hostReattachObserver = null
-  try {
-    const host = overlayMount?.host
-    if (host && 'hidePopover' in host && typeof host.hidePopover === 'function') {
-      host.hidePopover()
-    }
-  } catch {
-    /* ignore */
-  }
   overlayMount?.host.remove()
   document.getElementById(HOST_ID)?.remove()
   overlayMount = null
@@ -1091,7 +1080,7 @@ class TabOverlay {
     const vw = window.innerWidth
     const vh = window.innerHeight
     const diameter = Math.max(BUBBLE_MIN_PX, Math.min(vw, vh) * this.state.size)
-    // position: fixed — left/top are viewport coords (top layer when popover is active)
+    // position: fixed — left/top are viewport coordinates
     const left = this.state.x * vw - diameter / 2
     const top = this.state.y * vh - diameter / 2
     this.bubble.style.setProperty('width', `${diameter}px`, 'important')
@@ -1353,22 +1342,42 @@ function clearOverlaySingleton() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'PIP_OVERLAY_START') {
-    overlay?.dispose()
-    overlay = new TabOverlay({
-      x: message.x ?? 0.82,
-      y: message.y ?? 0.78,
-      size: message.size ?? 0.18,
-      shape: message.bubbleShape === 'square' ? 'square' : 'circle',
-      mirror: message.mirror ?? true,
-      borderColor: sanitizeCssColor(message.borderColor ?? '#ffffff'),
-      shadow: message.shadow ?? true,
-      backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
-      mode: message.mode === 'guide' ? 'guide' : 'live',
-      recordMode: (message.recordMode as RecordMode) || 'screen-cam',
-      cameraDeviceId: message.cameraDeviceId ?? null,
-      phase: message.phase === 'recording' ? 'recording' : 'countdown',
-    })
-    sendResponse({ ok: true })
+    try {
+      overlay?.dispose()
+      overlay = new TabOverlay({
+        x: message.x ?? 0.82,
+        y: message.y ?? 0.78,
+        size: message.size ?? 0.18,
+        shape: message.bubbleShape === 'square' ? 'square' : 'circle',
+        mirror: message.mirror ?? true,
+        borderColor: sanitizeCssColor(message.borderColor ?? '#ffffff'),
+        shadow: message.shadow ?? true,
+        backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
+        mode: message.mode === 'guide' ? 'guide' : 'live',
+        recordMode: (message.recordMode as RecordMode) || 'screen-cam',
+        cameraDeviceId: message.cameraDeviceId ?? null,
+        phase: message.phase === 'recording' ? 'recording' : 'countdown',
+      })
+      // Sanity: host must be in the document and not zero-sized.
+      const host = overlayMount?.host
+      if (!host?.isConnected) {
+        throw new Error('Recording overlay failed to attach to the page')
+      }
+      sendResponse({ ok: true })
+    } catch (err) {
+      try {
+        overlay?.dispose()
+      } catch {
+        /* ignore */
+      }
+      overlay = null
+      const reason =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not mount recording overlay'
+      console.error('[MyPipCam overlay] PIP_OVERLAY_START failed:', reason, err)
+      sendResponse({ ok: false, reason })
+    }
     return true
   }
   if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED' && overlay) {

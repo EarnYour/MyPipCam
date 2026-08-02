@@ -197,7 +197,7 @@ async function injectOverlay(tabId: number) {
  * CRX content scripts load via async dynamic import(). executeScript resolves
  * before onMessage is registered — retry until the overlay listener answers.
  */
-async function sendOverlayMessage<T extends { ok?: boolean }>(
+async function sendOverlayMessage<T extends { ok?: boolean; reason?: string }>(
   tabId: number,
   message: Record<string, unknown>,
   attempts = 25,
@@ -206,14 +206,85 @@ async function sendOverlayMessage<T extends { ok?: boolean }>(
   for (let i = 0; i < attempts; i++) {
     try {
       const res = (await chrome.tabs.sendMessage(tabId, message)) as T | undefined
-      if (res != null) return res
+      if (res != null) {
+        if (res.ok === false) {
+          throw new Error(
+            typeof res.reason === 'string' && res.reason.trim()
+              ? res.reason.trim()
+              : 'Overlay refused to start',
+          )
+        }
+        return res
+      }
       lastErr = 'Overlay returned an empty response'
     } catch (err) {
       lastErr = errMessage(err, 'Could not reach camera overlay in this tab')
+      // Hard failure from overlay mount — don't keep retrying.
+      if (/failed to attach|could not mount|refused to start|no document\.body/i.test(lastErr)) {
+        throw new Error(lastErr)
+      }
     }
     await new Promise((r) => setTimeout(r, 40 + Math.min(i, 10) * 20))
   }
   throw new Error(lastErr)
+}
+
+/**
+ * Last-resort visible error when the Loom overlay never mounts — otherwise the
+ * user only sees Chrome's "Sharing this tab" indicator with no countdown/UI.
+ */
+async function showOverlayInjectFailureToast(tabId: number, detail: string) {
+  const text =
+    detail.trim() ||
+    'MyPipCam could not show the recording overlay on this page. Reload the extension and try another https tab.'
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (message: string) => {
+        const ID = 'mypipcam-overlay-fail-toast'
+        document.getElementById(ID)?.remove()
+        const el = document.createElement('div')
+        el.id = ID
+        el.setAttribute('role', 'alert')
+        el.textContent = message
+        el.style.cssText = [
+          'position:fixed',
+          'left:50%',
+          'bottom:28px',
+          'transform:translateX(-50%)',
+          'z-index:2147483647',
+          'max-width:min(440px,calc(100vw - 32px))',
+          'padding:14px 16px',
+          'border-radius:12px',
+          'background:rgba(28,12,12,0.96)',
+          'border:1px solid rgba(255,120,100,0.5)',
+          'color:#ffe8e4',
+          'font:600 13px/1.4 ui-sans-serif,system-ui,sans-serif',
+          'box-shadow:0 12px 32px rgba(0,0,0,0.45)',
+          'text-align:center',
+          'pointer-events:auto',
+        ].join(';')
+        const parent = document.body ?? document.documentElement
+        parent.appendChild(el)
+        window.setTimeout(() => el.remove(), 14000)
+      },
+      args: [
+        `MyPipCam: recording UI failed to appear. ${text} (Sharing may still show — click Stop sharing in the Chrome toolbar if needed.)`,
+      ],
+    })
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (message: string) => {
+          window.alert(message)
+        },
+        args: [`MyPipCam: recording UI failed — ${text}`],
+      })
+    } catch {
+      /* page may be restricted */
+    }
+  }
 }
 
 async function stopOverlay(tabId: number | null | undefined) {
@@ -417,11 +488,13 @@ async function startLoomRecording(
         phase: 'countdown',
       })
     } catch (err) {
+      const reason = errMessage(err, 'Could not start camera overlay in this tab.')
+      await showOverlayInjectFailureToast(tab.id, reason)
       await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
       await closeOffscreen()
       return {
         ok: false,
-        reason: errMessage(err, 'Could not start camera overlay in this tab.'),
+        reason,
       }
     }
 
@@ -1132,12 +1205,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Legacy messages kept for advanced recorder window path
   if (message?.type === 'START_TAB_OVERLAY') {
     void (async () => {
+      let toastTabId: number | undefined
       try {
         const resolved = await resolveTargetTab(message.tabId)
         if (!resolved.ok || !resolved.tab.id) {
           sendResponse({ ok: false, reason: resolved.ok ? 'no-tab' : resolved.reason })
           return
         }
+        toastTabId = resolved.tab.id
         try {
           await injectOverlay(resolved.tab.id)
         } catch {
@@ -1159,9 +1234,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
         sendResponse({ ok: true, tabId: resolved.tab.id })
       } catch (err) {
+        const reason = errMessage(err, 'inject-failed')
+        if (toastTabId != null) {
+          await showOverlayInjectFailureToast(toastTabId, reason)
+        }
         sendResponse({
           ok: false,
-          reason: errMessage(err, 'inject-failed'),
+          reason,
         })
       }
     })()
