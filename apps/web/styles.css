@@ -209,6 +209,23 @@ a:hover {
   box-shadow: inset 0 0 0 1.5px var(--brand);
 }
 
+.btn--tip {
+  background: rgba(255, 94, 41, 0.08);
+  color: var(--brand);
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
+.btn--tip:hover {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(255, 94, 41, 0.22);
+}
+
+.btn--tip-lg {
+  padding: 1rem 1.65rem;
+  font-size: 1.05rem;
+}
+
 .hero__visual {
   position: relative;
   min-height: clamp(16rem, 36vw, 22rem);
@@ -448,18 +465,35 @@ a:hover {
   background: rgba(17, 19, 18, 0.06);
 }
 
-.tip-jar {
-  margin: 1.35rem 0 0;
-  max-width: 36rem;
-  color: var(--ink-faint);
-  font-size: 0.98rem;
+.section--support {
+  padding-top: 0.25rem;
 }
 
-.tip-jar a {
-  font-weight: 650;
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 0.16em;
+.section__inner--support {
+  padding: clamp(1.85rem, 4.5vw, 2.75rem);
+  border-radius: calc(var(--radius) + 6px);
+  background:
+    linear-gradient(145deg, rgba(255, 94, 41, 0.16), transparent 48%),
+    linear-gradient(300deg, rgba(125, 223, 154, 0.16), transparent 42%),
+    rgba(255, 255, 255, 0.62);
+  border: 1.5px solid rgba(255, 94, 41, 0.28);
+  box-shadow: 0 18px 40px rgba(255, 94, 41, 0.08);
+  text-align: center;
+}
+
+.section__inner--support h2 {
+  margin-bottom: 0.55rem;
+}
+
+.section__inner--support > p {
+  margin: 0 auto 1.5rem;
+  max-width: 28rem;
+  color: var(--ink-soft);
+  font-size: 1.08rem;
+}
+
+.section__inner--support .cta-row {
+  justify-content: center;
 }
 
 .thanks-banner {
