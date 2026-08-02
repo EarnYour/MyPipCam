@@ -281,6 +281,14 @@ body {
   flex: 1;
   text-align: center;
   font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.timeline-howto {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  text-align: center;
 }
 
 .timeline-toolbar {
@@ -296,6 +304,13 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
+}
+
+.timeline-toolbar-left button.is-active {
+  background: color-mix(in srgb, var(--color-primary) 18%, #fff);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  color: var(--color-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, transparent);
 }
 
 .timeline-zoom {
@@ -330,6 +345,15 @@ body {
   cursor: pointer;
   touch-action: none;
   user-select: none;
+}
+
+.timeline.is-select-mode {
+  cursor: crosshair;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+
+.timeline-scroll.is-select-mode {
+  outline: none;
 }
 
 .timeline-dim {
@@ -440,11 +464,11 @@ body {
   position: absolute;
   top: -6px;
   bottom: -6px;
-  width: 14px;
+  width: 16px;
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--color-primary);
   transform: translateX(-50%);
   cursor: ew-resize;
@@ -469,6 +493,33 @@ body {
   transform: translate(-50%, -50%);
   border-radius: 1px;
   box-shadow: 4px 0 0 rgba(255, 255, 255, 0.35), -4px 0 0 rgba(255, 255, 255, 0.35);
+}
+
+.trim-handle::before {
+  content: attr(data-label);
+  position: absolute;
+  top: -1.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.trim-handle--in::before {
+  left: 0;
+  transform: none;
+}
+
+.trim-handle--out::before {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 
 .cut-handle,
@@ -518,11 +569,17 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem;
-  padding: 0.45rem 0.55rem;
+  padding: 0.55rem 0.7rem;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--color-primary) 10%, #fff);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
-  font-size: 0.82rem;
+  background: color-mix(in srgb, var(--color-primary) 12%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 34%, transparent);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.selection-bar .mono {
+  font-weight: 700;
+  color: var(--color-primary);
 }
 
 .cut-list {
@@ -942,6 +999,10 @@ body {
 
 @media (max-width: 979px) {
   .timeline-hint {
+    display: none;
+  }
+
+  .trim-handle::before {
     display: none;
   }
 
