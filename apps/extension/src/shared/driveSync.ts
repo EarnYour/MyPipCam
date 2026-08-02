@@ -98,7 +98,7 @@ async function connectGoogleDriveCore(opts?: {
 }): Promise<DriveConnectionStatus> {
   if (!isOAuthClientConfigured()) {
     throw new Error(
-      'Paste your Google OAuth client ID into apps/extension/src/shared/driveConfig.ts (see README).',
+      'Set VITE_GOOGLE_OAUTH_CLIENT_ID in apps/extension/.env.local, rebuild, and reload (see README).',
     )
   }
   if (!opts?.tokenAlreadyFetched) {
@@ -127,7 +127,7 @@ async function connectGoogleDriveCore(opts?: {
 export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
   if (!isOAuthClientConfigured()) {
     throw new Error(
-      'Paste your Google OAuth client ID into apps/extension/src/shared/driveConfig.ts (see README).',
+      'Set VITE_GOOGLE_OAUTH_CLIENT_ID in apps/extension/.env.local, rebuild, and reload (see README).',
     )
   }
 

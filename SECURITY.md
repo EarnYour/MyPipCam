@@ -53,6 +53,6 @@ We will acknowledge reports as soon as practical and coordinate disclosure after
 
 - [ ] No `*.pem` / `client_secret*.json` in the tree or git history
 - [ ] Extension OAuth ID only via `.env.local` / CI secrets, not hardcoded
-- [ ] Vercel has `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (not committed)
+- [ ] Vercel has `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` on Production **and** Preview (not committed; anon alone breaks share API after RLS lockdown)
 - [ ] GitHub → Settings → Code security → private vulnerability advisories enabled
 - [ ] Confirm `git status` is clean of `.env.local` before every push

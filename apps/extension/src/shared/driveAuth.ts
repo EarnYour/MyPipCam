@@ -105,7 +105,7 @@ export function explainDriveAuthError(raw: string, code?: string): string {
 export async function getAccessTokenDirect(interactive = true): Promise<string> {
   if (!isOAuthClientConfigured()) {
     throw new DriveAuthError(
-      'Google OAuth client ID is not configured. Paste your client ID into driveConfig.ts (see README).',
+      'Google OAuth client ID is not configured. Set VITE_GOOGLE_OAUTH_CLIENT_ID in apps/extension/.env.local, rebuild, and reload (see README).',
       'client_id_missing',
     )
   }
@@ -311,7 +311,7 @@ export function openDriveConnectKeepAlive(): chrome.runtime.Port | null {
 export async function getAccessToken(interactive = true): Promise<string> {
   if (!isOAuthClientConfigured()) {
     throw new DriveAuthError(
-      'Google OAuth client ID is not configured. Paste your client ID into driveConfig.ts (see README).',
+      'Google OAuth client ID is not configured. Set VITE_GOOGLE_OAUTH_CLIENT_ID in apps/extension/.env.local, rebuild, and reload (see README).',
       'client_id_missing',
     )
   }

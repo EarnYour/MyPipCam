@@ -61,7 +61,7 @@ starts until the countdown finishes (Cancel / discard aborts without saving).
 
 ## Google Drive / OAuth
 
-Optional. Paste a **Chrome extension** OAuth client ID into `src/shared/driveConfig.ts` (see root [README](../../README.md#google-drive-optional-cloud-library)).
+Optional. Set `VITE_GOOGLE_OAUTH_CLIENT_ID` in gitignored `.env.local` (copy from `.env.example`), then rebuild (see root [README](../../README.md#google-drive-optional-cloud-library)).
 
 - **OAuth client type:** Chrome extension — Item ID must match the ID on `chrome://extensions` (`akpchobfndfddajiihkkdpnihihdicjc` when dist includes the manifest `key`; otherwise use whatever ID Chrome shows). Not the website.
 - **Consent screen URLs** (product funnel): home `https://mypipcam.earnyour.com`, privacy `https://mypipcam.earnyour.com/privacy`, terms `https://mypipcam.earnyour.com/terms`; authorized domain `earnyour.com`.

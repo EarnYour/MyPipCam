@@ -16,17 +16,23 @@ Drive native analytics are unavailable to third-party apps — the custom watch 
 
 ## Environment
 
-Copy `.env.example` and set in Vercel (Production + Preview):
+Copy `.env.example` and set in Vercel (Production **and** Preview):
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
+- `SUPABASE_URL` — `https://YOUR_PROJECT_REF.supabase.co`
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only; required after RLS lockdown (anon can no longer write `mypipcam_*` tables)
 
-Tables (Supabase): `mypipcam_shares`, `mypipcam_views` + RPC `mypipcam_record_view`.
+Optional local fallback only: `SUPABASE_ANON_KEY` (not enough for share create/view under locked RLS).
+
+Tables (Supabase): `mypipcam_shares`, `mypipcam_views` + RPC `mypipcam_record_view` (service_role).
 
 ## Deploy
+
+Vercel project root directory is `apps/web` (link from the monorepo root or this folder):
 
 ```bash
 cd apps/web
 npm install
 vercel --prod
 ```
+
+Never commit real Supabase keys. Prefer `vercel env add SUPABASE_SERVICE_ROLE_KEY` for Production and Preview.

@@ -46,7 +46,7 @@ export default defineManifest({
     'notifications',
   ],
   oauth2: {
-    // Paste client ID once in src/shared/driveConfig.ts (imported here).
+    // From VITE_GOOGLE_OAUTH_CLIENT_ID (.env.local) via driveConfig.ts.
     // Extension ID for Google Cloud Console: akpchobfndfddajiihkkdpnihihdicjc
     client_id: GOOGLE_OAUTH_CLIENT_ID,
     scopes: [DRIVE_SCOPE],

@@ -104,15 +104,15 @@ Auth still uses **`chrome.identity`** with a **Chrome extension** OAuth client. 
    Connect Google surfaces the live extension ID in the Settings error when auth
    fails for a client mismatch.
 7. Copy the **Client ID** (ends with `.apps.googleusercontent.com`).
-8. Paste it into **one** place, then rebuild:
+8. Put it in gitignored env (never commit the real ID):
 
-```ts
-// apps/extension/src/shared/driveConfig.ts
-export const GOOGLE_OAUTH_CLIENT_ID =
-  'PASTE_YOUR_CLIENT_ID.apps.googleusercontent.com'
+```bash
+cp apps/extension/.env.example apps/extension/.env.local
+# edit .env.local:
+VITE_GOOGLE_OAUTH_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
 ```
 
-The manifest `oauth2.client_id` imports this constant automatically.
+`driveConfig.ts` reads `VITE_GOOGLE_OAUTH_CLIENT_ID` at build time; the committed fallback is a placeholder. The manifest `oauth2.client_id` imports that value automatically.
 
 9. Rebuild and reload:
 
@@ -145,6 +145,8 @@ SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<service_role from Supabase → Settings → API>
 ```
 
+With RLS locked down, **`SUPABASE_SERVICE_ROLE_KEY` is required** on Vercel. `SUPABASE_ANON_KEY` alone cannot create shares or record views. Set both Production and Preview (Dashboard or `vercel env add`).
+
 Deploy from the monorepo root (Vercel root directory is `apps/web`):
 
 ```bash
@@ -158,15 +160,6 @@ vercel --prod
 2. Folder ID is stored in **`chrome.storage.sync`**, so other Chrome profiles signed into that Google account receive the same folder ID.
 3. On computer B: open Library → Connect Google (if needed) → recordings uploaded from A appear (play downloads from Drive).
 4. Local disk library and Mac app stay independent; Drive does not replace them.
-
-### Google OAuth client ID (extension)
-
-Connect Google needs a **Chrome-extension** OAuth client ID (no client secret).
-
-1. Copy [`apps/extension/.env.example`](apps/extension/.env.example) → `apps/extension/.env.local` (gitignored).
-2. Set `VITE_GOOGLE_OAUTH_CLIENT_ID=….apps.googleusercontent.com`.
-3. Google Cloud → Item ID must match the extension ID (`akpchobfndfddajiihkkdpnihihdicjc` when built with the manifest `key`).
-4. `npm run build` and reload the unpacked extension.
 
 ---
 

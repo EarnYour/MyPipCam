@@ -450,9 +450,11 @@ export function SettingsPanel({
               </p>
               {!isOAuthClientConfigured() && (
                 <p className="settings-warn">
-                  OAuth client ID not set. Paste your Chrome-extension client ID into{' '}
-                  <code>apps/extension/src/shared/driveConfig.ts</code>, rebuild, and reload the
-                  extension. See the README “Google Drive setup” section.
+                  OAuth client ID not set. Copy{' '}
+                  <code>apps/extension/.env.example</code> to{' '}
+                  <code>.env.local</code>, set{' '}
+                  <code>VITE_GOOGLE_OAUTH_CLIENT_ID</code>, rebuild, and reload the extension. See
+                  the README “Google Drive setup” section.
                 </p>
               )}
               <p className="folder-status">
