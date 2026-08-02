@@ -12,7 +12,12 @@ import {
   driveFileToRecordingMeta,
   type DriveFileMeta,
 } from './driveApi'
-import { clearDriveAuth, getAccessToken, hasDriveAuth } from './driveAuth'
+import {
+  clearDriveAuth,
+  explainDriveAuthError,
+  getAccessToken,
+  hasDriveAuth,
+} from './driveAuth'
 import { isOAuthClientConfigured } from './driveConfig'
 import {
   clearDriveSettings,
@@ -79,26 +84,41 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
   }
 }
 
-/** Interactive connect: OAuth + ensure MyPipCam Drive folder + persist folder ID. */
-async function connectGoogleDriveCore(): Promise<DriveConnectionStatus> {
+/**
+ * After interactive auth: create/find Drive folder and persist settings.
+ * Pass `tokenAlreadyFetched` when the SW already started getAuthToken under the
+ * user-gesture window (do not call interactive getAuthToken again first).
+ */
+async function connectGoogleDriveCore(opts?: {
+  tokenAlreadyFetched?: boolean
+}): Promise<DriveConnectionStatus> {
   if (!isOAuthClientConfigured()) {
     throw new Error(
       'Paste your Google OAuth client ID into apps/extension/src/shared/driveConfig.ts (see README).',
     )
   }
-  await getAccessToken(true)
+  if (!opts?.tokenAlreadyFetched) {
+    await getAccessToken(true)
+  }
   const settings = await loadDriveSettings()
   const folder = await ensureLibraryFolder(settings.folderId, true)
   await saveDriveSettings({
     folderId: folder.id,
     folderName: folder.name,
   })
-  return getDriveConnectionStatus()
+  // Avoid re-probing identity (can race/timeout right after connect).
+  return {
+    configured: true,
+    signedIn: true,
+    folderId: folder.id,
+    folderName: folder.name,
+    autoUpload: settings.autoUpload,
+  }
 }
 
 /**
- * Interactive connect. When chrome.identity is missing on the page (common on
- * some extension pages), delegates to the service worker (`CONNECT_GOOGLE`).
+ * Interactive connect — always messages the service worker (`CONNECT_GOOGLE`)
+ * so chrome.identity.getAuthToken runs in the SW under the click gesture.
  */
 export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
   if (!isOAuthClientConfigured()) {
@@ -107,22 +127,46 @@ export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
     )
   }
 
-  if (typeof chrome.identity?.getAuthToken !== 'function') {
-    const res = (await chrome.runtime.sendMessage({ type: 'CONNECT_GOOGLE' })) as
-      | { ok: true; status: DriveConnectionStatus }
-      | { ok: false; error?: string }
-      | undefined
-    if (!res?.ok) {
-      throw new Error(res?.error || 'Could not connect Google Drive.')
-    }
-    return res.status
+  // Already in the SW: run core directly (CONNECT_GOOGLE handler uses InBackground).
+  if (typeof window === 'undefined') {
+    return connectGoogleDriveCore()
   }
 
-  return connectGoogleDriveCore()
+  let res:
+    | { ok: true; status: DriveConnectionStatus }
+    | { ok: false; error?: string; reason?: string; code?: string }
+    | undefined
+  try {
+    res = (await chrome.runtime.sendMessage({ type: 'CONNECT_GOOGLE' })) as typeof res
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    throw new Error(explainDriveAuthError(raw || 'Could not reach background for Google Connect.'))
+  }
+
+  if (!res?.ok) {
+    const raw =
+      res?.error ||
+      res?.reason ||
+      (res == null
+        ? 'No response from background (reload the extension on chrome://extensions).'
+        : 'Could not connect Google Drive.')
+    throw new Error(explainDriveAuthError(raw, res?.code))
+  }
+  return res.status
 }
 
-/** SW-only entry used by CONNECT_GOOGLE (never messages back to self). */
-export async function connectGoogleDriveInBackground(): Promise<DriveConnectionStatus> {
+/**
+ * SW-only entry used by CONNECT_GOOGLE.
+ * Starts getAuthToken immediately (caller should kick it off in the sync
+ * onMessage path when possible), then finishes folder setup.
+ */
+export async function connectGoogleDriveInBackground(
+  authPromise?: Promise<string>,
+): Promise<DriveConnectionStatus> {
+  if (authPromise) {
+    await authPromise
+    return connectGoogleDriveCore({ tokenAlreadyFetched: true })
+  }
   return connectGoogleDriveCore()
 }
 

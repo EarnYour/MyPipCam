@@ -1,4 +1,9 @@
-import { DRIVE_SCOPE, isOAuthClientConfigured } from './driveConfig'
+import {
+  DRIVE_SCOPE,
+  STABLE_EXTENSION_ID,
+  currentExtensionId,
+  isOAuthClientConfigured,
+} from './driveConfig'
 
 export class DriveAuthError extends Error {
   constructor(
@@ -31,11 +36,72 @@ function missingIdentityMessage(): string {
   return (
     'chrome.identity is unavailable. Reload MyPipCam from apps/extension/dist ' +
     '(manifest must include the "identity" permission and oauth2). ' +
-    'Confirm chrome://extensions shows the expected extension ID.'
+    `Confirm chrome://extensions shows ID ${currentExtensionId()} (expected ${STABLE_EXTENSION_ID} with manifest key).`
   )
 }
 
-/** Interactive or silent OAuth token via chrome.identity (service worker only). */
+function itemIdHint(): string {
+  const live = currentExtensionId()
+  return (
+    `Google Cloud → APIs & Services → Credentials → your Chrome-extension OAuth client → ` +
+    `Item ID must be exactly "${live}"` +
+    (live === STABLE_EXTENSION_ID
+      ? ''
+      : ` (packed builds use ${STABLE_EXTENSION_ID}; reload from dist so manifest key is present)`) +
+    `. Not the website hostname.`
+  )
+}
+
+/**
+ * Turn chrome.identity / OAuth lastError text into an actionable Settings message.
+ * Always keeps the raw Chrome error so debugging is possible.
+ */
+export function explainDriveAuthError(raw: string, code?: string): string {
+  const msg = (raw || '').trim() || 'Unknown Google auth error'
+  // Already enriched (e.g. DriveAuthError message passed through SW → UI).
+  if (/Item ID must be exactly/i.test(msg) || /Click Connect Google again/i.test(msg)) {
+    return msg
+  }
+  const lower = msg.toLowerCase()
+
+  const looksLikeBadClient =
+    /bad client|invalid.?oauth|client.?id|authorization page could not be loaded|oauth2 request failed|invalid_client|unauthorized_client|redirect_uri|origin/i.test(
+      lower,
+    )
+
+  if (looksLikeBadClient || code === 'bad_client') {
+    return `${msg} — ${itemIdHint()}`
+  }
+
+  if (/user gesture|interaction required|must be called/i.test(lower)) {
+    return (
+      `${msg} — Click Connect Google again (interactive sign-in must start from that click). ` +
+      `If it keeps failing, reload the extension on chrome://extensions.`
+    )
+  }
+
+  if (/did not approve|access denied|user.?denied|canceled|cancelled/i.test(lower)) {
+    return `${msg} — Sign-in was cancelled or denied. Click Connect Google to try again.`
+  }
+
+  if (/not granted or revoked|invalid.?grant/i.test(lower)) {
+    return (
+      `${msg} — Disconnect (or clear site data for accounts.google.com), then Connect Google again. ` +
+      itemIdHint()
+    )
+  }
+
+  if (/timeout|timed out/i.test(lower)) {
+    return `${msg} — Google sign-in took too long. Try Connect Google again.`
+  }
+
+  return msg
+}
+
+/**
+ * Interactive or silent OAuth token via chrome.identity (prefer service worker).
+ * Call this as early as possible after a user gesture for interactive:true.
+ */
 export async function getAccessTokenDirect(interactive = true): Promise<string> {
   if (!isOAuthClientConfigured()) {
     throw new DriveAuthError(
@@ -48,18 +114,38 @@ export async function getAccessTokenDirect(interactive = true): Promise<string> 
   }
 
   return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive }, (token) => {
-      const err = chromeLastError()
-      if (err) {
-        reject(new DriveAuthError(err, interactive ? 'auth_failed' : 'not_signed_in'))
-        return
-      }
-      if (!token || typeof token !== 'string') {
-        reject(new DriveAuthError('No auth token returned.', 'no_token'))
-        return
-      }
-      resolve(token)
-    })
+    try {
+      chrome.identity.getAuthToken({ interactive }, (token) => {
+        const err = chromeLastError()
+        if (err) {
+          const code = /bad client|invalid.?oauth|authorization page/i.test(err)
+            ? 'bad_client'
+            : interactive
+              ? 'auth_failed'
+              : 'not_signed_in'
+          reject(new DriveAuthError(explainDriveAuthError(err, code), code))
+          return
+        }
+        if (!token || typeof token !== 'string') {
+          reject(
+            new DriveAuthError(
+              explainDriveAuthError(
+                interactive
+                  ? 'No auth token returned (sign-in may have been cancelled or blocked).'
+                  : 'Not signed in to Google Drive.',
+                'no_token',
+              ),
+              'no_token',
+            ),
+          )
+          return
+        }
+        resolve(token)
+      })
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err)
+      reject(new DriveAuthError(explainDriveAuthError(raw, 'auth_failed'), 'auth_failed'))
+    }
   })
 }
 
@@ -125,15 +211,25 @@ export async function hasDriveAuthDirect(): Promise<boolean> {
   )
 }
 
-async function sendDriveAuthMessage<T>(payload: object): Promise<T> {
-  const res = (await withTimeout(
-    chrome.runtime.sendMessage(payload) as Promise<T | undefined>,
-    2000,
-    undefined,
-  )) as T | undefined
+/**
+ * Message the SW. Silent probes stay short; interactive OAuth must wait for the
+ * consent UI (often tens of seconds).
+ */
+async function sendDriveAuthMessage<T>(
+  payload: object,
+  timeoutMs: number,
+): Promise<T> {
+  const send = chrome.runtime.sendMessage(payload) as Promise<T | undefined>
+  const res =
+    timeoutMs > 0
+      ? ((await withTimeout(send, timeoutMs, undefined)) as T | undefined)
+      : await send
   if (res == null) {
     throw new DriveAuthError(
-      'No response from background. Reload the extension on chrome://extensions.',
+      explainDriveAuthError(
+        'No response from background. Reload the extension on chrome://extensions.',
+        'no_background',
+      ),
       'no_background',
     )
   }
@@ -157,12 +253,19 @@ export async function getAccessToken(interactive = true): Promise<string> {
     return getAccessTokenDirect(interactive)
   }
 
-  const res = await sendDriveAuthMessage<DriveTokenResponse>({
-    type: 'GET_DRIVE_TOKEN',
-    interactive: Boolean(interactive),
-  })
+  // Interactive: no short timeout (user may be in the Google consent window).
+  const res = await sendDriveAuthMessage<DriveTokenResponse>(
+    {
+      type: 'GET_DRIVE_TOKEN',
+      interactive: Boolean(interactive),
+    },
+    interactive ? 0 : 2000,
+  )
   if (!res.ok) {
-    throw new DriveAuthError(res.error || 'Auth failed', res.code)
+    throw new DriveAuthError(
+      explainDriveAuthError(res.error || 'Auth failed', res.code),
+      res.code,
+    )
   }
   return res.token
 }
@@ -173,10 +276,13 @@ export async function invalidateAccessToken(token: string): Promise<void> {
     await invalidateAccessTokenDirect(token)
     return
   }
-  await sendDriveAuthMessage<DriveOk | DriveErr>({
-    type: 'INVALIDATE_DRIVE_TOKEN',
-    token,
-  })
+  await sendDriveAuthMessage<DriveOk | DriveErr>(
+    {
+      type: 'INVALIDATE_DRIVE_TOKEN',
+      token,
+    },
+    2000,
+  )
 }
 
 /** Revoke + clear cached tokens (Disconnect). */
@@ -185,9 +291,10 @@ export async function clearDriveAuth(): Promise<void> {
     await clearDriveAuthDirect()
     return
   }
-  const res = await sendDriveAuthMessage<DriveOk | DriveErr>({
-    type: 'CLEAR_DRIVE_AUTH',
-  })
+  const res = await sendDriveAuthMessage<DriveOk | DriveErr>(
+    { type: 'CLEAR_DRIVE_AUTH' },
+    5000,
+  )
   if (!res.ok) {
     throw new DriveAuthError(res.error || 'Could not disconnect', res.code)
   }
@@ -199,9 +306,10 @@ export async function hasDriveAuth(): Promise<boolean> {
   if (identityApiAvailable()) {
     return hasDriveAuthDirect()
   }
-  const res = await sendDriveAuthMessage<DriveBoolOk | DriveErr>({
-    type: 'HAS_DRIVE_AUTH',
-  })
+  const res = await sendDriveAuthMessage<DriveBoolOk | DriveErr>(
+    { type: 'HAS_DRIVE_AUTH' },
+    2000,
+  )
   if (!res.ok) return false
   return res.value
 }

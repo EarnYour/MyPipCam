@@ -93,8 +93,11 @@ Auth still uses **`chrome.identity`** with a **Chrome extension** OAuth client. 
    — **not** the website hostname.  
    If you load unpacked *without* `key` in `dist/manifest.json`, Chrome assigns a
    different ID (e.g. `okpchcbnnbdssajmkophnfnklgjcsncl`). The Google Cloud Item ID
-   **must match that live ID**, or OAuth will fail. Prefer rebuilding so `key` is
+   **must match that live ID**, or OAuth will fail with errors like “bad client id” /
+   “Authorization page could not be loaded”. Prefer rebuilding so `key` is
    present and the ID stays `akpchobfndfddajiihkkdpnihihdicjc`.
+   Connect Google surfaces the live extension ID in the Settings error when auth
+   fails for a client mismatch.
 7. Copy the **Client ID** (ends with `.apps.googleusercontent.com`).
 8. Paste it into **one** place, then rebuild:
 

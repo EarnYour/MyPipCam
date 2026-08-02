@@ -19,6 +19,13 @@
 export const GOOGLE_OAUTH_CLIENT_ID =
   'YOUR_CLIENT_ID.apps.googleusercontent.com'
 
+/**
+ * Extension ID when `manifest.key` is present (packed / dist build).
+ * Google Cloud → OAuth client (Chrome extension) → Item ID must equal this
+ * (or whatever chrome://extensions shows if you loaded without `key`).
+ */
+export const STABLE_EXTENSION_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
+
 /** Preferred scope: only files/folders this app creates or the user opens with it. */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 
@@ -30,4 +37,16 @@ export function isOAuthClientConfigured(): boolean {
     Boolean(GOOGLE_OAUTH_CLIENT_ID) &&
     !GOOGLE_OAUTH_CLIENT_ID.startsWith('YOUR_CLIENT_ID')
   )
+}
+
+/** Live extension ID (chrome.runtime.id), falling back to the stable packed ID. */
+export function currentExtensionId(): string {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+      return chrome.runtime.id
+    }
+  } catch {
+    /* ignore */
+  }
+  return STABLE_EXTENSION_ID
 }

@@ -43,6 +43,7 @@ export function SettingsPanel({
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [folderMsg, setFolderMsg] = useState<string | null>(null)
   const [driveMsg, setDriveMsg] = useState<string | null>(null)
+  const [driveErr, setDriveErr] = useState(false)
   const [drive, setDrive] = useState<DriveConnectionStatus | null>(null)
   const [loaded, setLoaded] = useState(false)
 
@@ -197,16 +198,26 @@ export function SettingsPanel({
   async function onConnectDrive() {
     setDriveBusy(true)
     setDriveMsg(null)
+    setDriveErr(false)
     try {
       const status = await connectGoogleDrive()
       setDrive(status)
+      setDriveErr(false)
       setDriveMsg(
         `Connected. Library folder “${status.folderName || DRIVE_LIBRARY_FOLDER_NAME}” on Google Drive.` +
           ' Other Chrome browsers signed into the same Google account will share this folder via sync.',
       )
       onDriveChanged?.()
     } catch (err) {
-      setDriveMsg(err instanceof Error ? err.message : 'Could not connect Google Drive.')
+      const raw =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Could not connect Google Drive.'
+      setDriveErr(true)
+      setDriveMsg(raw)
+      console.error('[MyPipCam] Connect Google failed:', err)
     } finally {
       setDriveBusy(false)
     }
@@ -218,12 +229,14 @@ export function SettingsPanel({
     }
     setDriveBusy(true)
     setDriveMsg(null)
+    setDriveErr(false)
     try {
       await disconnectGoogleDrive()
       await refreshDrive()
       setDriveMsg('Google Drive disconnected.')
       onDriveChanged?.()
     } catch (err) {
+      setDriveErr(true)
       setDriveMsg(err instanceof Error ? err.message : 'Could not disconnect.')
     } finally {
       setDriveBusy(false)
@@ -350,7 +363,9 @@ export function SettingsPanel({
                   </button>
                 )}
               </div>
-              {driveMsg && <p className="settings-saved">{driveMsg}</p>}
+              {driveMsg && (
+                <p className={driveErr ? 'settings-warn' : 'settings-saved'}>{driveMsg}</p>
+              )}
             </section>
 
             <section className="settings-section">

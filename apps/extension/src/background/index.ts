@@ -2,6 +2,7 @@ import pipOverlayScript from '../content/pipOverlay.ts?script'
 import {
   clearDriveAuthDirect,
   DriveAuthError,
+  explainDriveAuthError,
   getAccessTokenDirect,
   hasDriveAuthDirect,
   invalidateAccessTokenDirect,
@@ -764,7 +765,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target === 'offscreen') return false
 
   if (!isTrustedExtensionSender(sender)) {
-    sendResponse({ ok: false, reason: 'untrusted-sender' })
+    sendResponse({
+      ok: false,
+      reason: 'untrusted-sender',
+      error: 'Untrusted sender — reload MyPipCam from apps/extension/dist on chrome://extensions.',
+    })
     return false
   }
 
@@ -851,9 +856,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const token = await getAccessTokenDirect(Boolean(message.interactive))
         sendResponse({ ok: true, token })
       } catch (err) {
+        const raw = errMessage(err, 'Could not get Google auth token')
+        console.error('[MyPipCam] GET_DRIVE_TOKEN failed:', raw, err)
         sendResponse({
           ok: false,
-          error: errMessage(err, 'Could not get Google auth token'),
+          error: explainDriveAuthError(
+            raw,
+            err instanceof DriveAuthError ? err.code : undefined,
+          ),
           code: err instanceof DriveAuthError ? err.code : undefined,
         })
       }
@@ -905,14 +915,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'CONNECT_GOOGLE') {
+    // Start interactive getAuthToken in the sync listener body so Chrome still
+    // treats this as a user-gesture continuation from Settings → sendMessage.
+    const authPromise = getAccessTokenDirect(true)
     void (async () => {
       try {
-        const status = await connectGoogleDriveInBackground()
+        const status = await connectGoogleDriveInBackground(authPromise)
         sendResponse({ ok: true, status })
       } catch (err) {
+        const raw = errMessage(err, 'Could not connect Google Drive')
+        console.error('[MyPipCam] CONNECT_GOOGLE failed:', raw, err)
         sendResponse({
           ok: false,
-          error: errMessage(err, 'Could not connect Google Drive'),
+          error: explainDriveAuthError(
+            raw,
+            err instanceof DriveAuthError ? err.code : undefined,
+          ),
           code: err instanceof DriveAuthError ? err.code : undefined,
         })
       }
