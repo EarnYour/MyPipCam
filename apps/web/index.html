@@ -6,7 +6,7 @@
     <title>MyPipCam — Screen Recording with Camera PiP (Chrome + Mac)</title>
     <meta
       name="description"
-      content="Free open-source screen recording with a live camera picture-in-picture: Chrome extension for capture and editing, plus a macOS always-on-top PiP bubble. Local-first by EarnYour Marketing."
+      content="Free Loom-style screen recording with camera PiP: Chrome extension, Mac bubble, Google Drive sync, share links with view counts, and a local library folder. By EarnYour Marketing."
     />
     <link rel="canonical" href="https://mypipcam.earnyour.com/" />
     <link rel="icon" href="https://mypipcam.earnyour.com/assets/logo.png" type="image/png" />
@@ -24,7 +24,7 @@
     />
     <meta
       property="og:description"
-      content="Local-first Chrome extension and macOS companion for screen recording with a live camera picture-in-picture."
+      content="Record with camera PiP, sync to Google Drive, share mypipcam.earnyour.com links with view tracking, and keep a local library on Mac + Chrome."
     />
     <meta property="og:url" content="https://mypipcam.earnyour.com/" />
     <meta
@@ -42,7 +42,7 @@
     />
     <meta
       name="twitter:description"
-      content="Free open-source Chrome extension and Mac companion for screen recording with a live camera PiP bubble."
+      content="Chrome + Mac PiP recorder with Google Drive, share links that track views, and a shared local library folder."
     />
     <meta
       name="twitter:image"
@@ -74,7 +74,7 @@
             "@id": "https://mypipcam.earnyour.com/#website",
             "url": "https://mypipcam.earnyour.com/",
             "name": "MyPipCam",
-            "description": "Local-first screen recording with camera picture-in-picture for Chrome and macOS.",
+            "description": "Local-first screen recording with camera PiP, optional Google Drive, and share links with view counts.",
             "publisher": { "@id": "https://earnyour.com/#organization" },
             "inLanguage": "en"
           },
@@ -87,7 +87,7 @@
             "url": "https://mypipcam.earnyour.com/",
             "downloadUrl": "https://github.com/swmartinezdot33/MyPipCam",
             "image": "https://mypipcam.earnyour.com/assets/logo.png",
-            "description": "Free open-source screen and camera picture-in-picture recorder: Chrome extension plus macOS always-on-top camera companion.",
+            "description": "Free open-source screen and camera PiP recorder with Google Drive sync, share watch pages that track views, and a shared local library for Chrome and Mac.",
             "offers": {
               "@type": "Offer",
               "price": "0",
@@ -124,7 +124,15 @@
                 "name": "Where are my recordings stored?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "By default, recordings stay on your device in the browser or a local library folder you choose. Optional Google Drive upload and OpenAI transcription only run when you connect those services."
+                  "text": "By default on your device (browser storage or a library folder you choose). Connect Google Drive in Library Settings to upload into a MyPipCam folder in your Drive and sync across browsers on the same Google account. OpenAI transcription only runs when you add an API key."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does MyPipCam track views on shared links?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Share from the Library to get a mypipcam.earnyour.com/w/… watch link. When someone opens it, the view is counted and shown back in your Library (view count and last viewed). The video is still stored in your Google Drive."
                 }
               },
               {
@@ -132,7 +140,7 @@
                 "name": "How do I install MyPipCam?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Get the Chrome extension and macOS app from the GitHub repository at https://github.com/swmartinezdot33/MyPipCam. Follow the README for build and install steps."
+                  "text": "Get the Chrome extension and macOS app from the GitHub repository at https://github.com/swmartinezdot33/MyPipCam. Follow the README for build and install steps. Connect Google Drive from Library → Settings after install."
                 }
               },
               {
@@ -182,9 +190,10 @@
             />
             <h1 id="brand-title">MyPipCam</h1>
             <p class="hero__lede">
-              Screen recording with a live camera picture-in-picture — a free,
-              local-first Chrome extension and macOS companion. An honest
-              Loom-style workflow without a SaaS lock-in.
+              Screen recording with a live camera picture-in-picture — plus
+              Google Drive sync, share links that track views, and a local
+              library shared between Chrome and Mac. Free, open source, and
+              built by EarnYour Marketing.
             </p>
             <div class="cta-row">
               <a
@@ -208,26 +217,27 @@
 
       <section class="section" aria-labelledby="how-title">
         <div class="section__inner">
-          <h2 id="how-title">Screen capture, camera PiP, local library</h2>
+          <h2 id="how-title">Record, library, edit — Loom-style without lock-in</h2>
           <p>
-            Record a Chrome tab or your screen with a draggable camera overlay,
-            keep clips on your device, and use a floating Mac camera bubble when
-            you need desktop-wide picture-in-picture for OBS or any screen
-            recorder.
+            Capture a Chrome tab with a draggable camera overlay, trim in the
+            browser, and keep a floating Mac camera bubble for desktop-wide PiP
+            with OBS or any screen recorder.
           </p>
           <ul class="feature-list">
             <li>
               <strong>Chrome extension</strong>
               <p>
-                Tab or screen capture with a live camera PiP, local recording
-                library, trim/cut editor, and optional Google Drive upload.
+                Tab + camera PiP recording, countdown dock, rewind &amp; trim,
+                local library detail pages, and Whisper transcription when you
+                add an OpenAI key.
               </p>
             </li>
             <li>
               <strong>macOS PiP bubble</strong>
               <p>
                 Always-on-top camera window for Continuity Camera, webcams, or
-                virtual cameras — ideal for desktop recording workflows.
+                virtual cameras — and a native library that reads the same
+                folder as Chrome.
               </p>
             </li>
             <li>
@@ -235,7 +245,58 @@
               <p>
                 MIT-licensed. Build and install from
                 <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-                — no paid account required for core recording.
+                — core recording works without a paid account.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="cloud-title" id="drive">
+        <div class="section__inner">
+          <h2 id="cloud-title">Google Drive, shared folders &amp; view tracking</h2>
+          <p>
+            Connect Google once in Library Settings. Your clips can live in Drive,
+            stay on a local folder both apps use, and ship as share links that
+            report views back to you.
+          </p>
+          <ul class="feature-list feature-list--four">
+            <li>
+              <strong>Connect Google Drive</strong>
+              <p>
+                In the Chrome Library → Settings → <strong>Connect Google</strong>.
+                MyPipCam creates a <code>MyPipCam</code> folder in
+                <em>your</em> Drive (<code>drive.file</code> scope only). The same
+                Google account on other computers can list and play uploaded
+                clips.
+              </p>
+            </li>
+            <li>
+              <strong>Shared local library folder</strong>
+              <p>
+                Pick the same folder (for example
+                <code>~/Movies/MyPipCam</code>) in Chrome and in the Mac app.
+                Both sides read and write the same on-disk library so recordings
+                stay in sync offline.
+              </p>
+            </li>
+            <li>
+              <strong>Share links that track views</strong>
+              <p>
+                Share from the Library to copy a
+                <code>mypipcam.earnyour.com/w/…</code> watch link. Viewers open
+                that page (Drive video embedded); you see view count and last
+                viewed in the Library — Loom-style feedback without a SaaS
+                vault.
+              </p>
+            </li>
+            <li>
+              <strong>You stay in control</strong>
+              <p>
+                Drive and OpenAI only run after you connect them. Disconnect
+                anytime. See the
+                <a href="https://mypipcam.earnyour.com/privacy">Privacy Policy</a>
+                for what stays on-device vs. optional cloud.
               </p>
             </li>
           </ul>
@@ -251,15 +312,37 @@
               <p>
                 A free, open-source toolkit for screen recording with a live
                 camera picture-in-picture: Chrome extension for capture and
-                editing, plus a macOS always-on-top camera companion.
+                editing, a macOS always-on-top camera companion, optional Google
+                Drive sync, and share links with view tracking.
               </p>
             </details>
             <details>
               <summary>Is MyPipCam a Loom alternative?</summary>
               <p>
                 It’s inspired by picture-in-picture screen-recording workflows —
-                local-first and open source. It is not affiliated with Loom;
+                local-first and open source, with Drive + view-tracked share
+                links when you want cloud. It is not affiliated with Loom;
                 “Loom-style” is descriptive only.
+              </p>
+            </details>
+            <details>
+              <summary>How does Google Drive connection work?</summary>
+              <p>
+                Open Library → Settings → <strong>Connect Google</strong> and
+                finish the Google sign-in. Uploads go to a MyPipCam folder in
+                your Drive. Use the same Google account in Chrome on another
+                computer to see those uploads. You can still keep a local folder
+                for Mac + Chrome offline.
+              </p>
+            </details>
+            <details>
+              <summary>Do shared links show view counts?</summary>
+              <p>
+                Yes. Library → Share copies a
+                <code>https://mypipcam.earnyour.com/w/…</code> link. Each open
+                counts as a view; your Library shows how many times it was
+                viewed and when it was last opened. The file itself stays in
+                your Google Drive.
               </p>
             </details>
             <details>
@@ -278,7 +361,8 @@
                 <a href="https://github.com/swmartinezdot33/MyPipCam"
                   >GitHub</a
                 >
-                and follow the README for build and install steps.
+                and follow the README. After install, connect Drive from Library
+                → Settings if you want cloud sync and share views.
               </p>
             </details>
             <details>

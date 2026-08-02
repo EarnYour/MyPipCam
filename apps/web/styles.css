@@ -308,6 +308,16 @@ a:hover {
   .feature-list {
     grid-template-columns: repeat(3, 1fr);
   }
+
+  .feature-list--four {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 960px) {
+  .feature-list--four {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .feature-list li {
