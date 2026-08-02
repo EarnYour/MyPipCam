@@ -695,6 +695,14 @@ export function PopupApp() {
     const next: BackgroundEffect = backgroundEffect === 'blur' ? 'none' : 'blur'
     setBackgroundEffect(next)
     await savePipSettings({ backgroundEffect: next })
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'LOOM_BUBBLE_EFFECT',
+        backgroundEffect: next,
+      })
+    } catch {
+      /* SW may be asleep — settings already persisted */
+    }
     setHelper(next === 'blur' ? 'Background blur on' : 'Background blur off')
   }
 

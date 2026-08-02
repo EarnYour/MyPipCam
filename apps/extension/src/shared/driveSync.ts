@@ -35,6 +35,14 @@ import type { RecordingMeta, RecordingRecord } from './types'
 
 const STORAGE_PENDING_DRIVE = 'drivePendingUploadIds'
 const STORAGE_LAST_DRIVE_ERROR = 'driveLastUploadError'
+const STORAGE_DRIVE_TOAST = 'driveUploadToast'
+
+export type DriveUploadToast = {
+  message: string
+  tone: 'ok' | 'warn'
+  at: number
+  recordingId?: string
+}
 
 export async function getPendingDriveUploadIds(): Promise<string[]> {
   const result = await chrome.storage.local.get(STORAGE_PENDING_DRIVE)
@@ -70,6 +78,46 @@ export async function setLastDriveUploadError(message: string | null): Promise<v
     return
   }
   await chrome.storage.local.set({ [STORAGE_LAST_DRIVE_ERROR]: message.trim() })
+}
+
+/** Library banner after auto-upload (session — survives tab open after stop). */
+export async function setDriveUploadToast(toast: DriveUploadToast | null): Promise<void> {
+  if (!toast) {
+    await chrome.storage.session.remove(STORAGE_DRIVE_TOAST)
+    return
+  }
+  await chrome.storage.session.set({ [STORAGE_DRIVE_TOAST]: toast })
+}
+
+export async function peekDriveUploadToast(): Promise<DriveUploadToast | null> {
+  const result = await chrome.storage.session.get(STORAGE_DRIVE_TOAST)
+  const raw = result[STORAGE_DRIVE_TOAST] as DriveUploadToast | undefined
+  if (!raw || typeof raw.message !== 'string' || !raw.message.trim()) return null
+  return {
+    message: raw.message.trim(),
+    tone: raw.tone === 'warn' ? 'warn' : 'ok',
+    at: typeof raw.at === 'number' ? raw.at : Date.now(),
+    recordingId: typeof raw.recordingId === 'string' ? raw.recordingId : undefined,
+  }
+}
+
+/** Read + clear so the banner shows once. */
+export async function consumeDriveUploadToast(): Promise<DriveUploadToast | null> {
+  const toast = await peekDriveUploadToast()
+  if (toast) await setDriveUploadToast(null)
+  return toast
+}
+
+export function driveUploadToastStorageKey(): string {
+  return STORAGE_DRIVE_TOAST
+}
+
+/** Network / 5xx / rate-limit — safe to retry once. */
+export function isTransientDriveUploadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  if (/Drive API (429|500|502|503|504)\b/.test(msg)) return true
+  if (/network|Failed to fetch|timeout|temporar|ECONNRESET|quota/i.test(msg)) return true
+  return false
 }
 
 export type DriveConnectionStatus = {
@@ -249,12 +297,10 @@ export type DriveUploadResult = {
   driveShared: boolean
 }
 
-/** Upload one recording; caller persists returned Drive fields onto local meta. */
-export async function uploadRecordingToDrive(
+async function uploadRecordingToDriveOnce(
   record: RecordingRecord,
-  opts?: { interactive?: boolean },
+  interactive: boolean,
 ): Promise<DriveUploadResult> {
-  const interactive = opts?.interactive ?? false
   const settings = await loadDriveSettings()
   const folder = await ensureLibraryFolder(settings.folderId, interactive)
   if (folder.id !== settings.folderId) {
@@ -268,6 +314,10 @@ export async function uploadRecordingToDrive(
       driveWebViewLink: link,
       driveShared: Boolean(record.driveShared),
     }
+  }
+
+  if (!record.blob || record.blob.size < 1) {
+    throw new Error('Recording blob missing — cannot upload to Google Drive.')
   }
 
   const file = await uploadRecordingFile({
@@ -291,6 +341,41 @@ export async function uploadRecordingToDrive(
     driveFileId: file.id,
     driveWebViewLink: file.webViewLink,
     driveShared: false,
+  }
+}
+
+/** Upload one recording; retries once on transient network/5xx failures. */
+export async function uploadRecordingToDrive(
+  record: RecordingRecord,
+  opts?: { interactive?: boolean },
+): Promise<DriveUploadResult> {
+  const interactive = opts?.interactive ?? false
+  try {
+    return await uploadRecordingToDriveOnce(record, interactive)
+  } catch (err) {
+    if (!isTransientDriveUploadError(err)) throw err
+    await sleep(900)
+    return await uploadRecordingToDriveOnce(record, interactive)
+  }
+}
+
+/**
+ * Ask the MV3 service worker to upload a queued recording (fire-and-forget).
+ * Must NOT await upload from offscreen during OFFSCREEN_STOP — that nests
+ * messaging while the SW is blocked on stop and causes silent auth timeouts.
+ */
+export function requestBackgroundDriveUpload(recordingId: string): void {
+  try {
+    void chrome.runtime
+      .sendMessage({
+        type: 'DRIVE_AUTO_UPLOAD',
+        id: recordingId,
+      })
+      .catch(() => {
+        /* SW will pick up pending ids on next alarm / Library open */
+      })
+  } catch {
+    /* ignore */
   }
 }
 

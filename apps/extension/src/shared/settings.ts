@@ -30,12 +30,16 @@ export async function loadPipSettings(): Promise<PipSettings> {
 
 export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipSettings> {
   const current = await loadPipSettings()
-  const next = { ...current, ...patch }
-  if (patch.borderColor !== undefined) {
-    next.borderColor = sanitizeCssColor(patch.borderColor, current.borderColor)
+  // Drop undefined keys so callers like LOOM_BUBBLE_MOVED cannot wipe size/x/y.
+  const clean = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined),
+  ) as Partial<PipSettings>
+  const next = { ...current, ...clean }
+  if (clean.borderColor !== undefined) {
+    next.borderColor = sanitizeCssColor(clean.borderColor, current.borderColor)
   }
-  if (patch.cameraFilter !== undefined) {
-    next.cameraFilter = await saveCameraFilter(patch.cameraFilter)
+  if (clean.cameraFilter !== undefined) {
+    next.cameraFilter = await saveCameraFilter(clean.cameraFilter)
   }
   await chrome.storage.sync.set({ [KEY]: next })
   return next

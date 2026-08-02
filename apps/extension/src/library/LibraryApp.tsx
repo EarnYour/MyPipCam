@@ -30,6 +30,8 @@ import { isOAuthClientConfigured } from '../shared/driveConfig'
 import { getVideoPlaybackStatus } from '../shared/driveApi'
 import {
   connectGoogleDrive,
+  consumeDriveUploadToast,
+  driveUploadToastStorageKey,
   getDriveConnectionStatus,
   isDriveLinked,
   shareRecordingOnDrive,
@@ -478,14 +480,36 @@ export function LibraryApp() {
     void refreshFolderName()
     void refresh()
 
+    const showDriveToast = async () => {
+      const toast = await consumeDriveUploadToast()
+      if (!toast) return
+      showBanner(toast.message, null, toast.tone)
+      await refreshDriveUploadNotice()
+      if (toast.tone === 'ok') await refresh()
+    }
+    void showDriveToast()
+
     const onPopState = () => setDetailId(readDetailIdFromUrl())
+    const onStorage: Parameters<typeof chrome.storage.onChanged.addListener>[0] = (
+      changes,
+      area,
+    ) => {
+      if (area === 'session' && changes[driveUploadToastStorageKey()]) {
+        void showDriveToast()
+      }
+      if (area === 'local' && (changes.drivePendingUploadIds || changes.driveLastUploadError)) {
+        void refreshDriveUploadNotice()
+      }
+    }
+    chrome.storage.onChanged.addListener(onStorage)
     window.addEventListener('popstate', onPopState)
     return () => {
       window.removeEventListener('popstate', onPopState)
+      chrome.storage.onChanged.removeListener(onStorage)
       Object.values(thumbUrls).forEach((u) => URL.revokeObjectURL(u))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh, refreshFolderName])
+  }, [refresh, refreshFolderName, refreshDriveUploadNotice, showBanner])
 
   // Load video when detail opens / changes.
   useEffect(() => {

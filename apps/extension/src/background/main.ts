@@ -12,6 +12,10 @@ import {
   invalidateAccessTokenDirect,
 } from '../shared/driveAuth'
 import { connectGoogleDriveInBackground } from '../shared/driveSync'
+import {
+  runDriveAutoUploadById,
+  runPendingDriveAutoUploads,
+} from '../shared/db'
 import { normalizeCameraFilter } from '../shared/cameraFilters'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
 import { openEditorTab, openLibraryTab, openRecorderTab } from '../shared/navigation'
@@ -1107,6 +1111,14 @@ async function stopLoomRecording(opts?: {
 
     await closeOffscreen()
 
+    // Upload in the SW after offscreen is closed — chrome.identity is reliable here
+    // and avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP.
+    if (result.id && isSafeRecordingId(result.id)) {
+      void runDriveAutoUploadById(result.id).catch((err) => {
+        console.error('[MyPipCam] Drive auto-upload failed:', err)
+      })
+    }
+
     if (result.id && opts?.openEditor) {
       try {
         await openEditorTab(result.id, 'trim')
@@ -1369,6 +1381,18 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(() => {})
 })
 
+// Periodic backlog drain — covers cases where the post-stop kick was missed.
+try {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== 'mypipcam-sw-keepalive') return
+    void runPendingDriveAutoUploads().catch((err) => {
+      console.warn('[MyPipCam] pending Drive auto-upload flush failed:', err)
+    })
+  })
+} catch {
+  /* alarms permission missing in unexpected builds */
+}
+
 function replySafe(
   sendResponse: (response: unknown) => void,
   payload: unknown,
@@ -1489,6 +1513,27 @@ function dispatchExtensionMessage(
         sendResponse({
           ok: false,
           reason: errMessage(err, 'Microphone permission failed'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'DRIVE_AUTO_UPLOAD') {
+    void (async () => {
+      const id = typeof message.id === 'string' ? message.id : ''
+      if (!isSafeRecordingId(id)) {
+        replySafe(sendResponse, { ok: false, reason: 'invalid-id' })
+        return
+      }
+      try {
+        const result = await runDriveAutoUploadById(id)
+        replySafe(sendResponse, { ok: true, ...result })
+      } catch (err) {
+        console.error('[MyPipCam] DRIVE_AUTO_UPLOAD failed:', err)
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Drive auto-upload failed'),
         })
       }
     })()
@@ -1791,32 +1836,59 @@ function dispatchExtensionMessage(
       sendResponse({ ok: false, reason: 'untrusted-sender' })
       return false
     }
-    const x = typeof message.x === 'number' ? message.x : undefined
-    const y = typeof message.y === 'number' ? message.y : undefined
-    const size = typeof message.size === 'number' ? message.size : undefined
-    void savePipSettings({
-      bubbleX: x,
-      bubbleY: y,
-      bubbleSize: size,
-    })
+    const patch: {
+      bubbleX?: number
+      bubbleY?: number
+      bubbleSize?: number
+    } = {}
+    if (typeof message.x === 'number' && Number.isFinite(message.x)) patch.bubbleX = message.x
+    if (typeof message.y === 'number' && Number.isFinite(message.y)) patch.bubbleY = message.y
+    if (typeof message.size === 'number' && Number.isFinite(message.size)) {
+      patch.bubbleSize = message.size
+    }
+    if (Object.keys(patch).length > 0) void savePipSettings(patch)
     sendResponse({ ok: true })
     return false
   }
 
   if (message?.type === 'LOOM_BUBBLE_SHAPE') {
-    void savePipSettings({
-      bubbleShape: message.bubbleShape === 'square' ? 'square' : 'circle',
-    })
-    sendResponse({ ok: true })
-    return false
+    const bubbleShape = message.bubbleShape === 'square' ? 'square' : 'circle'
+    void (async () => {
+      await savePipSettings({ bubbleShape })
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            bubbleShape,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true })
+    })()
+    return true
   }
 
   if (message?.type === 'LOOM_BUBBLE_EFFECT') {
-    void savePipSettings({
-      backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
-    })
-    sendResponse({ ok: true })
-    return false
+    const backgroundEffect = message.backgroundEffect === 'blur' ? 'blur' : 'none'
+    void (async () => {
+      await savePipSettings({ backgroundEffect })
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            backgroundEffect,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true })
+    })()
+    return true
   }
 
   if (message?.type === 'LOOM_BUBBLE_FILTER') {

@@ -125,12 +125,19 @@ async function applyEffect(next: BackgroundEffect) {
   }
 }
 
+let cameraBootstrapped = false
+
 async function startCamera(deviceId: string | null) {
   const params = new URLSearchParams(location.search)
-  setMirror(params.get('mirror') !== '0')
   const id = deviceId ?? params.get('deviceId')
-  effect = readEffectFromQuery()
-  applyCameraFilter(readFilterFromQuery())
+  // Seed mirror/effect/filter from the URL once. Later MPC_PIP_* messages own
+  // live state — do not reset them when switching cameras mid-recording.
+  if (!cameraBootstrapped) {
+    setMirror(params.get('mirror') !== '0')
+    effect = readEffectFromQuery()
+    applyCameraFilter(readFilterFromQuery())
+    cameraBootstrapped = true
+  }
 
   try {
     if (stream) {

@@ -1,7 +1,9 @@
 # MyPipCam promo video — script, shot list & regeneration
 
 The funnel at [mypipcam.earnyour.com](https://mypipcam.earnyour.com) embeds a ~46s
-animated promo at `apps/web/assets/promo/mypipcam-promo.mp4`.
+animated promo at `apps/web/assets/promo.mp4` (poster:
+`apps/web/assets/promo-poster.jpg`), shown in the "See MyPipCam in 45 seconds"
+section.
 
 ## How the current MP4 was made
 
@@ -28,7 +30,7 @@ npx hyperframes preview        # Studio timeline preview
 npx hyperframes render --quality high --output mypipcam-promo.mp4
 ```
 
-Poster frame: `ffmpeg -ss 2.6 -i mypipcam-promo.mp4 -frames:v 1 mypipcam-promo-poster.jpg`
+Poster frame: `ffmpeg -ss 2.6 -i promo.mp4 -frames:v 1 promo-poster.jpg`
 
 ## HeyGen Studio script (for an avatar/VO version)
 
@@ -57,7 +59,7 @@ Studio.
 | 3 | 14–23s | Countdown + PiP | Big 3→2→1 on the page; round camera bubble (orange ring) pops in and gets dragged; slim left dock (timer, stop, pause, discard) | "A live camera bubble on your page — controls are never baked into your video" |
 | 4 | 23–30s | Library | Stop clicked → Library grid: cards with thumbnails, durations, Drive badges, view counts; first card highlighted | "Every recording, saved locally — yours." |
 | 5 | 30–38s | Share + views | Detail view; **Share** clicked → "Link copied ✓" toast + `mypipcam.earnyour.com/w/…` chip; mint views chip pulses | "12 views · last viewed 2 min ago · link expires in 30 days" |
-| 6 | 38–46s | CTA | Logo, "MyPipCam", pills **Get it on GitHub** / **Install free**, URLs | "github.com/swmartinezdot33/MyPipCam · mypipcam.earnyour.com" · "By EarnYour Marketing · MIT licensed" |
+| 6 | 38–46s | CTA | Logo, "MyPipCam", pills **Get it on GitHub** / **Install free**, URLs | "github.com/EarnYour/MyPipCam · mypipcam.earnyour.com" · "By EarnYour Marketing · MIT licensed" |
 
 Brand rules: primary `#ff5e29`, secondary `#7ddf9a`, bg `#fafaf7`, ink
 `#111312`; Syne for display, Figtree for body; rounded pill buttons; no
