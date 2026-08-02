@@ -287,6 +287,8 @@ struct CameraBubbleView: View {
             }
             .popover(isPresented: $showBorderPopover, arrowEdge: .top) {
                 BorderColorPopover(settings: settings)
+                    // Break white toolbar inheritance for popover content (hex field contrast).
+                    .foregroundStyle(.primary)
             }
             .help("Appearance")
 
