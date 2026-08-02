@@ -143,6 +143,10 @@ struct LibraryView: View {
             self.selection = items.first?.id
         }
         .onChange(of: selection) { _, _ in
+            // play() sets the selection itself; don't tear down the player it
+            // is in the middle of preparing. A switch to another clip is
+            // handled by the staleness check inside play().
+            guard !isPreparingPlayback else { return }
             stopPlayback()
         }
         .onDisappear {
@@ -235,6 +239,7 @@ struct LibraryView: View {
                         .tag(item.id)
                         .contextMenu {
                             Button("Play") { play(item) }
+                                .disabled(isPreparingPlayback)
                             Button("Rename…") { beginRename(item) }
                             Button("Reveal in Finder") {
                                 store.revealRecordingInFinder(id: item.id)
@@ -331,6 +336,9 @@ struct LibraryView: View {
     }
 
     private func play(_ item: FolderRecording) {
+        // The context menu can fire on a row that isn't selected, and the
+        // staleness check below compares against the selection.
+        selection = item.id
         stopPlayback()
         isPreparingPlayback = true
         Task {

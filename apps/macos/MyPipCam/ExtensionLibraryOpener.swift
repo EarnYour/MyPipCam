@@ -6,7 +6,6 @@ enum ExtensionLibraryOpener {
     /// Stable ID from the public `key` in `apps/extension/manifest.config.ts`.
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
     static let libraryPath = "src/library/index.html"
-    static let extensionDisplayName = "MyPipCam"
 
     private static let firstOpenTipKey = "hasShownLibraryExtensionTip"
     private static let extensionIdDefaultsKey = "chromeExtensionId"

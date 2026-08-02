@@ -233,6 +233,14 @@ struct CameraBubbleView: View {
                 }
                 if microphone.devices.isEmpty {
                     Text("No microphones found")
+                    // Device names stay hidden until mic access is granted, so
+                    // without this the list is empty forever and there is no
+                    // way to grant it. Explicit opt-in, never automatic.
+                    if microphone.authorizationStatus == .notDetermined {
+                        Button("Allow Microphone Access…") {
+                            Task { await microphone.ensureAccess() }
+                        }
+                    }
                 }
                 if microphone.needsMicrophonePermissionInSettings {
                     Divider()
@@ -319,6 +327,11 @@ struct CameraBubbleView: View {
             }
             if microphone.devices.isEmpty {
                 Text("No microphones found")
+                if microphone.authorizationStatus == .notDetermined {
+                    Button("Allow Microphone Access…") {
+                        Task { await microphone.ensureAccess() }
+                    }
+                }
             }
             Divider()
             Button("Refresh Microphones") {
