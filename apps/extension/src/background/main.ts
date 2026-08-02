@@ -1000,12 +1000,29 @@ async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: strin
     session.startedAt = Date.now()
     await persistLoomSession(session)
 
+    // Retried notify — a single fire-and-forget sendMessage used to drop, and
+    // with HUD fallback-only that left users with no Stop/timer dock.
+    let dockOk = false
     try {
-      await chrome.tabs.sendMessage(session.tabId, {
-        type: 'PIP_OVERLAY_RECORDING_STARTED',
+      const res = await sendOverlayMessage<{
+        ok?: boolean
+        dockVisible?: boolean
+      }>(session.tabId, { type: 'PIP_OVERLAY_RECORDING_STARTED' }, 8)
+      dockOk = Boolean(res?.ok && res.dockVisible !== false)
+    } catch (err) {
+      startWarn(
+        'PIP_OVERLAY_RECORDING_STARTED failed',
+        errMessage(err, 'overlay notify failed'),
+      )
+    }
+    if (!dockOk) {
+      // Last resort: open the separate HUD so Stop is never unreachable.
+      startWarn('page dock notify failed — opening fallback HUD')
+      await openRecordingHud({
+        driveCountdown: false,
+        anchorTabId: session.tabId,
+        reuse: true,
       })
-    } catch {
-      /* overlay may have been removed */
     }
     await syncHud('recording')
 
@@ -1729,14 +1746,26 @@ function dispatchExtensionMessage(
         sendResponse({ ok: false, reason: 'not-recording' })
         return
       }
-      // Prefer page dock; only open HUD if overlay is gone.
+      // Prefer page dock; only open HUD if overlay/dock chrome is missing.
       try {
-        const status = await chrome.tabs.sendMessage(session.tabId, {
+        const status = (await chrome.tabs.sendMessage(session.tabId, {
           type: 'PIP_OVERLAY_STATUS',
-        })
-        if (status?.ok || status?.visible) {
+        })) as {
+          ok?: boolean
+          visible?: boolean
+          dockVisible?: boolean
+          countdownVisible?: boolean
+          phase?: string
+        }
+        const hostUp = Boolean(status?.ok || status?.visible)
+        const hasCountdown = Boolean(status?.countdownVisible)
+        const hasDock = Boolean(status?.dockVisible)
+        if (hostUp && (hasDock || hasCountdown)) {
           sendResponse({ ok: true, ui: 'page' })
           return
+        }
+        if (hostUp && !hasDock && session.phase !== 'countdown') {
+          startWarn('ENSURE_RECORDING_HUD: host up but dock not visible')
         }
       } catch {
         /* overlay missing — fall through to HUD */

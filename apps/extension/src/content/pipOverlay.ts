@@ -13,11 +13,26 @@ import {
   sanitizeCssColor,
 } from '../shared/security'
 
-/** Prevent duplicate onMessage listeners when IIFE is re-injected. */
+/**
+ * Prevent duplicate onMessage listeners when IIFE is re-injected.
+ * A single thin dispatcher calls the latest handler body so extension reloads
+ * pick up dock fixes without stacking listeners or keeping a stale pre-dock
+ * TabOverlay class. DISPATCHER_KEY is new — older builds only set INSTALL_KEY.
+ */
 const INSTALL_KEY = '__mypipcamPipOverlayInstalled'
+const DISPATCHER_KEY = '__mypipcamPipOverlayDispatcher'
+const HANDLER_KEY = '__mypipcamPipOverlayHandle'
+const INSTALL_VERSION = 2
+type OverlayMessageHandler = (
+  message: any,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: any) => void,
+) => boolean | void
 declare global {
   interface Window {
-    [INSTALL_KEY]?: boolean
+    [INSTALL_KEY]?: number | boolean
+    [DISPATCHER_KEY]?: boolean
+    [HANDLER_KEY]?: OverlayMessageHandler
   }
 }
 
@@ -269,13 +284,16 @@ function overlayStyles(): string {
       position: fixed !important;
       left: 10px !important;
       top: 50% !important;
-      transform: translateY(-50%);
+      transform: translateY(-50%) !important;
       z-index: 2147483647 !important;
-      pointer-events: auto !important;
-      display: flex !important;
+      pointer-events: none;
+      /* display:none while hidden — opacity alone can stay invisible under
+         aggressive page compositing / capture overlays. */
+      display: none;
       flex-direction: column;
       align-items: center;
       width: 48px;
+      min-height: 96px;
       padding: 6px 5px 8px;
       gap: 4px;
       border-radius: 999px;
@@ -287,8 +305,10 @@ function overlayStyles(): string {
       transition: opacity 0.18s ease;
     }
     .mpc-dock.is-visible {
+      display: flex !important;
       opacity: 1 !important;
       visibility: visible !important;
+      pointer-events: auto !important;
     }
 
     .mpc-dock-head {
@@ -612,10 +632,15 @@ type OverlayVisibility = {
   height: number
   display: string
   countdownVisible: boolean
+  dockVisible: boolean
   phase: string | null
 }
 
-function readHostVisibility(phase: string | null, countdownVisible: boolean): OverlayVisibility {
+function readHostVisibility(
+  phase: string | null,
+  countdownVisible: boolean,
+  dockVisible = false,
+): OverlayVisibility {
   const host = overlayMount?.host
   if (!host?.isConnected) {
     return {
@@ -627,6 +652,7 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
       height: 0,
       display: 'missing',
       countdownVisible: false,
+      dockVisible: false,
       phase,
     }
   }
@@ -650,6 +676,7 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
     height: Math.round(rect.height),
     display,
     countdownVisible,
+    dockVisible,
     phase,
   }
 }
@@ -1162,7 +1189,7 @@ class TabOverlay {
     }
     this.clearCollapseTimer()
     this.countdownEl.classList.add('is-hidden')
-    this.dock.classList.remove('is-visible')
+    this.hideDock()
     this.setDockExpanded(false)
     this.errorBanner?.remove()
     const banner = document.createElement('div')
@@ -1187,8 +1214,25 @@ class TabOverlay {
     if (host) prepareHostShell(host)
     const countdownVisible =
       this.state.phase === 'countdown' &&
+      this.countdownEl.isConnected &&
       !this.countdownEl.classList.contains('is-hidden')
-    return readHostVisibility(this.state.phase, countdownVisible)
+    const dockVisible = this.isDockPainted()
+    return readHostVisibility(this.state.phase, countdownVisible, dockVisible)
+  }
+
+  /** True when the left dock is actually painted (not just mounted). */
+  private isDockPainted(): boolean {
+    if (!this.dock.isConnected) return false
+    if (!this.dock.classList.contains('is-visible')) return false
+    const rect = this.dock.getBoundingClientRect()
+    const cs = getComputedStyle(this.dock)
+    return (
+      cs.display !== 'none' &&
+      cs.visibility !== 'hidden' &&
+      cs.opacity !== '0' &&
+      rect.width >= 24 &&
+      rect.height >= 48
+    )
   }
 
   private showCamBlockedFallback(message: string) {
@@ -1332,7 +1376,8 @@ class TabOverlay {
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
     this.setDockBusy(false)
     this.setDockExpanded(false)
-    this.dock.classList.remove('is-visible', 'is-paused')
+    this.dock.classList.remove('is-paused')
+    this.hideDock()
     if (!this.countdownEl.isConnected) {
       this.root.appendChild(this.countdownEl)
     }
@@ -1363,12 +1408,46 @@ class TabOverlay {
     // Hide countdown before frames are committed; show tiny collapsed dock.
     this.countdownEl.classList.add('is-hidden')
     this.countdownEl.remove()
-    this.dock.classList.add('is-visible')
     this.setDockExpanded(false)
+    this.revealDock()
     if (this.timerId == null) {
       this.timerId = window.setInterval(() => this.tickTimer(), 250)
     }
     this.tickTimer()
+  }
+
+  /**
+   * Force the collapsed left dock onto the page. Uses class + inline
+   * !important so a missed RECORDING_STARTED message or page CSS cannot
+   * leave Stop/timer invisible after countdown.
+   */
+  private revealDock() {
+    if (!this.dock.isConnected) {
+      this.root.appendChild(this.dock)
+    }
+    this.dock.classList.add('is-visible')
+    const props: Array<[string, string]> = [
+      ['display', 'flex'],
+      ['opacity', '1'],
+      ['visibility', 'visible'],
+      ['pointer-events', 'auto'],
+      ['position', 'fixed'],
+      ['left', '10px'],
+      ['top', '50%'],
+      ['transform', 'translateY(-50%)'],
+      ['z-index', '2147483647'],
+    ]
+    for (const [k, v] of props) this.dock.style.setProperty(k, v, 'important')
+    const host = overlayMount?.host
+    if (host) prepareHostShell(host)
+  }
+
+  private hideDock() {
+    this.dock.classList.remove('is-visible')
+    this.dock.style.removeProperty('display')
+    this.dock.style.removeProperty('opacity')
+    this.dock.style.removeProperty('visibility')
+    this.dock.style.removeProperty('pointer-events')
   }
 
   private tickTimer() {
@@ -1415,9 +1494,10 @@ class TabOverlay {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
-    // Hide before MediaRecorder starts so the number/dim isn't in first frames.
-    this.countdownEl.classList.add('is-hidden')
-    this.countdownEl.remove()
+    // Hide countdown AND show dock immediately — do not wait for
+    // PIP_OVERLAY_RECORDING_STARTED (that message can fail silently and used
+    // to leave users with zero controls after the HUD was made fallback-only).
+    this.enterRecordingUi()
     void (async () => {
       try {
         const res = (await chrome.runtime.sendMessage({
@@ -1428,7 +1508,11 @@ class TabOverlay {
             res?.reason?.trim() ||
               'Could not start capture after countdown. Try Start again.',
           )
+          return
         }
+        // Belt-and-suspenders: ensure dock stays painted even if the SW's
+        // RECORDING_STARTED ping was dropped.
+        this.enterRecordingUi()
       } catch (err) {
         const msg =
           err instanceof Error && err.message.trim()
@@ -1445,7 +1529,7 @@ class TabOverlay {
       this.root.appendChild(this.countdownEl)
     }
     this.countdownEl.classList.remove('is-hidden')
-    this.dock.classList.remove('is-visible')
+    this.hideDock()
     this.setDockExpanded(false)
     const show = () => {
       this.countdownNum.textContent = String(n)
@@ -1804,9 +1888,18 @@ function clearOverlaySingleton() {
   overlay = null
 }
 
-if (!window[INSTALL_KEY]) {
-  window[INSTALL_KEY] = true
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const priorInstall = window[INSTALL_KEY]
+if (priorInstall != null && priorInstall !== INSTALL_VERSION) {
+  // Older injected build — drop its host so the new dock markup can mount cleanly.
+  overlay = null
+  try {
+    removeRoot()
+  } catch {
+    /* ignore */
+  }
+}
+
+window[HANDLER_KEY] = (message, _sender, sendResponse) => {
   if (message?.type === 'PIP_OVERLAY_START') {
     try {
       console.log('[MyPipCam][start] PIP_OVERLAY_START received', {
@@ -1895,9 +1988,18 @@ if (!window[INSTALL_KEY]) {
     sendResponse({ ...rest, ok: visibility.visible })
     return true
   }
-  if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED' && overlay) {
+  if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED') {
+    if (!overlay) {
+      sendResponse({ ok: false, reason: 'no-overlay', dockVisible: false })
+      return true
+    }
     overlay.beginRecordingClock()
-    sendResponse({ ok: true })
+    const visibility = overlay.getVisibility()
+    sendResponse({
+      ok: true,
+      dockVisible: visibility.dockVisible,
+      phase: visibility.phase,
+    })
     return true
   }
   if (message?.type === 'PIP_OVERLAY_RESTART' && overlay) {
@@ -1969,5 +2071,14 @@ if (!window[INSTALL_KEY]) {
     return true
   }
   return false
-})
+}
+
+window[INSTALL_KEY] = INSTALL_VERSION
+if (!window[DISPATCHER_KEY]) {
+  window[DISPATCHER_KEY] = true
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const handle = window[HANDLER_KEY]
+    if (!handle) return false
+    return handle(message, sender, sendResponse) ?? false
+  })
 }
