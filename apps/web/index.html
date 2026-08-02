@@ -170,9 +170,10 @@
           <span>MyPipCam</span>
         </a>
         <nav class="nav" aria-label="Primary">
+          <a href="#watch">Watch</a>
+          <a href="#see-it">Screenshots</a>
           <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-          <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
-          <a href="https://mypipcam.earnyour.com/terms">Terms</a>
+          <a href="#install">Install</a>
         </nav>
       </div>
     </header>
@@ -199,18 +200,137 @@
               <a
                 class="btn btn--primary"
                 href="https://github.com/swmartinezdot33/MyPipCam"
-                >View on GitHub</a
+                >Download on GitHub</a
               >
+              <a class="btn btn--ghost" href="#watch">Watch the demo</a>
               <a
                 class="btn btn--ghost"
                 href="https://github.com/swmartinezdot33/MyPipCam#readme"
-                >Install from source</a
+                >Install guide</a
               >
             </div>
           </div>
           <div class="hero__visual" aria-hidden="true">
+            <img
+              class="hero__shot"
+              src="https://mypipcam.earnyour.com/assets/shot-detail.png"
+              width="960"
+              height="600"
+              alt=""
+            />
             <span class="pip"></span>
             <span class="mint-dot"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--watch" aria-labelledby="watch-title" id="watch">
+        <div class="section__inner">
+          <h2 id="watch-title">See MyPipCam in 40 seconds</h2>
+          <p>
+            Tab + camera PiP, a local library, optional Drive sync, and share
+            links that track views — free and open source.
+          </p>
+          <div class="video-frame">
+            <video
+              id="promo-video"
+              class="video-frame__player"
+              controls
+              playsinline
+              preload="metadata"
+              poster="https://mypipcam.earnyour.com/assets/promo-poster.jpg"
+              data-ready="true"
+            >
+              <source
+                id="promo-video-source"
+                src="https://mypipcam.earnyour.com/assets/promo.mp4"
+                type="video/mp4"
+              />
+            </video>
+            <p class="video-frame__fallback" id="promo-video-fallback" hidden>
+              Having trouble playing?
+              <a href="https://mypipcam.earnyour.com/assets/promo.mp4"
+                >Open the promo MP4</a
+              >
+              or
+              <a href="https://github.com/swmartinezdot33/MyPipCam"
+                >get MyPipCam on GitHub</a
+              >.
+            </p>
+          </div>
+          <div class="cta-row cta-row--center">
+            <a
+              class="btn btn--primary"
+              href="https://github.com/swmartinezdot33/MyPipCam"
+              >Get the Chrome + Mac apps</a
+            >
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/swmartinezdot33/MyPipCam/releases"
+              >Releases</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--shots" aria-labelledby="shots-title" id="see-it">
+        <div class="section__inner">
+          <h2 id="shots-title">Real product screenshots</h2>
+          <p>
+            The Chrome popup, Library, Drive settings, and share detail page —
+            the same UI you get after install.
+          </p>
+          <div class="shot-grid">
+            <figure class="shot">
+              <img
+                src="https://mypipcam.earnyour.com/assets/shot-popup.png"
+                width="1200"
+                height="750"
+                loading="lazy"
+                alt="MyPipCam extension popup ready to share a Chrome tab and start recording"
+              />
+              <figcaption>Popup — share tab &amp; start</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="https://mypipcam.earnyour.com/assets/shot-library.png"
+                width="1200"
+                height="750"
+                loading="lazy"
+                alt="MyPipCam Library grid with Drive badges and New recording button"
+              />
+              <figcaption>Library — clips, Drive sync, New recording</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="https://mypipcam.earnyour.com/assets/shot-detail.png"
+                width="1200"
+                height="750"
+                loading="lazy"
+                alt="MyPipCam recording detail with camera PiP in the player and Share button"
+              />
+              <figcaption>Detail — PiP playback, edit &amp; share</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="https://mypipcam.earnyour.com/assets/shot-share.png"
+                width="1200"
+                height="750"
+                loading="lazy"
+                alt="MyPipCam share settings with mypipcam.earnyour.com watch link"
+              />
+              <figcaption>Share — watch links with view tracking</figcaption>
+            </figure>
+            <figure class="shot shot--wide">
+              <img
+                src="https://mypipcam.earnyour.com/assets/shot-settings.png"
+                width="1200"
+                height="750"
+                loading="lazy"
+                alt="MyPipCam Settings with local Movies folder and Google Drive connected"
+              />
+              <figcaption>Settings — local folder + Google Drive connected</figcaption>
+            </figure>
           </div>
         </div>
       </section>
@@ -300,6 +420,56 @@
               </p>
             </li>
           </ul>
+        </div>
+      </section>
+
+      <section class="section section--install" aria-labelledby="install-title" id="install">
+        <div class="section__inner section__inner--install">
+          <h2 id="install-title">Install from GitHub in minutes</h2>
+          <p>
+            Clone the repo, build the Chrome extension into
+            <code>apps/extension/dist</code>, load unpacked in Chrome, and
+            optionally install the macOS PiP bubble. Full steps live in the
+            README.
+          </p>
+          <ol class="install-steps">
+            <li>
+              <strong>Clone</strong>
+              <p>
+                <code>git clone https://github.com/swmartinezdot33/MyPipCam.git</code>
+              </p>
+            </li>
+            <li>
+              <strong>Build the extension</strong>
+              <p>
+                <code>cd apps/extension &amp;&amp; npm install &amp;&amp; npm run build</code>
+              </p>
+            </li>
+            <li>
+              <strong>Load unpacked</strong>
+              <p>
+                Chrome → Extensions → Developer mode → Load
+                <code>apps/extension/dist</code>
+              </p>
+            </li>
+          </ol>
+          <div class="cta-row">
+            <a
+              class="btn btn--primary"
+              href="https://github.com/swmartinezdot33/MyPipCam"
+              >Open GitHub repository</a
+            >
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/swmartinezdot33/MyPipCam#readme"
+              >Read the README</a
+            >
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/swmartinezdot33/MyPipCam/blob/master/AGENTS.md"
+              >Agent / build notes</a
+            >
+          </div>
         </div>
       </section>
 
@@ -399,5 +569,16 @@
         </nav>
       </div>
     </footer>
+    <script>
+      (function () {
+        var video = document.getElementById("promo-video");
+        var fallback = document.getElementById("promo-video-fallback");
+        if (!video) return;
+        video.addEventListener("error", function () {
+          if (fallback) fallback.hidden = false;
+          video.removeAttribute("data-ready");
+        });
+      })();
+    </script>
   </body>
 </html>
