@@ -79,11 +79,11 @@ export async function exportEditedVideo(
   onLog?: (msg: string) => void,
 ): Promise<Blob> {
   const ffmpeg = await getFFmpeg(onLog)
-  ffmpeg.on('progress', ({ progress }) => onProgress?.(progress))
+  const progressHandler = ({ progress }: { progress: number }) => onProgress?.(progress)
+  ffmpeg.on('progress', progressHandler)
 
   const inName = 'input.webm'
   const outName = 'output.webm'
-  await ffmpeg.writeFile(inName, await fetchFile(input))
 
   const segments = planToKeepSegments(plan)
   if (segments.length === 0) {
@@ -92,69 +92,75 @@ export async function exportEditedVideo(
 
   const noise = plan.noiseReduce ? ',afftdn=nf=-25' : ''
 
+  // -y so a partial output.webm from an earlier failed export never blocks the next run.
   const run = async (args: string[]) => {
-    await ffmpeg.exec(args)
+    await ffmpeg.exec(['-y', ...args])
   }
 
-  if (segments.length === 1 && !plan.noiseReduce) {
-    const seg = segments[0]!
-    try {
-      await run([
-        '-ss',
-        String(seg.start),
-        '-to',
-        String(seg.end),
-        '-i',
-        inName,
-        '-c:v',
-        'libvpx',
-        '-b:v',
-        '2M',
-        '-c:a',
-        'libvorbis',
-        outName,
-      ])
-    } catch {
-      await run([
-        '-ss',
-        String(seg.start),
-        '-to',
-        String(seg.end),
-        '-i',
-        inName,
-        '-c:v',
-        'libvpx',
-        '-b:v',
-        '2M',
-        '-an',
-        outName,
-      ])
-    }
-  } else {
-    const tryChain = async (withAudio: boolean, noise: string) => {
-      await run(buildConcatArgs(inName, outName, segments, withAudio, noise))
-    }
-    try {
-      await tryChain(true, noise)
-    } catch {
+  try {
+    await ffmpeg.writeFile(inName, await fetchFile(input))
+
+    if (segments.length === 1 && !plan.noiseReduce) {
+      const seg = segments[0]!
       try {
-        // Retry without noise reduction if afftdn is unavailable in this ffmpeg build
-        await tryChain(true, '')
+        await run([
+          '-ss',
+          String(seg.start),
+          '-to',
+          String(seg.end),
+          '-i',
+          inName,
+          '-c:v',
+          'libvpx',
+          '-b:v',
+          '2M',
+          '-c:a',
+          'libvorbis',
+          outName,
+        ])
       } catch {
-        await tryChain(false, '')
+        await run([
+          '-ss',
+          String(seg.start),
+          '-to',
+          String(seg.end),
+          '-i',
+          inName,
+          '-c:v',
+          'libvpx',
+          '-b:v',
+          '2M',
+          '-an',
+          outName,
+        ])
+      }
+    } else {
+      const tryChain = async (withAudio: boolean, noise: string) => {
+        await run(buildConcatArgs(inName, outName, segments, withAudio, noise))
+      }
+      try {
+        await tryChain(true, noise)
+      } catch {
+        try {
+          // Retry without noise reduction if afftdn is unavailable in this ffmpeg build
+          await tryChain(true, '')
+        } catch {
+          await tryChain(false, '')
+        }
       }
     }
+
+    const data = await ffmpeg.readFile(outName)
+    const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data))
+    // Copy into a fresh ArrayBuffer-backed Uint8Array for Blob Part compatibility
+    const copy = new Uint8Array(bytes.byteLength)
+    copy.set(bytes)
+    return new Blob([copy], { type: 'video/webm' })
+  } finally {
+    ffmpeg.off('progress', progressHandler)
+    await ffmpeg.deleteFile(inName).catch(() => {})
+    await ffmpeg.deleteFile(outName).catch(() => {})
   }
-
-  const data = await ffmpeg.readFile(outName)
-  await ffmpeg.deleteFile(inName)
-  await ffmpeg.deleteFile(outName)
-
-  const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data))
-  // Copy into a fresh ArrayBuffer-backed Uint8Array for Blob Part compatibility
-  const copy = new Uint8Array(bytes.byteLength)
-  copy.set(bytes)
-  return new Blob([copy], { type: 'video/webm' })
 }
 
 function buildConcatArgs(

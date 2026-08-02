@@ -151,6 +151,12 @@ export function LibraryApp() {
         Object.values(prev).forEach((u) => URL.revokeObjectURL(u))
         return urls
       })
+    } catch (err) {
+      // Without this the rejection is unhandled and the library silently shows
+      // "No recordings yet", which reads as data loss.
+      setBannerMsg(
+        err instanceof Error ? err.message : 'Could not load the library. Try reloading.',
+      )
     } finally {
       setLoading(false)
     }
@@ -406,11 +412,7 @@ export function LibraryApp() {
       }
       const rec = await getRecording(id)
       if (!rec) throw new Error('Recording not found.')
-      const result = await transcribeWithOpenAI(
-        rec.blob,
-        rec.mimeType || 'video/webm',
-        settings.openaiApiKey,
-      )
+      const result = await transcribeWithOpenAI(rec.blob, settings.openaiApiKey)
       await updateRecordingTranscript(id, result)
       setItems((prev) => prev.map((i) => (i.id === id ? { ...i, transcript: result } : i)))
       setBannerMsg('Transcript ready.')

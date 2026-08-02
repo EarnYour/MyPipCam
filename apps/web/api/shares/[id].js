@@ -1,4 +1,4 @@
-import { cors, getSupabase, json, mapShare } from '../_lib/supabase.js'
+import { cors, getSupabase, json, mapShare, serverError } from '../_lib/supabase.js'
 
 /**
  * GET /api/shares/:id — public share metadata for the watch page
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
       .maybeSingle()
 
     if (error) {
-      json(res, 500, { error: error.message })
+      serverError(res, 'share fetch failed', error)
       return
     }
     if (!data) {
@@ -43,6 +43,10 @@ export default async function handler(req, res) {
 
     json(res, 200, { share: mapShare(data) })
   } catch (err) {
-    json(res, err.statusCode || 500, { error: err.message || 'Server error' })
+    if (err.statusCode) {
+      json(res, err.statusCode, { error: err.message })
+      return
+    }
+    serverError(res, 'share handler failed', err)
   }
 }

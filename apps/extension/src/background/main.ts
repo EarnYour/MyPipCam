@@ -20,6 +20,12 @@ import {
 } from '../shared/security'
 import type { RecordMode } from '../shared/types'
 
+// Content scripts (pipOverlay guide mode) write pipOverlayLive to session
+// storage; without this, those writes reject and the recorder never sees them.
+void chrome.storage.session
+  .setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
+  .catch(() => {})
+
 /** Short-lived tokens allowing the WAR PiP iframe to start the camera. */
 const PIP_TOKEN_TTL_MS = 10 * 60 * 1000
 const PIP_TOKEN_PREFIX = 'pipCh:'
@@ -1082,9 +1088,13 @@ chrome.commands.onCommand.addListener(async (command) => {
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (loomSession?.tabId === tabId) {
-    void discardLoomRecording()
-  }
+  // Hydrate first: after an MV3 SW restart the in-memory session is gone
+  // while offscreen capture for the closed tab may still be live.
+  void hydrateLoomSession().then(() => {
+    if (loomSession?.tabId === tabId) {
+      return discardLoomRecording()
+    }
+  })
 })
 
 /**
@@ -1166,10 +1176,14 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'REVOKE_PIP_CHANNEL') {
+    // Same gate as REGISTER: only the content script that minted a token may
+    // revoke it — a WAR iframe must not be able to kill another tab's channel.
+    if (!isContentScriptSender(sender) || !isPipChannelToken(message.token)) {
+      sendResponse({ ok: false, reason: 'invalid-pip-channel' })
+      return false
+    }
     void (async () => {
-      if (isPipChannelToken(message.token)) {
-        await revokePipChannelToken(message.token)
-      }
+      await revokePipChannelToken(message.token)
       sendResponse({ ok: true })
     })()
     return true
@@ -1511,6 +1525,10 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'LOOM_BUBBLE_SHAPE') {
+    if (!isContentScriptSender(sender)) {
+      sendResponse({ ok: false, reason: 'untrusted-sender' })
+      return false
+    }
     void savePipSettings({
       bubbleShape: message.bubbleShape === 'square' ? 'square' : 'circle',
     })
@@ -1519,6 +1537,10 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'LOOM_BUBBLE_EFFECT') {
+    if (!isContentScriptSender(sender)) {
+      sendResponse({ ok: false, reason: 'untrusted-sender' })
+      return false
+    }
     void savePipSettings({
       backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
     })

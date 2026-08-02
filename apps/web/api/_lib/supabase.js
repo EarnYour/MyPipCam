@@ -13,9 +13,7 @@ export function getSupabase() {
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
   if (!url || !key) {
-    const err = new Error(
-      'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Set them in Vercel project env (never commit service_role).',
-    )
+    const err = new Error('Share service is not configured')
     err.statusCode = 503
     throw err
   }
@@ -36,31 +34,72 @@ export function json(res, status, body) {
   res.end(JSON.stringify(body))
 }
 
-export function cors(req, res) {
-  const origin = req.headers.origin || '*'
-  // Extension pages use chrome-extension:// origins; allow those + product site.
-  const allowed =
-    origin === '*' ||
-    origin.startsWith('chrome-extension://') ||
-    origin.endsWith('mypipcam.earnyour.com') ||
-    origin.endsWith('mypipcam.vercel.app') ||
-    origin.includes('localhost') ||
-    origin.includes('127.0.0.1')
+/**
+ * Log the real error server-side, return a generic message to the client.
+ * Internal Supabase/driver messages must never reach callers.
+ */
+export function serverError(res, context, error) {
+  console.error(`[mypipcam] ${context}:`, error?.message || error)
+  json(res, 500, { error: 'Server error' })
+}
 
-  res.setHeader('Access-Control-Allow-Origin', allowed ? origin : 'https://mypipcam.earnyour.com')
+const ALLOWED_ORIGINS = new Set([
+  'https://mypipcam.earnyour.com',
+  'https://mypipcam.vercel.app',
+])
+
+function isAllowedOrigin(origin) {
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  // Extension pages use chrome-extension:// origins.
+  if (/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) return true
+  try {
+    const { protocol, hostname } = new URL(origin)
+    if (protocol !== 'http:' && protocol !== 'https:') return false
+    return hostname === 'localhost' || hostname === '127.0.0.1'
+  } catch {
+    return false
+  }
+}
+
+export function cors(req, res) {
+  const origin = req.headers.origin || ''
+  res.setHeader(
+    'Access-Control-Allow-Origin',
+    origin && isAllowedOrigin(origin) ? origin : 'https://mypipcam.earnyour.com',
+  )
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   res.setHeader('Vary', 'Origin')
 }
 
+/** Google Drive file IDs are URL-safe tokens. */
+export function isValidDriveFileId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9_-]{10,120}$/.test(id)
+}
+
+/** Only real Google Drive/Docs links may be stored — the watch page renders this. */
+export function isValidDriveLink(link) {
+  if (typeof link !== 'string' || link.length > 500) return false
+  try {
+    const { protocol, hostname } = new URL(link)
+    return (
+      protocol === 'https:' &&
+      (hostname === 'drive.google.com' || hostname === 'docs.google.com')
+    )
+  } catch {
+    return false
+  }
+}
+
 export function mapShare(row) {
   if (!row) return null
+  // owner_hint is intentionally omitted: it is caller-supplied free text and
+  // must not be disclosed to anyone who merely knows a share id.
   return {
     id: row.id,
     recordingId: row.recording_id,
     driveFileId: row.drive_file_id ?? undefined,
     driveWebViewLink: row.drive_web_view_link ?? undefined,
-    ownerHint: row.owner_hint ?? undefined,
     createdAt: row.created_at,
     viewCount: row.view_count ?? 0,
     lastViewedAt: row.last_viewed_at ?? null,
@@ -68,19 +107,32 @@ export function mapShare(row) {
   }
 }
 
-/** URL-safe share id (~16 chars). */
+/** URL-safe share id, 16 chars / 96 bits (no modulo bias). */
 export function makeShareId() {
-  const bytes = randomBytes(12)
-  let out = ''
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  for (const b of bytes) out += alphabet[b % alphabet.length]
-  return out
+  return randomBytes(12).toString('base64url')
 }
+
+const MAX_BODY_BYTES = 64 * 1024
 
 export async function readJson(req) {
   const chunks = []
-  for await (const chunk of req) chunks.push(chunk)
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > MAX_BODY_BYTES) {
+      const err = new Error('Request body too large')
+      err.statusCode = 413
+      throw err
+    }
+    chunks.push(chunk)
+  }
   const raw = Buffer.concat(chunks).toString('utf8')
   if (!raw) return {}
-  return JSON.parse(raw)
+  try {
+    return JSON.parse(raw)
+  } catch {
+    const err = new Error('Invalid JSON body')
+    err.statusCode = 400
+    throw err
+  }
 }

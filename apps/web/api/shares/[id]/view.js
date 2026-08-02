@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto'
-import { cors, getSupabase, json, mapShare, readJson } from '../../_lib/supabase.js'
+import {
+  cors,
+  getSupabase,
+  json,
+  mapShare,
+  readJson,
+  serverError,
+} from '../../_lib/supabase.js'
 
 /**
  * POST /api/shares/:id/view — record a watch-page open (counts as a view)
@@ -46,7 +53,11 @@ export default async function handler(req, res) {
       const notFound =
         /share not found|invalid share/i.test(error.message || '') ||
         error.code === 'P0001'
-      json(res, notFound ? 404 : 500, { error: error.message })
+      if (notFound) {
+        json(res, 404, { error: 'Share not found' })
+        return
+      }
+      serverError(res, 'record view failed', error)
       return
     }
 
@@ -58,6 +69,10 @@ export default async function handler(req, res) {
 
     json(res, 200, { share: mapShare(row) })
   } catch (err) {
-    json(res, err.statusCode || 500, { error: err.message || 'Server error' })
+    if (err.statusCode) {
+      json(res, err.statusCode, { error: err.message })
+      return
+    }
+    serverError(res, 'view handler failed', err)
   }
 }

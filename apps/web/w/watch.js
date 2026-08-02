@@ -18,6 +18,24 @@
     return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
   }
 
+  // Share data comes from the API but is ultimately caller-supplied; only
+  // render links that are genuinely Google Drive URLs.
+  function safeDriveLink(link) {
+    if (typeof link !== 'string') return null
+    try {
+      const url = new URL(link)
+      if (
+        url.protocol === 'https:' &&
+        (url.hostname === 'drive.google.com' || url.hostname === 'docs.google.com')
+      ) {
+        return url.href
+      }
+    } catch {
+      /* fall through */
+    }
+    return null
+  }
+
   function showError(title, body) {
     statusEl.textContent = 'Unavailable'
     placeholderTitle.textContent = title
@@ -81,11 +99,21 @@
     player.src = drivePreviewUrl(fileId)
 
     hint.hidden = false
-    hint.innerHTML =
-      'If the video does not appear, your browser may block the Drive embed. ' +
-      (share.driveWebViewLink
-        ? `<a href="${share.driveWebViewLink}" target="_blank" rel="noopener">Open in Google Drive</a>.`
-        : 'Open the link again later, or ask the owner to re-share.')
+    hint.textContent = 'If the video does not appear, your browser may block the Drive embed. '
+    const driveLink = safeDriveLink(share.driveWebViewLink)
+    if (driveLink) {
+      const a = document.createElement('a')
+      a.href = driveLink
+      a.target = '_blank'
+      a.rel = 'noopener'
+      a.textContent = 'Open in Google Drive'
+      hint.appendChild(a)
+      hint.appendChild(document.createTextNode('.'))
+    } else {
+      hint.appendChild(
+        document.createTextNode('Open the link again later, or ask the owner to re-share.'),
+      )
+    }
   }
 
   void main()

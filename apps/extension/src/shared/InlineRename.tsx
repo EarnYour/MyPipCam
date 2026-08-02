@@ -36,6 +36,10 @@ export function InlineRename({ title, onSave, className, as: Tag = 'h3' }: Props
     try {
       await onSave(next)
       setEditing(false)
+    } catch (err) {
+      // Keep the draft so the user can retry; without this the rejection is
+      // unhandled and the input silently stays stuck in edit mode.
+      console.warn('[MyPipCam] rename failed', err)
     } finally {
       setBusy(false)
     }

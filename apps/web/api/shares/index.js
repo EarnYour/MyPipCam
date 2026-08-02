@@ -1,10 +1,13 @@
 import {
   cors,
   getSupabase,
+  isValidDriveFileId,
+  isValidDriveLink,
   json,
   makeShareId,
   mapShare,
   readJson,
+  serverError,
 } from '../_lib/supabase.js'
 
 /**
@@ -43,7 +46,7 @@ export default async function handler(req, res) {
         .in('id', ids)
 
       if (error) {
-        json(res, 500, { error: error.message })
+        serverError(res, 'batch share lookup failed', error)
         return
       }
 
@@ -66,6 +69,16 @@ export default async function handler(req, res) {
         json(res, 400, { error: 'recordingId is required' })
         return
       }
+      if (driveFileId && !isValidDriveFileId(driveFileId)) {
+        json(res, 400, { error: 'driveFileId is not a valid Drive file id' })
+        return
+      }
+      if (driveWebViewLink && !isValidDriveLink(driveWebViewLink)) {
+        json(res, 400, {
+          error: 'driveWebViewLink must be an https://drive.google.com link',
+        })
+        return
+      }
 
       const { data: existing, error: findErr } = await supabase
         .from('mypipcam_shares')
@@ -76,7 +89,7 @@ export default async function handler(req, res) {
         .maybeSingle()
 
       if (findErr) {
-        json(res, 500, { error: findErr.message })
+        serverError(res, 'share lookup failed', findErr)
         return
       }
 
@@ -99,7 +112,7 @@ export default async function handler(req, res) {
             .single()
 
           if (updErr) {
-            json(res, 500, { error: updErr.message })
+            serverError(res, 'share update failed', updErr)
             return
           }
           json(res, 200, { share: mapShare(updated), created: false })
@@ -140,7 +153,7 @@ export default async function handler(req, res) {
             return
           }
         }
-        json(res, 500, { error: insErr.message })
+        serverError(res, 'share insert failed', insErr)
         return
       }
 
@@ -150,6 +163,10 @@ export default async function handler(req, res) {
 
     json(res, 405, { error: 'Method not allowed' })
   } catch (err) {
-    json(res, err.statusCode || 500, { error: err.message || 'Server error' })
+    if (err.statusCode) {
+      json(res, err.statusCode, { error: err.message })
+      return
+    }
+    serverError(res, 'shares handler failed', err)
   }
 }

@@ -175,7 +175,12 @@ export function PipBubble({ canvas, cameraStream, settings, api, onPersist, onLi
     persistPosition()
   }
 
-  function onWheel(e: React.WheelEvent<HTMLDivElement>) {
+  // React registers root wheel listeners passively, so preventDefault from a
+  // React onWheel prop is a no-op and the page scrolls while resizing. Attach a
+  // native non-passive listener instead; latest-props via ref.
+  const persistTimerRef = useRef<number | null>(null)
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => {})
+  wheelRef.current = (e: WheelEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const cur = api.getBubbleRect()
@@ -184,8 +189,26 @@ export function PipBubble({ canvas, cameraStream, settings, api, onPersist, onLi
     api.setBubbleSize(next)
     const rect = api.getBubbleRect()
     onLiveMove?.(rect.x, rect.y, rect.size)
-    onPersist({ bubbleSize: next })
+    bump((n) => n + 1)
+    // Debounce: storage.sync allows only 120 writes/minute — one write per
+    // wheel tick locks out all settings writes after ~2s of scrolling.
+    if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = window.setTimeout(() => {
+      persistTimerRef.current = null
+      onPersist({ bubbleSize: api.getBubbleRect().size })
+    }, 250)
   }
+
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => wheelRef.current(e)
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', handler)
+      if (persistTimerRef.current != null) window.clearTimeout(persistTimerRef.current)
+    }
+  }, [cameraStream])
 
   if (!cameraStream) return null
 
@@ -205,7 +228,6 @@ export function PipBubble({ canvas, cameraStream, settings, api, onPersist, onLi
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onWheel={onWheel}
       title="Drag to move · scroll or corner to resize"
       role="slider"
       aria-label="Camera bubble position and size"

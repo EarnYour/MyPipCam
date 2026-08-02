@@ -4,6 +4,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MACOS="$ROOT/apps/macos"
+
+# Override with your own Apple Development Team when forking:
+#   MYPIPCAM_DEV_TEAM=ABCDE12345 ./scripts/install-macos-app.sh
+DEV_TEAM="${MYPIPCAM_DEV_TEAM:-977CN6XFAH}"
+
+if ! command -v magick >/dev/null 2>&1; then
+  echo "ImageMagick ('magick') is required for icon generation. Install it (e.g. brew install imagemagick) and re-run." >&2
+  exit 1
+fi
 ICONSET="$MACOS/MyPipCam/Assets.xcassets/AppIcon.appiconset"
 DERIVED="$MACOS/build-release"
 APP_SRC="$DERIVED/Build/Products/Release/MyPipCam.app"
@@ -27,15 +36,15 @@ magick -background none "$SVG" -resize 1024x1024 "PNG32:$MASTER"
 # filename → pixel size
 declare -a PAIRS=(
   "icon_16x16.png:16"
-  "diana.k@example.org:32"
+  "icon_16x16@2x.png:32"
   "icon_32x32.png:32"
-  "ivan.p@example.net:64"
+  "icon_32x32@2x.png:64"
   "icon_128x128.png:128"
-  "wendy.h@example.net:256"
+  "icon_128x128@2x.png:256"
   "icon_256x256.png:256"
-  "wendy.h@example.net:512"
+  "icon_256x256@2x.png:512"
   "icon_512x512.png:512"
-  "walt.e@example.net:1024"
+  "icon_512x512@2x.png:1024"
 )
 
 for pair in "${PAIRS[@]}"; do
@@ -48,15 +57,15 @@ cat > "$ICONSET/Contents.json" << 'EOF'
 {
   "images" : [
     { "filename" : "icon_16x16.png", "idiom" : "mac", "scale" : "1x", "size" : "16x16" },
-    { "filename" : "diana.k@example.org", "idiom" : "mac", "scale" : "2x", "size" : "16x16" },
+    { "filename" : "icon_16x16@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "16x16" },
     { "filename" : "icon_32x32.png", "idiom" : "mac", "scale" : "1x", "size" : "32x32" },
-    { "filename" : "ivan.p@example.net", "idiom" : "mac", "scale" : "2x", "size" : "32x32" },
+    { "filename" : "icon_32x32@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "32x32" },
     { "filename" : "icon_128x128.png", "idiom" : "mac", "scale" : "1x", "size" : "128x128" },
-    { "filename" : "wendy.h@example.net", "idiom" : "mac", "scale" : "2x", "size" : "128x128" },
+    { "filename" : "icon_128x128@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "128x128" },
     { "filename" : "icon_256x256.png", "idiom" : "mac", "scale" : "1x", "size" : "256x256" },
-    { "filename" : "wendy.h@example.net", "idiom" : "mac", "scale" : "2x", "size" : "256x256" },
+    { "filename" : "icon_256x256@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "256x256" },
     { "filename" : "icon_512x512.png", "idiom" : "mac", "scale" : "1x", "size" : "512x512" },
-    { "filename" : "walt.e@example.net", "idiom" : "mac", "scale" : "2x", "size" : "512x512" }
+    { "filename" : "icon_512x512@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "512x512" }
   ],
   "info" : { "author" : "xcode", "version" : 1 }
 }
@@ -70,7 +79,7 @@ xcodebuild \
   -scheme MyPipCam \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
-  DEVELOPMENT_TEAM=977CN6XFAH \
+  DEVELOPMENT_TEAM="$DEV_TEAM" \
   CODE_SIGN_STYLE=Automatic \
   build
 

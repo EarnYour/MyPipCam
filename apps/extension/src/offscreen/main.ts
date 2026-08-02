@@ -37,6 +37,9 @@ let mixedStream: MediaStream | null = null
 let audioCtx: AudioContext | null = null
 let prepared = false
 let paused = false
+/** Accumulated paused time, excluded from the saved duration. */
+let pausedTotalMs = 0
+let pausedAt = 0
 
 function errDetail(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.trim()) return err.message.trim()
@@ -280,6 +283,8 @@ function cleanupMedia() {
   recorder = null
   chunks = []
   paused = false
+  pausedTotalMs = 0
+  pausedAt = 0
   prepared = false
   stopTracks(mixedStream)
   stopTracks(tabStream)
@@ -372,6 +377,8 @@ async function startRecorder() {
   mimeType = pickMimeType()
   chunks = []
   paused = false
+  pausedTotalMs = 0
+  pausedAt = 0
   try {
     recorder = new MediaRecorder(
       mixedStream,
@@ -411,6 +418,7 @@ function pauseRecording(): { ok: boolean; reason?: string } {
   try {
     recorder.pause()
     paused = true
+    pausedAt = Date.now()
     return { ok: true }
   } catch (err) {
     return { ok: false, reason: errDetail(err, 'pause-failed') }
@@ -424,6 +432,10 @@ function resumeRecording(): { ok: boolean; reason?: string } {
   try {
     recorder.resume()
     paused = false
+    if (pausedAt > 0) {
+      pausedTotalMs += Date.now() - pausedAt
+      pausedAt = 0
+    }
     return { ok: true }
   } catch (err) {
     return { ok: false, reason: errDetail(err, 'resume-failed') }
@@ -457,6 +469,8 @@ async function resetRecordingKeepStreams(): Promise<{ ok: boolean; reason?: stri
   recorder = null
   chunks = []
   paused = false
+  pausedTotalMs = 0
+  pausedAt = 0
   startedAt = 0
 
   const videoAlive = Boolean(
@@ -479,7 +493,9 @@ async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; re
     return { ok: false, reason: 'not-recording' }
   }
 
-  const durationMs = Date.now() - startedAt
+  // Exclude time spent paused — a stop while still paused counts up to pausedAt.
+  const pausedMs = pausedTotalMs + (paused && pausedAt > 0 ? Date.now() - pausedAt : 0)
+  const durationMs = Math.max(0, Date.now() - startedAt - pausedMs)
   const blob = await new Promise<Blob>((resolve, reject) => {
     const finish = () => resolve(new Blob(chunks, { type: mimeType }))
     active.onstop = finish
@@ -528,6 +544,8 @@ async function blobToThumbnail(blob: Blob): Promise<Blob | undefined> {
     await new Promise<void>((resolve, reject) => {
       video.onloadeddata = () => resolve()
       video.onerror = () => reject(new Error('thumb load failed'))
+      // A blob that never fires either event must not block saving the recording.
+      window.setTimeout(() => reject(new Error('thumb load timeout')), 5000)
     })
     video.currentTime = Math.min(0.5, (video.duration || 1) * 0.1)
     await new Promise<void>((resolve) => {

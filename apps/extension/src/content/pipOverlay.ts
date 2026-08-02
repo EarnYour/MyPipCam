@@ -1103,7 +1103,12 @@ class TabOverlay {
     const prevMirror = this.state.mirror
     const prevDevice = this.state.cameraDeviceId
     const prevEffect = this.state.backgroundEffect
+    // Senders build messages with keys always present (x: message.x, …), so a
+    // key explicitly set to undefined must not clobber valid state (NaN layout).
     const next = { ...partial }
+    for (const key of Object.keys(next) as Array<keyof BubbleState>) {
+      if (next[key] === undefined) delete next[key]
+    }
     if (next.borderColor != null) {
       next.borderColor = sanitizeCssColor(next.borderColor)
     }
@@ -1305,7 +1310,22 @@ class TabOverlay {
     this.bubble.classList.toggle('is-square', this.state.shape === 'square')
   }
 
+  private persistTimer: number | null = null
+
+  /**
+   * Trailing debounce: wheel-resize fires dozens of events per second, and the
+   * live path ends in a chrome.storage.sync write capped at 120 writes/minute —
+   * bursts would make all settings writes fail for the next minute.
+   */
   private persist() {
+    if (this.persistTimer != null) window.clearTimeout(this.persistTimer)
+    this.persistTimer = window.setTimeout(() => {
+      this.persistTimer = null
+      this.persistNow()
+    }, 250)
+  }
+
+  private persistNow() {
     if (this.state.mode === 'live') {
       void chrome.runtime.sendMessage({
         type: 'LOOM_BUBBLE_MOVED',

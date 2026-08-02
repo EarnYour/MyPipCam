@@ -130,7 +130,10 @@ function drawBubbleCover(
   }
 }
 
-export async function waitForVideo(video: HTMLVideoElement): Promise<void> {
+export async function waitForVideo(
+  video: HTMLVideoElement,
+  timeoutMs = 10_000,
+): Promise<void> {
   if (video.readyState >= 2 && video.videoWidth > 0) return
   await new Promise<void>((resolve, reject) => {
     const onReady = () => {
@@ -141,7 +144,12 @@ export async function waitForVideo(video: HTMLVideoElement): Promise<void> {
       cleanup()
       reject(new Error('Video failed to load'))
     }
+    const timer = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('Video stream did not become ready'))
+    }, timeoutMs)
     const cleanup = () => {
+      window.clearTimeout(timer)
       video.removeEventListener('loadeddata', onReady)
       video.removeEventListener('error', onError)
     }
@@ -198,15 +206,28 @@ export async function startCapture(settings: PipSettings): Promise<{
     cameraStream = null
   }
 
-  const displayVideo = createHiddenVideo(displayStream)
-  await waitForVideo(displayVideo)
+  // From here on a failure must release the live streams, or the camera LED /
+  // Chrome sharing bar stays on with no way for the user to stop them.
+  const releaseStreams = () => {
+    for (const track of displayStream.getTracks()) track.stop()
+    if (cameraStream) for (const track of cameraStream.getTracks()) track.stop()
+  }
 
+  let displayVideo: HTMLVideoElement
   let cameraVideo: HTMLVideoElement | null = null
-  if (cameraStream) {
-    cameraVideo = createHiddenVideo(cameraStream)
-    await waitForVideo(cameraVideo).catch(() => {
-      cameraVideo = null
-    })
+  try {
+    displayVideo = createHiddenVideo(displayStream)
+    await waitForVideo(displayVideo)
+
+    if (cameraStream) {
+      cameraVideo = createHiddenVideo(cameraStream)
+      await waitForVideo(cameraVideo).catch(() => {
+        cameraVideo = null
+      })
+    }
+  } catch (err) {
+    releaseStreams()
+    throw err
   }
 
   const width = displayVideo.videoWidth || 1280
@@ -215,7 +236,10 @@ export async function startCapture(settings: PipSettings): Promise<{
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Canvas 2D unavailable')
+  if (!ctx) {
+    releaseStreams()
+    throw new Error('Canvas 2D unavailable')
+  }
 
   let liveSettings = { ...settings }
   let bubbleX = settings.bubbleX

@@ -88,7 +88,15 @@ export function EditorApp() {
       setFocusHint('Drag Out to trim the end, or set In/Out at the playhead — then export.')
     }
     void (async () => {
-      const rec = await getRecording(safe)
+      let rec
+      try {
+        rec = await getRecording(safe)
+      } catch (err) {
+        // Without this a storage/folder read failure leaves the editor stuck
+        // on "Loading editor…" with an unhandled rejection.
+        setError(err instanceof Error ? err.message : 'Could not load the recording')
+        return
+      }
       if (!rec) {
         setError('Recording not found')
         return
