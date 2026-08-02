@@ -118,6 +118,19 @@ async function acquireCamera(deviceId: string | null): Promise<MediaStream> {
   }
 }
 
+function isPermissionDismissed(err: unknown): boolean {
+  const msg = errDetail(err, '').toLowerCase()
+  const name =
+    err && typeof err === 'object' && 'name' in err
+      ? String((err as { name?: string }).name)
+      : ''
+  return (
+    name === 'NotAllowedError' ||
+    name === 'PermissionDeniedError' ||
+    /permission dismissed|notallowed|permission denied|denied by user|dismissed/i.test(msg)
+  )
+}
+
 async function acquireMic(deviceId: string | null | undefined): Promise<MediaStream> {
   const tryGet = async (exactId: string | null) =>
     navigator.mediaDevices.getUserMedia({
@@ -147,6 +160,28 @@ async function acquireMic(deviceId: string | null | undefined): Promise<MediaStr
     throw new Error(
       errDetail(first, 'Microphone unavailable — allow mic access for MyPipCam in Chrome'),
     )
+  }
+}
+
+/**
+ * Offscreen docs often can't show Chrome's mic Allow dialog ("Permission dismissed").
+ * Prefer continuing with tab/cam video (+ tab audio) over aborting the whole start.
+ */
+async function tryAcquireMic(
+  deviceId: string | null | undefined,
+): Promise<MediaStream | null> {
+  try {
+    return await acquireMic(deviceId)
+  } catch (err) {
+    if (isPermissionDismissed(err)) {
+      console.warn(
+        '[MyPipCam][start] offscreen mic Permission dismissed — continuing without mic. Grant mic from the popup first (Allow microphone).',
+        err,
+      )
+      return null
+    }
+    console.warn('[MyPipCam][start] offscreen mic failed — continuing without mic:', errDetail(err, ''))
+    return null
   }
 }
 
@@ -249,16 +284,29 @@ async function prepareRecording(msg: PrepareMessage) {
   if (recorder || prepared) cleanupMedia()
 
   const mode: RecordMode = msg.recordMode || 'screen-cam'
+  const wantMic = msg.includeMic !== false
 
   if (mode === 'cam') {
-    camStream = await acquireCamera(msg.cameraDeviceId ?? null)
-    if (msg.includeMic !== false) {
-      micStream = await acquireMic(msg.micDeviceId)
+    // Cam-only: camera must succeed. Pre-grant from the popup (Allow camera) so
+    // offscreen isn't the first getUserMedia (invisible → Permission dismissed).
+    try {
+      camStream = await acquireCamera(msg.cameraDeviceId ?? null)
+    } catch (err) {
+      if (isPermissionDismissed(err)) {
+        throw new Error(
+          'Permission dismissed — allow Camera for MyPipCam in the popup (Allow camera) or chrome://settings/content/camera, then try again.',
+        )
+      }
+      throw new Error(errDetail(err, 'Camera unavailable for cam-only recording'))
+    }
+    if (wantMic) {
+      micStream = await tryAcquireMic(msg.micDeviceId)
     }
     const mixed = await mixAudio(camStream, micStream)
     mixedStream = mixed.stream
     audioCtx = mixed.ctx
   } else {
+    // Tab first — streamId expires in seconds; never delay it behind mic/cam.
     if (!msg.streamId) throw new Error('Missing tab stream id (tabCapture token expired or not granted)')
     try {
       tabStream = await acquireTabStream(msg.streamId)
@@ -270,8 +318,8 @@ async function prepareRecording(msg: PrepareMessage) {
         ),
       )
     }
-    if (msg.includeMic !== false) {
-      micStream = await acquireMic(msg.micDeviceId)
+    if (wantMic) {
+      micStream = await tryAcquireMic(msg.micDeviceId)
     }
     const mixed = await mixAudio(tabStream, micStream)
     mixedStream = mixed.stream
@@ -288,9 +336,9 @@ async function prepareRecording(msg: PrepareMessage) {
     throw new Error('Capture produced no video track')
   }
 
-  if (msg.includeMic !== false && mixedStream.getAudioTracks().length === 0) {
-    throw new Error(
-      'No audio track in the recording mix. Allow microphone access for MyPipCam, pick a mic, then try again.',
+  if (wantMic && !micStream) {
+    console.warn(
+      '[MyPipCam][start] prepare continuing without microphone (tab/system audio may still be present)',
     )
   }
 

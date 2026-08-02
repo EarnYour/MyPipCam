@@ -74,6 +74,8 @@ type LoomSession = {
 let loomSession: LoomSession | null = null
 let starting = false
 let armingCapture = false
+/** Fallback extension window when page overlay inject/visibility fails. */
+let hudWindowId: number | null = null
 
 function errMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.trim()) return err.message.trim()
@@ -85,6 +87,78 @@ function errMessage(err: unknown, fallback: string): string {
     /* ignore */
   }
   return fallback
+}
+
+function startLog(...args: unknown[]) {
+  console.log('[MyPipCam][start]', ...args)
+}
+
+function startWarn(...args: unknown[]) {
+  console.warn('[MyPipCam][start]', ...args)
+}
+
+function startError(...args: unknown[]) {
+  console.error('[MyPipCam][start]', ...args)
+}
+
+async function persistLastStartError(reason: string | null) {
+  try {
+    if (!reason) {
+      await chrome.storage.session.remove('lastStartError')
+      return
+    }
+    await chrome.storage.session.set({
+      lastStartError: { reason, at: Date.now() },
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+async function notifyStartFailure(reason: string) {
+  await persistLastStartError(reason)
+  try {
+    await chrome.notifications.create(`mypipcam-start-fail-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'MyPipCam — could not start',
+      message: reason.slice(0, 180),
+      priority: 2,
+    })
+  } catch (err) {
+    startWarn('notification failed', err)
+  }
+}
+
+async function closeHudWindow() {
+  if (hudWindowId == null) return
+  const id = hudWindowId
+  hudWindowId = null
+  try {
+    await chrome.windows.remove(id)
+  } catch {
+    /* already closed */
+  }
+}
+
+async function openFallbackHud(): Promise<{ ok: boolean; reason?: string }> {
+  await closeHudWindow()
+  try {
+    const win = await chrome.windows.create({
+      url: 'src/hud/index.html',
+      type: 'popup',
+      width: 300,
+      height: 260,
+      focused: true,
+    })
+    hudWindowId = typeof win?.id === 'number' ? win.id : null
+    startLog('fallback HUD opened', { windowId: hudWindowId })
+    return { ok: hudWindowId != null }
+  } catch (err) {
+    const reason = errMessage(err, 'Could not open fallback recording controls')
+    startError('fallback HUD failed', reason)
+    return { ok: false, reason }
+  }
 }
 
 async function setRecordingBadge(on: boolean) {
@@ -204,10 +278,12 @@ async function ensureMicrophoneAccess(): Promise<{ ok: boolean; reason?: string 
 }
 
 async function injectOverlay(tabId: number) {
+  startLog('injectOverlay', { tabId, script: pipOverlayScript })
   await chrome.scripting.executeScript({
     target: { tabId },
     files: [pipOverlayScript],
   })
+  startLog('injectOverlay executeScript resolved', { tabId })
 }
 
 /**
@@ -217,9 +293,10 @@ async function injectOverlay(tabId: number) {
 async function sendOverlayMessage<T extends { ok?: boolean; reason?: string }>(
   tabId: number,
   message: Record<string, unknown>,
-  attempts = 25,
+  attempts = 30,
 ): Promise<T> {
   let lastErr = 'Overlay content script did not respond'
+  startLog('sendOverlayMessage', { tabId, type: message.type, attempts })
   for (let i = 0; i < attempts; i++) {
     try {
       const res = (await chrome.tabs.sendMessage(tabId, message)) as T | undefined
@@ -231,19 +308,41 @@ async function sendOverlayMessage<T extends { ok?: boolean; reason?: string }>(
               : 'Overlay refused to start',
           )
         }
+        startLog('sendOverlayMessage ok', { tabId, type: message.type, attempt: i + 1, res })
         return res
       }
       lastErr = 'Overlay returned an empty response'
     } catch (err) {
       lastErr = errMessage(err, 'Could not reach camera overlay in this tab')
       // Hard failure from overlay mount — don't keep retrying.
-      if (/failed to attach|could not mount|refused to start|no document\.body/i.test(lastErr)) {
+      if (
+        /failed to attach|could not mount|refused to start|no document\.body|not visible/i.test(
+          lastErr,
+        )
+      ) {
+        startError('sendOverlayMessage hard fail', { tabId, attempt: i + 1, lastErr })
         throw new Error(lastErr)
       }
     }
     await new Promise((r) => setTimeout(r, 40 + Math.min(i, 10) * 20))
   }
+  startError('sendOverlayMessage exhausted', { tabId, type: message.type, lastErr })
   throw new Error(lastErr)
+}
+
+async function teardownCaptureStreams(tabId?: number | null) {
+  startLog('teardownCaptureStreams', { tabId })
+  try {
+    await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
+  } catch {
+    /* ignore */
+  }
+  await closeOffscreen()
+  await closeHudWindow()
+  if (tabId != null) await stopOverlay(tabId)
+  loomSession = null
+  await setRecordingBadge(false)
+  await chrome.storage.session.remove('loomRecording')
 }
 
 /**
@@ -392,6 +491,8 @@ async function getTabStreamId(tabId: number): Promise<string> {
  * Phase 1 (must stay in the Start user-gesture chain):
  * mint/consume tabCapture streamId → hold MediaStreams in offscreen →
  * inject overlay + 3→2→1. MediaRecorder starts on LOOM_COUNTDOWN_DONE.
+ * If page overlay is invisible/unreachable, open a fallback HUD window and
+ * keep capture armed (never leave orphaned "Sharing…" with zero UI).
  */
 async function startLoomRecording(
   explicitTabId?: number,
@@ -407,9 +508,14 @@ async function startLoomRecording(
   ok: boolean
   reason?: string
   tabId?: number
+  ui?: 'page' | 'hud'
 }> {
-  if (starting) return { ok: false, reason: 'Already starting — wait a moment and try again.' }
+  if (starting) {
+    startWarn('already starting')
+    return { ok: false, reason: 'Already starting — wait a moment and try again.' }
+  }
   if (loomSession) {
+    startWarn('already recording', { tabId: loomSession.tabId })
     return {
       ok: false,
       reason: 'Already recording. Stop the current recording first.',
@@ -418,7 +524,13 @@ async function startLoomRecording(
   }
 
   starting = true
+  startLog('startLoomRecording begin', {
+    explicitTabId,
+    recordMode: options?.recordMode,
+    hasStreamId: Boolean(options?.streamId?.trim()),
+  })
   try {
+    await persistLastStartError(null)
     const settings = await loadPipSettings()
     const recordMode: RecordMode =
       options?.recordMode ?? settings.recordMode ?? 'screen-cam'
@@ -437,37 +549,47 @@ async function startLoomRecording(
     })
 
     const resolved = await resolveTargetTab(explicitTabId)
-    if (!resolved.ok) return { ok: false, reason: resolved.reason }
+    if (!resolved.ok) {
+      startError('resolveTargetTab failed', resolved.reason)
+      await notifyStartFailure(resolved.reason)
+      return { ok: false, reason: resolved.reason }
+    }
     const tab = resolved.tab
     if (!tab.id) {
-      return {
-        ok: false,
-        reason: "Can't record this page. Open a normal website tab (https://…) and try again.",
-      }
+      const reason =
+        "Can't record this page. Open a normal website tab (https://…) and try again."
+      await notifyStartFailure(reason)
+      return { ok: false, reason }
     }
+    startLog('target tab', { tabId: tab.id, url: tab.url?.slice(0, 120) })
 
+    startLog('ensureOffscreen…')
     await ensureOffscreen()
+    startLog('offscreen ready')
 
     // Consume tabCapture token immediately — it expires in a few seconds and
     // cannot be obtained reliably after the 3s countdown (gesture is gone).
     let streamId: string | undefined
     if (recordMode !== 'cam') {
       try {
-        streamId =
-          options?.streamId?.trim() ||
-          (await getTabStreamId(tab.id))
+        streamId = options?.streamId?.trim() || (await getTabStreamId(tab.id))
+        startLog('tabCapture streamId ready', {
+          fromPopup: Boolean(options?.streamId?.trim()),
+          length: streamId.length,
+        })
       } catch (err) {
+        const reason = errMessage(
+          err,
+          'Tab capture failed. Click Start on an https tab and try again.',
+        )
+        startError('tabCapture failed', reason)
         await closeOffscreen()
-        return {
-          ok: false,
-          reason: errMessage(
-            err,
-            'Tab capture failed. Click Start on an https tab and try again.',
-          ),
-        }
+        await notifyStartFailure(reason)
+        return { ok: false, reason }
       }
     }
 
+    startLog('OFFSCREEN_PREPARE…', { recordMode, includeMic })
     const prepareResult = await sendOffscreen<{ ok?: boolean; reason?: string }>({
       type: 'OFFSCREEN_PREPARE',
       streamId,
@@ -478,18 +600,26 @@ async function startLoomRecording(
     })
 
     if (!prepareResult?.ok) {
+      const reason =
+        prepareResult?.reason?.trim() ||
+        'Could not prepare tab/camera capture in the recorder.'
+      startError('OFFSCREEN_PREPARE failed', reason)
       await closeOffscreen()
-      return {
-        ok: false,
-        reason:
-          prepareResult?.reason?.trim() ||
-          'Could not prepare tab/camera capture in the recorder.',
-      }
+      await notifyStartFailure(reason)
+      return { ok: false, reason }
     }
+    startLog('OFFSCREEN_PREPARE ok')
 
+    let ui: 'page' | 'hud' = 'page'
     try {
       await injectOverlay(tab.id)
-      await sendOverlayMessage(tab.id, {
+      const overlayRes = await sendOverlayMessage<{
+        ok?: boolean
+        reason?: string
+        visible?: boolean
+        topLayer?: boolean
+        countdownVisible?: boolean
+      }>(tab.id, {
         type: 'PIP_OVERLAY_START',
         x: settings.bubbleX,
         y: settings.bubbleY,
@@ -504,25 +634,20 @@ async function startLoomRecording(
         cameraDeviceId: cameraDeviceId ?? null,
         phase: 'countdown',
       })
+      startLog('page overlay ready', overlayRes)
     } catch (err) {
       const reason = errMessage(err, 'Could not start camera overlay in this tab.')
-      // Tear down tabCapture/offscreen FIRST so Chrome stops "Sharing … to MyPipCam".
-      try {
-        await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
-      } catch {
-        /* ignore */
-      }
-      await closeOffscreen()
+      startError('page overlay failed — trying HUD fallback', reason)
       await showOverlayInjectFailureToast(tab.id, reason)
-      try {
-        await focusCapturedTab(tab.id)
-      } catch {
-        /* ignore */
+      const hud = await openFallbackHud()
+      if (!hud.ok) {
+        await teardownCaptureStreams(tab.id)
+        const detail = `${reason} Fallback controls also failed: ${hud.reason || 'unknown'}`
+        await notifyStartFailure(detail)
+        // Do not focusCapturedTab here — that closes the popup before it can show the error.
+        return { ok: false, reason: detail }
       }
-      return {
-        ok: false,
-        reason,
-      }
+      ui = 'hud'
     }
 
     loomSession = {
@@ -541,33 +666,26 @@ async function startLoomRecording(
         startedAt: loomSession.startedAt,
         phase: 'countdown',
         recordMode,
+        ui,
       },
     })
     await setRecordingBadge(true)
-    // Overlay lives on the captured tab — leave Library/Settings and show countdown.
-    await focusCapturedTab(tab.id)
+    startLog('session armed', { tabId: tab.id, ui })
+    // Do NOT focusCapturedTab here — focusing steals focus from the action
+    // popup, which destroys it before sendResponse is delivered. The popup then
+    // sees a null response and FORCE_STOPs a successful start (zero UI).
+    // Popup (or a deferred tick after reply) focuses the tab instead.
 
-    return { ok: true, tabId: tab.id }
+    return { ok: true, tabId: tab.id, ui }
   } catch (err) {
-    console.error('[MyPipCam] startLoomRecording failed:', err)
-    if (loomSession) {
-      await stopOverlay(loomSession.tabId)
-      loomSession = null
-    }
-    try {
-      await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
-    } catch {
-      /* ignore */
-    }
-    await closeOffscreen()
-    await setRecordingBadge(false)
-    await chrome.storage.session.remove('loomRecording')
-    return {
-      ok: false,
-      reason: errMessage(err, 'Failed to start recording'),
-    }
+    const reason = errMessage(err, 'Failed to start recording')
+    startError('startLoomRecording failed', reason, err)
+    await teardownCaptureStreams(loomSession?.tabId)
+    await notifyStartFailure(reason)
+    return { ok: false, reason }
   } finally {
     starting = false
+    startLog('startLoomRecording end', { starting: false, hasSession: Boolean(loomSession) })
   }
 }
 
@@ -633,6 +751,7 @@ async function failCaptureKeepOverlay(_tabId: number) {
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
+  await closeHudWindow()
   try {
     await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
   } catch {
@@ -650,6 +769,7 @@ async function stopLoomRecording(): Promise<{
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
+  await closeHudWindow()
 
   const tabId = session?.tabId
   await stopOverlay(tabId)
@@ -696,6 +816,7 @@ async function discardLoomRecording(): Promise<{ ok: boolean; reason?: string }>
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
+  await closeHudWindow()
   await stopOverlay(session?.tabId)
 
   try {
@@ -853,7 +974,10 @@ chrome.commands.onCommand.addListener(async (command) => {
     await stopLoomRecording()
     return
   }
-  await startLoomRecording()
+  const result = await startLoomRecording()
+  if (result.ok && result.ui === 'page' && typeof result.tabId === 'number') {
+    await focusCapturedTab(result.tabId)
+  }
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -1111,6 +1235,7 @@ function dispatchExtensionMessage(
       try {
         const tabId =
           typeof message.tabId === 'number' ? message.tabId : sender.tab?.id
+        startLog('START_LOOM_RECORDING message', { tabId, hasStreamId: Boolean(message.streamId) })
         const result = await startLoomRecording(tabId, {
           recordMode: message.recordMode,
           micDeviceId: message.micDeviceId,
@@ -1119,17 +1244,60 @@ function dispatchExtensionMessage(
           streamId: typeof message.streamId === 'string' ? message.streamId : null,
         })
         if (!result.ok) {
-          console.error('[MyPipCam] START_LOOM_RECORDING failed:', result.reason)
+          startError('START_LOOM_RECORDING failed:', result.reason)
+        } else {
+          startLog('START_LOOM_RECORDING ok', result)
+          // Focus after reply so the popup receives ok before it is destroyed.
+          if (result.ui === 'page' && typeof result.tabId === 'number') {
+            const focusTabId = result.tabId
+            setTimeout(() => {
+              void focusCapturedTab(focusTabId)
+            }, 50)
+          }
         }
         sendResponse(result)
       } catch (err) {
         const reason = errMessage(err, 'Failed to start recording')
-        console.error('[MyPipCam] START_LOOM_RECORDING threw:', reason, err)
+        startError('START_LOOM_RECORDING threw:', reason, err)
+        await notifyStartFailure(reason)
         sendResponse({
           ok: false,
           reason,
         })
       }
+    })()
+    return true
+  }
+
+  if (message?.type === 'FOCUS_CAPTURED_TAB') {
+    void (async () => {
+      const tabId =
+        typeof message.tabId === 'number' ? message.tabId : loomSession?.tabId
+      if (typeof tabId === 'number') {
+        startLog('FOCUS_CAPTURED_TAB', { tabId })
+        await focusCapturedTab(tabId)
+      }
+      sendResponse({ ok: true })
+    })()
+    return true
+  }
+
+  if (message?.type === 'GET_LAST_START_ERROR') {
+    void (async () => {
+      try {
+        const stored = await chrome.storage.session.get('lastStartError')
+        sendResponse({ ok: true, error: stored.lastStartError ?? null })
+      } catch {
+        sendResponse({ ok: true, error: null })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'CLEAR_LAST_START_ERROR') {
+    void (async () => {
+      await persistLastStartError(null)
+      sendResponse({ ok: true })
     })()
     return true
   }
@@ -1336,20 +1504,12 @@ function dispatchExtensionMessage(
   if (message?.type === 'FORCE_STOP_CAPTURE') {
     void (async () => {
       try {
+        startLog('FORCE_STOP_CAPTURE', { tabId: message.tabId, hasSession: Boolean(loomSession) })
         const tabId =
           typeof message.tabId === 'number'
             ? message.tabId
             : loomSession?.tabId ?? null
-        await stopOverlay(tabId)
-        loomSession = null
-        await chrome.storage.session.remove('loomRecording')
-        await setRecordingBadge(false)
-        try {
-          await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
-        } catch {
-          /* ignore */
-        }
-        await closeOffscreen()
+        await teardownCaptureStreams(tabId)
         replySafe(sendResponse, { ok: true })
       } catch (err) {
         replySafe(sendResponse, {

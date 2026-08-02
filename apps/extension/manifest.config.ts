@@ -43,6 +43,7 @@ export default defineManifest({
     'offscreen',
     'identity',
     'alarms',
+    'notifications',
   ],
   oauth2: {
     // Paste client ID once in src/shared/driveConfig.ts (imported here).

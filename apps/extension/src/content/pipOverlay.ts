@@ -4,7 +4,10 @@
  * - Left-edge vertical control dock (timer / stop / pause / restart / discard)
  * - Center-screen 3→2→1 countdown before capture begins
  *
- * Mounted in a closed Shadow DOM under a fixed max-z host (no Popover API).
+ * Mounted in a closed Shadow DOM under a fixed max-z host. Prefer Popover
+ * top-layer via showPopover() so page transforms/filters cannot clip us;
+ * without showPopover, UA [popover]:not(:popover-open) { display:none !important }
+ * makes the UI invisible while start still reports ok.
  */
 
 import {
@@ -57,10 +60,8 @@ let hostReattachObserver: MutationObserver | null = null
 function overlayStyles(): string {
   return `
     /*
-     * Host is a plain fixed full-viewport shell (no Popover API).
-     * Popover left the host stuck under UA [popover]:not(:popover-open) {
-     * display:none !important } which author CSS cannot override — silent
-     * "Sharing this tab" with zero countdown/dock/bubble.
+     * Host uses popover=manual + showPopover() for top-layer, with fixed
+     * fallback styles if Popover API is unavailable.
      */
     :host {
       all: initial !important;
@@ -82,6 +83,23 @@ function overlayStyles(): string {
       pointer-events: none !important;
       z-index: 2147483647 !important;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
+    }
+    :host(:popover-open) {
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      overflow: visible !important;
+      background: transparent !important;
+      pointer-events: none !important;
     }
     * { box-sizing: border-box; }
 
@@ -413,14 +431,50 @@ function applyHostInlineStyles(host: HTMLElement) {
   for (const [k, v] of props) host.style.setProperty(k, v, 'important')
 }
 
+/** Open top-layer when supported; strip popover if showPopover is unavailable. */
+function ensureHostTopLayer(host: HTMLElement) {
+  applyHostInlineStyles(host)
+  const canPopover =
+    typeof host.showPopover === 'function' && 'popover' in HTMLElement.prototype
+  if (!canPopover) {
+    try {
+      host.removeAttribute('popover')
+    } catch {
+      /* ignore */
+    }
+    return false
+  }
+  try {
+    host.setAttribute('popover', 'manual')
+    // Already open — calling again can throw; ignore.
+    if (!host.matches(':popover-open')) {
+      host.showPopover()
+    }
+    applyHostInlineStyles(host)
+    return host.matches(':popover-open')
+  } catch (err) {
+    console.warn('[MyPipCam][start] showPopover failed:', err)
+    try {
+      host.removeAttribute('popover')
+    } catch {
+      /* ignore */
+    }
+    applyHostInlineStyles(host)
+    return false
+  }
+}
+
 function watchHostAttached(host: HTMLElement) {
   hostReattachObserver?.disconnect()
   hostReattachObserver = new MutationObserver(() => {
-    if (host.isConnected) return
+    if (host.isConnected) {
+      ensureHostTopLayer(host)
+      return
+    }
     const parent = document.body ?? document.documentElement
     if (!parent) return
-    applyHostInlineStyles(host)
     parent.appendChild(host)
+    ensureHostTopLayer(host)
   })
   hostReattachObserver.observe(document.documentElement, {
     childList: true,
@@ -428,15 +482,72 @@ function watchHostAttached(host: HTMLElement) {
   })
 }
 
+type OverlayVisibility = {
+  ok: boolean
+  connected: boolean
+  visible: boolean
+  topLayer: boolean
+  width: number
+  height: number
+  display: string
+  countdownVisible: boolean
+  phase: string | null
+}
+
+function readHostVisibility(phase: string | null, countdownVisible: boolean): OverlayVisibility {
+  const host = overlayMount?.host
+  if (!host?.isConnected) {
+    return {
+      ok: false,
+      connected: false,
+      visible: false,
+      topLayer: false,
+      width: 0,
+      height: 0,
+      display: 'missing',
+      countdownVisible: false,
+      phase,
+    }
+  }
+  const rect = host.getBoundingClientRect()
+  const cs = getComputedStyle(host)
+  const topLayer = host.hasAttribute('popover') && host.matches(':popover-open')
+  const display = cs.display
+  const visible =
+    display !== 'none' &&
+    cs.visibility !== 'hidden' &&
+    cs.opacity !== '0' &&
+    rect.width >= 40 &&
+    rect.height >= 40
+  return {
+    ok: visible,
+    connected: true,
+    visible,
+    topLayer,
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    display,
+    countdownVisible,
+    phase,
+  }
+}
+
 function ensureMount(): OverlayMount {
   if (overlayMount?.host.isConnected) {
-    applyHostInlineStyles(overlayMount.host)
+    ensureHostTopLayer(overlayMount.host)
     return overlayMount
   }
 
-  // Drop any leftover host (including a stuck popover="manual" from older builds).
+  // Drop any leftover host from older builds (stuck closed popover, etc.).
   const stale = document.getElementById(HOST_ID)
   if (stale) {
+    try {
+      if (typeof (stale as HTMLElement).hidePopover === 'function') {
+        ;(stale as HTMLElement).hidePopover()
+      }
+    } catch {
+      /* ignore */
+    }
     try {
       stale.removeAttribute('popover')
     } catch {
@@ -448,8 +559,7 @@ function ensureMount(): OverlayMount {
   const host = document.createElement('div')
   host.id = HOST_ID
   host.setAttribute('data-mypipcam', 'overlay')
-  // Never use the Popover API here — see overlayStyles() comment.
-  host.removeAttribute('popover')
+  host.setAttribute('popover', 'manual')
   applyHostInlineStyles(host)
 
   // Closed shadow: page CSS cannot hide/move our countdown/dock/bubble.
@@ -465,6 +575,8 @@ function ensureMount(): OverlayMount {
     throw new Error('Page has no document.body — cannot mount recording overlay')
   }
   parent.appendChild(host)
+  const topLayer = ensureHostTopLayer(host)
+  console.log('[MyPipCam][start] overlay host mounted', { topLayer, id: HOST_ID })
   watchHostAttached(host)
 
   overlayMount = { host, layer, shadow }
@@ -882,6 +994,15 @@ class TabOverlay {
     banner.append(text, dismiss)
     this.root.appendChild(banner)
     this.errorBanner = banner
+  }
+
+  getVisibility(): OverlayVisibility {
+    const host = overlayMount?.host
+    if (host) ensureHostTopLayer(host)
+    const countdownVisible =
+      this.state.phase === 'countdown' &&
+      !this.countdownEl.classList.contains('is-hidden')
+    return readHostVisibility(this.state.phase, countdownVisible)
   }
 
   private showCamBlockedFallback(message: string) {
@@ -1343,6 +1464,11 @@ function clearOverlaySingleton() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'PIP_OVERLAY_START') {
     try {
+      console.log('[MyPipCam][start] PIP_OVERLAY_START received', {
+        phase: message.phase,
+        recordMode: message.recordMode,
+        href: location.href.slice(0, 120),
+      })
       overlay?.dispose()
       overlay = new TabOverlay({
         x: message.x ?? 0.82,
@@ -1358,12 +1484,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         cameraDeviceId: message.cameraDeviceId ?? null,
         phase: message.phase === 'recording' ? 'recording' : 'countdown',
       })
-      // Sanity: host must be in the document and not zero-sized.
+      // Sanity: host must be in the document, top-layer open, and not zero-sized.
       const host = overlayMount?.host
       if (!host?.isConnected) {
         throw new Error('Recording overlay failed to attach to the page')
       }
-      sendResponse({ ok: true })
+      // Popover top-layer can take a frame to apply :popover-open styles.
+      requestAnimationFrame(() => {
+        try {
+          if (!overlay) throw new Error('Recording overlay disappeared after mount')
+          const visibility = overlay.getVisibility()
+          console.log('[MyPipCam][start] overlay visibility after mount', visibility)
+          if (!visibility.visible) {
+            throw new Error(
+              `Recording overlay mounted but is not visible (display=${visibility.display}, ${visibility.width}x${visibility.height}, topLayer=${visibility.topLayer})`,
+            )
+          }
+          const { ok: _ok, ...rest } = visibility
+          sendResponse({ ...rest, ok: true })
+        } catch (err) {
+          try {
+            overlay?.dispose()
+          } catch {
+            /* ignore */
+          }
+          overlay = null
+          const reason =
+            err instanceof Error && err.message.trim()
+              ? err.message.trim()
+              : 'Could not mount recording overlay'
+          console.error('[MyPipCam][start] PIP_OVERLAY_START visible-check failed:', reason, err)
+          sendResponse({ ok: false, reason })
+        }
+      })
     } catch (err) {
       try {
         overlay?.dispose()
@@ -1375,9 +1528,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         err instanceof Error && err.message.trim()
           ? err.message.trim()
           : 'Could not mount recording overlay'
-      console.error('[MyPipCam overlay] PIP_OVERLAY_START failed:', reason, err)
+      console.error('[MyPipCam][start] PIP_OVERLAY_START failed:', reason, err)
       sendResponse({ ok: false, reason })
     }
+    return true
+  }
+  if (message?.type === 'PIP_OVERLAY_STATUS') {
+    if (!overlay) {
+      const missing = readHostVisibility(null, false)
+      const { ok: _ok, ...rest } = missing
+      sendResponse({
+        ...rest,
+        ok: false,
+        reason: 'no-overlay',
+      })
+      return true
+    }
+    const visibility = overlay.getVisibility()
+    const { ok: _ok, ...rest } = visibility
+    sendResponse({ ...rest, ok: visibility.visible })
     return true
   }
   if (message?.type === 'PIP_OVERLAY_RECORDING_STARTED' && overlay) {
