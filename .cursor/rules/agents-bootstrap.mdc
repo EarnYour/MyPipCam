@@ -1,0 +1,12 @@
+---
+description: Point agents at AGENTS.md for MyPipCam install/build/run
+alwaysApply: true
+---
+
+# MyPipCam agent bootstrap
+
+Before installing, building, or configuring this repo, read and follow **[AGENTS.md](../../AGENTS.md)** at the repository root.
+
+- No root `package.json` — work inside `apps/extension`, `apps/web`, or `apps/macos`.
+- Extension load path is `apps/extension/dist` (unpacked), not `src`.
+- Never commit `.env.local`, `*.pem`, or Supabase `service_role` keys. Use `.env.example` placeholders only.

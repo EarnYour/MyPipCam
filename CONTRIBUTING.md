@@ -8,7 +8,8 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## What to know before you start
 
-- Monorepo layout: `apps/extension` (Chrome) and `apps/macos` (SwiftUI companion)
+- Monorepo layout: `apps/extension` (Chrome), `apps/macos` (SwiftUI), `apps/web` (site + share API)
+- **First-time setup / agent bootstrap:** [AGENTS.md](AGENTS.md)
 - Prefer small, focused pull requests with a clear problem statement
 - Do not commit secrets (API keys, OAuth client secrets, signing credentials)
 - Keep the local-first privacy model: no new telemetry/analytics without an

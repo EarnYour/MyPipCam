@@ -16,6 +16,42 @@ Monorepo for **MyPipCam**: Loom-style camera PiP on macOS and in Chrome.
 
 **Legal & safety:** [Terms of Use](TERMS.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
+**AI / IDE agents:** start with **[AGENTS.md](AGENTS.md)** (install, env, load unpacked, pitfalls, verify checklist).
+
+## Quick start
+
+There is no root `package.json` — build each app from its directory.
+
+### Chrome extension (primary)
+
+```bash
+cd /path/to/MyPipCam/apps/extension
+npm install
+cp .env.example .env.local   # optional: set VITE_GOOGLE_OAUTH_CLIENT_ID for Drive
+npm run build
+```
+
+Then Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked** → select `apps/extension/dist`.
+
+### Web (optional)
+
+```bash
+cd /path/to/MyPipCam/apps/web
+npm install
+# Set SUPABASE_* in Vercel (see apps/web/.env.example) for share/view API
+vercel --prod
+```
+
+### macOS app (optional)
+
+```bash
+# Xcode: open apps/macos/MyPipCam.xcodeproj → Run
+# Or install Release to Applications (needs ImageMagick + Xcode):
+./scripts/install-macos-app.sh
+```
+
+Details, Drive OAuth, shared library folder, and pitfalls: [AGENTS.md](AGENTS.md) · [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## How the pieces fit together
 
 - **Chrome extension** is the Loom-like capture path: record **this Chrome tab** with a live draggable camera PiP on the page (tab capture), browse clips in a local library, trim/cut, and download. An Advanced path still supports screen/window capture.
