@@ -47,29 +47,77 @@ export function SettingsPanel({
   const [loaded, setLoaded] = useState(false)
 
   const refreshFolder = useCallback(async () => {
-    const name = await getLibraryFolderName()
-    setFolderName(name)
-    return name
+    try {
+      const name = await getLibraryFolderName()
+      setFolderName(name)
+      return name
+    } catch {
+      setFolderName(null)
+      return null
+    }
   }, [])
 
   const refreshDrive = useCallback(async () => {
-    const status = await getDriveConnectionStatus()
-    setDrive(status)
-    return status
+    try {
+      // Never block Settings forever on identity / SW messaging.
+      const status = await Promise.race([
+        getDriveConnectionStatus(),
+        new Promise<DriveConnectionStatus>((resolve) => {
+          window.setTimeout(
+            () =>
+              resolve({
+                configured: isOAuthClientConfigured(),
+                signedIn: false,
+                folderId: null,
+                folderName: null,
+                autoUpload: true,
+              }),
+            1500,
+          )
+        }),
+      ])
+      setDrive(status)
+      return status
+    } catch {
+      setDrive({
+        configured: isOAuthClientConfigured(),
+        signedIn: false,
+        folderId: null,
+        folderName: null,
+        autoUpload: true,
+      })
+      return null
+    }
   }, [])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setLoaded(false)
+      return
+    }
     setSavedMsg(null)
     setFolderMsg(null)
     setDriveMsg(null)
+    setLoaded(false)
+    let cancelled = false
     void (async () => {
-      const s = await loadApiSettings()
-      setOpenai(s.openaiApiKey)
-      await refreshFolder()
-      await refreshDrive()
-      setLoaded(true)
+      try {
+        // OpenAI + folder first — never gated on Drive connect status.
+        const s = await loadApiSettings()
+        if (cancelled) return
+        setOpenai(s.openaiApiKey)
+        await refreshFolder()
+      } catch (err) {
+        console.error('[MyPipCam] Settings load failed:', err)
+      } finally {
+        if (!cancelled) setLoaded(true)
+      }
+      // Drive status is best-effort after the panel is already usable.
+      if (!cancelled) await refreshDrive()
     })()
+    return () => {
+      cancelled = true
+    }
   }, [open, refreshFolder, refreshDrive])
 
   if (!open) return null
@@ -310,6 +358,17 @@ export function SettingsPanel({
               <p className="muted feature-note">
                 Required for <strong>Transcribe</strong> and caption / transcript download.
                 Uses Whisper (<code>whisper-1</code>).
+              </p>
+              <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
+                Get a key at{' '}
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  platform.openai.com
+                </a>
+                .
               </p>
               <input
                 type="password"

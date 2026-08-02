@@ -637,10 +637,22 @@ class TabOverlay {
 
   private async mountPipFrame() {
     try {
-      await chrome.runtime.sendMessage({
-        type: 'REGISTER_PIP_CHANNEL',
-        token: this.pipChannelToken,
-      })
+      let registered = false
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const res = (await chrome.runtime.sendMessage({
+          type: 'REGISTER_PIP_CHANNEL',
+          token: this.pipChannelToken,
+        })) as { ok?: boolean } | undefined
+        if (res?.ok) {
+          registered = true
+          break
+        }
+        await new Promise((r) => setTimeout(r, 40 * (attempt + 1)))
+      }
+      if (!registered) {
+        this.showCamBlockedFallback('Camera overlay unavailable')
+        return
+      }
     } catch {
       this.showCamBlockedFallback('Camera overlay unavailable')
       return

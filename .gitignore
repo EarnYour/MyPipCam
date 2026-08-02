@@ -32,3 +32,8 @@ dist/
 apps/extension/public/ffmpeg/
 apps/extension/public/mediapipe/
 apps/extension/keys/
+
+# Google OAuth downloaded credentials (never commit client_secret)
+*client_secret*
+client_secret*.json
+**/Downloads/**

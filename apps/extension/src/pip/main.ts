@@ -193,16 +193,23 @@ async function boot() {
     showFallback('Camera overlay unavailable')
     return
   }
-  try {
-    const res = (await chrome.runtime.sendMessage({
-      type: 'VALIDATE_PIP_CHANNEL',
-      token: channelToken,
-    })) as { ok?: boolean } | undefined
-    if (!res?.ok) {
-      showFallback('Camera overlay unavailable')
-      return
+  let allowed = false
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'VALIDATE_PIP_CHANNEL',
+        token: channelToken,
+      })) as { ok?: boolean } | undefined
+      if (res?.ok) {
+        allowed = true
+        break
+      }
+    } catch {
+      /* retry — SW may still be waking / token settling */
     }
-  } catch {
+    await new Promise((r) => setTimeout(r, 50 * (attempt + 1)))
+  }
+  if (!allowed) {
     showFallback('Camera overlay unavailable')
     return
   }

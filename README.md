@@ -87,10 +87,14 @@ Auth still uses **`chrome.identity`** with a **Chrome extension** OAuth client. 
    - **Authorized domains:** add `earnyour.com`
 4. Create credentials: **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 5. Application type: **Chrome extension** (not “Web application”).
-6. Item ID / Application ID: paste the stable **extension ID**  
+6. Item ID / Application ID: paste the **extension ID shown on `chrome://extensions`**
+   (Developer mode). With the packed manifest `key` that is  
    `akpchobfndfddajiihkkdpnihihdicjc`  
    — **not** the website hostname.  
-   (If you loaded an unpacked build *without* the manifest `key`, use the ID shown on `chrome://extensions` instead.)
+   If you load unpacked *without* `key` in `dist/manifest.json`, Chrome assigns a
+   different ID (e.g. `okpchcbnnbdssajmkophnfnklgjcsncl`). The Google Cloud Item ID
+   **must match that live ID**, or OAuth will fail. Prefer rebuilding so `key` is
+   present and the ID stays `akpchobfndfddajiihkkdpnihihdicjc`.
 7. Copy the **Client ID** (ends with `.apps.googleusercontent.com`).
 8. Paste it into **one** place, then rebuild:
 

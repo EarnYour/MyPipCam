@@ -1,9 +1,18 @@
 import pipOverlayScript from '../content/pipOverlay.ts?script'
+import {
+  clearDriveAuthDirect,
+  DriveAuthError,
+  getAccessTokenDirect,
+  hasDriveAuthDirect,
+  invalidateAccessTokenDirect,
+} from '../shared/driveAuth'
+import { connectGoogleDriveInBackground } from '../shared/driveSync'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
 import { openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
   isContentScriptSender,
   isPipChannelToken,
+  isPipFrameSender,
   isSafeRecordingId,
   isTrustedExtensionSender,
   sanitizeCssColor,
@@ -13,25 +22,37 @@ import type { RecordMode } from '../shared/types'
 /** Short-lived tokens allowing the WAR PiP iframe to start the camera. */
 const PIP_TOKEN_TTL_MS = 10 * 60 * 1000
 const PIP_TOKEN_PREFIX = 'pipCh:'
+/** In-memory cache so VALIDATE works even if session storage is briefly lagging. */
+const pipTokenExpiry = new Map<string, number>()
 
 async function registerPipChannelToken(token: string): Promise<void> {
-  await chrome.storage.session.set({
-    [`${PIP_TOKEN_PREFIX}${token}`]: Date.now() + PIP_TOKEN_TTL_MS,
-  })
+  const exp = Date.now() + PIP_TOKEN_TTL_MS
+  pipTokenExpiry.set(token, exp)
+  await chrome.storage.session.set({ [`${PIP_TOKEN_PREFIX}${token}`]: exp })
 }
 
 async function revokePipChannelToken(token: string): Promise<void> {
+  pipTokenExpiry.delete(token)
   await chrome.storage.session.remove(`${PIP_TOKEN_PREFIX}${token}`)
 }
 
 async function validatePipChannelToken(token: string): Promise<boolean> {
+  const now = Date.now()
+  const mem = pipTokenExpiry.get(token)
+  if (typeof mem === 'number') {
+    if (mem > now) return true
+    pipTokenExpiry.delete(token)
+  }
+
   const key = `${PIP_TOKEN_PREFIX}${token}`
   const result = await chrome.storage.session.get(key)
   const exp = result[key]
-  if (typeof exp !== 'number' || exp <= Date.now()) {
+  if (typeof exp !== 'number' || exp <= now) {
     await chrome.storage.session.remove(key)
+    pipTokenExpiry.delete(token)
     return false
   }
+  pipTokenExpiry.set(token, exp)
   return true
 }
 
@@ -171,6 +192,29 @@ async function injectOverlay(tabId: number) {
   })
 }
 
+/**
+ * CRX content scripts load via async dynamic import(). executeScript resolves
+ * before onMessage is registered — retry until the overlay listener answers.
+ */
+async function sendOverlayMessage<T extends { ok?: boolean }>(
+  tabId: number,
+  message: Record<string, unknown>,
+  attempts = 25,
+): Promise<T> {
+  let lastErr = 'Overlay content script did not respond'
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = (await chrome.tabs.sendMessage(tabId, message)) as T | undefined
+      if (res != null) return res
+      lastErr = 'Overlay returned an empty response'
+    } catch (err) {
+      lastErr = errMessage(err, 'Could not reach camera overlay in this tab')
+    }
+    await new Promise((r) => setTimeout(r, 40 + Math.min(i, 10) * 20))
+  }
+  throw new Error(lastErr)
+}
+
 async function stopOverlay(tabId: number | null | undefined) {
   if (tabId == null) return
   try {
@@ -265,6 +309,7 @@ async function startLoomRecording(
   options?: {
     recordMode?: RecordMode
     micDeviceId?: string | null
+    cameraDeviceId?: string | null
     includeMic?: boolean
     /** Prefer streamId minted in the popup click handler (strongest gesture). */
     streamId?: string | null
@@ -290,11 +335,16 @@ async function startLoomRecording(
       options?.recordMode ?? settings.recordMode ?? 'screen-cam'
     const micDeviceId =
       options?.micDeviceId !== undefined ? options.micDeviceId : settings.micDeviceId
+    const cameraDeviceId =
+      options?.cameraDeviceId !== undefined
+        ? options.cameraDeviceId
+        : settings.cameraDeviceId
     const includeMic = options?.includeMic ?? true
 
     await savePipSettings({
       recordMode,
       micDeviceId: micDeviceId ?? null,
+      cameraDeviceId: cameraDeviceId ?? null,
     })
 
     const resolved = await resolveTargetTab(explicitTabId)
@@ -334,7 +384,7 @@ async function startLoomRecording(
       streamId,
       includeMic,
       micDeviceId: micDeviceId ?? null,
-      cameraDeviceId: settings.cameraDeviceId,
+      cameraDeviceId: cameraDeviceId ?? null,
       recordMode,
     })
 
@@ -350,17 +400,7 @@ async function startLoomRecording(
 
     try {
       await injectOverlay(tab.id)
-    } catch (err) {
-      await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
-      await closeOffscreen()
-      return {
-        ok: false,
-        reason: errMessage(err, 'Could not inject camera overlay into this tab.'),
-      }
-    }
-
-    try {
-      await chrome.tabs.sendMessage(tab.id, {
+      await sendOverlayMessage(tab.id, {
         type: 'PIP_OVERLAY_START',
         x: settings.bubbleX,
         y: settings.bubbleY,
@@ -372,7 +412,7 @@ async function startLoomRecording(
         backgroundEffect: settings.backgroundEffect,
         mode: 'live',
         recordMode,
-        cameraDeviceId: settings.cameraDeviceId,
+        cameraDeviceId: cameraDeviceId ?? null,
         phase: 'countdown',
       })
     } catch (err) {
@@ -390,7 +430,7 @@ async function startLoomRecording(
       recordMode,
       phase: 'countdown',
       micDeviceId: micDeviceId ?? null,
-      cameraDeviceId: settings.cameraDeviceId,
+      cameraDeviceId: cameraDeviceId ?? null,
       includeMic,
       prepared: true,
     }
@@ -729,14 +769,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'REGISTER_PIP_CHANNEL') {
-    // Only content scripts (tab-injected) may mint camera-channel tokens.
+    // Only tab content scripts may mint camera-channel tokens (not WAR iframes).
     if (!isContentScriptSender(sender) || !isPipChannelToken(message.token)) {
       sendResponse({ ok: false, reason: 'invalid-pip-channel' })
       return false
     }
     void (async () => {
-      await registerPipChannelToken(message.token)
-      sendResponse({ ok: true })
+      try {
+        await registerPipChannelToken(message.token)
+        sendResponse({ ok: true })
+      } catch (err) {
+        console.error('[MyPipCam] REGISTER_PIP_CHANNEL failed:', err)
+        sendResponse({ ok: false, reason: 'register-failed' })
+      }
     })()
     return true
   }
@@ -752,10 +797,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'VALIDATE_PIP_CHANNEL') {
-    // PiP iframe (extension page) asks before getUserMedia — blocks WAR abuse.
+    // PiP iframe asks before getUserMedia. Token is the primary gate; URL check
+    // is defense-in-depth when Chrome provides sender.url (sometimes omitted).
+    if (!isPipChannelToken(message.token)) {
+      sendResponse({ ok: false })
+      return false
+    }
     const url = sender.url ?? ''
-    const pipBase = chrome.runtime.getURL('src/pip/')
-    if (!url.startsWith(pipBase) || !isPipChannelToken(message.token)) {
+    if (url && !isPipFrameSender(sender)) {
       sendResponse({ ok: false })
       return false
     }
@@ -796,6 +845,81 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  if (message?.type === 'GET_DRIVE_TOKEN') {
+    void (async () => {
+      try {
+        const token = await getAccessTokenDirect(Boolean(message.interactive))
+        sendResponse({ ok: true, token })
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: errMessage(err, 'Could not get Google auth token'),
+          code: err instanceof DriveAuthError ? err.code : undefined,
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'INVALIDATE_DRIVE_TOKEN') {
+    void (async () => {
+      try {
+        const token = typeof message.token === 'string' ? message.token : ''
+        if (token) await invalidateAccessTokenDirect(token)
+        sendResponse({ ok: true })
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: errMessage(err, 'Could not invalidate token'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'CLEAR_DRIVE_AUTH') {
+    void (async () => {
+      try {
+        await clearDriveAuthDirect()
+        sendResponse({ ok: true })
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: errMessage(err, 'Could not clear Google auth'),
+          code: err instanceof DriveAuthError ? err.code : undefined,
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'HAS_DRIVE_AUTH') {
+    void (async () => {
+      try {
+        sendResponse({ ok: true, value: await hasDriveAuthDirect() })
+      } catch {
+        sendResponse({ ok: true, value: false })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'CONNECT_GOOGLE') {
+    void (async () => {
+      try {
+        const status = await connectGoogleDriveInBackground()
+        sendResponse({ ok: true, status })
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: errMessage(err, 'Could not connect Google Drive'),
+          code: err instanceof DriveAuthError ? err.code : undefined,
+        })
+      }
+    })()
+    return true
+  }
+
   if (message?.type === 'OPEN_LIBRARY') {
     void (async () => {
       const id =
@@ -822,6 +946,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const result = await startLoomRecording(tabId, {
           recordMode: message.recordMode,
           micDeviceId: message.micDeviceId,
+          cameraDeviceId: message.cameraDeviceId,
           includeMic: message.includeMic,
           streamId: typeof message.streamId === 'string' ? message.streamId : null,
         })
@@ -970,7 +1095,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch {
           /* may already be injected */
         }
-        await chrome.tabs.sendMessage(resolved.tab.id, {
+        await sendOverlayMessage(resolved.tab.id, {
           type: 'PIP_OVERLAY_START',
           x: message.x,
           y: message.y,

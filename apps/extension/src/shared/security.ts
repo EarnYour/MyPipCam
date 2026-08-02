@@ -38,15 +38,38 @@ export function isTrustedExtensionSender(
 ): boolean {
   if (!sender) return false
   // Chrome always sets sender.id for extension messages; reject mismatches.
+  // Missing id is allowed for a few internal SW edge cases.
   if (sender.id != null && sender.id !== chrome.runtime.id) return false
   return true
 }
 
-/** Content scripts always have a tab; prefer this for tab-only control surfaces. */
+/**
+ * True for tab-injected content scripts (not extension pages / WAR iframes).
+ * WAR camera iframe also has sender.tab — exclude chrome-extension:// URLs.
+ */
 export function isContentScriptSender(
   sender: chrome.runtime.MessageSender | undefined,
 ): boolean {
-  return Boolean(isTrustedExtensionSender(sender) && sender?.tab?.id != null)
+  if (!isTrustedExtensionSender(sender) || sender?.tab?.id == null) return false
+  const url = sender.url ?? ''
+  if (!url) return true
+  return !/^chrome-extension:/i.test(url)
+}
+
+/** PiP WAR iframe (extension-origin camera page embedded in a tab). */
+export function isPipFrameSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): boolean {
+  if (!isTrustedExtensionSender(sender)) return false
+  const url = sender?.url ?? ''
+  if (!url) return false
+  try {
+    const pipIndex = chrome.runtime.getURL('src/pip/index.html')
+    const pipDir = chrome.runtime.getURL('src/pip/')
+    return url === pipIndex || url.startsWith(`${pipIndex}?`) || url.startsWith(pipDir)
+  } catch {
+    return /\/src\/pip\//i.test(url)
+  }
 }
 
 export function createPipChannelToken(): string {

@@ -1,16 +1,17 @@
 /**
- * Google OAuth client ID for chrome.identity (Chrome extension type).
+ * Google OAuth client ID for chrome.identity.
  *
- * PLACEHOLDER ONLY — never commit a real client ID tied to production quotas
- * unless you intentionally publish it (client IDs are public in extensions,
- * but each distributor should create their own). There is no client secret
- * for the Chrome-extension OAuth flow; do not invent or paste one here.
+ * Client IDs are public in extensions; there is no client secret for the
+ * Chrome-extension OAuth flow — never paste one here.
  *
- * Replace the placeholder before Connect Google will work. See root README
- * “Google Drive setup” for Google Cloud Console steps.
+ * Stable extension ID (when dist manifest includes `key`):
+ *   akpchobfndfddajiihkkdpnihihdicjc
+ * Use that as the Google Cloud OAuth client Item ID — not the product website.
  *
- * Extension ID (stable via manifest `key`): akpchobfndfddajiihkkdpnihihdicjc
- * — use that as the OAuth client Item ID, not the product website.
+ * If chrome://extensions shows a different ID (e.g. okpchcbnnbdssajmkophnfnklgjcsncl),
+ * you loaded unpacked without the manifest `key`. Either:
+ *   - Reload from a build whose dist/manifest.json includes `key`, OR
+ *   - Set the OAuth client Item ID to the ID currently shown on chrome://extensions.
  *
  * Consent screen (not the client Application ID): home/privacy/terms at
  * https://mypipcam.earnyour.com (authorized domain: earnyour.com).

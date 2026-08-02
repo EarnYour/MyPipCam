@@ -28,8 +28,11 @@ Output: `apps/extension/dist/` (load this folder in Chrome).
 
 1. Open a normal **http(s)** tab you want to demo.
 2. Pick a mode in the popup: **Tab + Cam**, **Tab only**, or **Cam only**.
-3. Optionally choose a **microphone**.
-4. Click **Start recording** — a center-screen **3 → 2 → 1** countdown runs first.
+3. Click **Start recording** — Loom-style preflight:
+   - **Camera first** (Tab + Cam / Cam): choose camera (+ mic), Allow if needed, Next.
+   - **Then share tab** (Tab + Cam / Tab): confirm the active tab and click **Share tab & start**
+     (mints `tabCapture` on that click).
+4. A center-screen **3 → 2 → 1** countdown runs on the page.
 5. After countdown: capture starts. Drag the **circular camera bubble** anywhere; use the
    left **vertical dock** (timer / stop / pause / discard).
 6. Bubble **⋯** menu cycles size (or scroll-wheel resize). Stop saves to the local library.
@@ -48,6 +51,7 @@ starts until the countdown finishes (Cancel / discard aborts without saving).
 | 3→2→1 countdown before MediaRecorder | **Done** |
 | Tab + Cam / Tab only / Cam only modes | **Done** (tab = current Chrome tab, not full OS screen) |
 | Mic picker | **Done** |
+| Camera picker before share (Loom order) | **Done** (popup preflight) |
 | Local library + trim / silence / transcribe / API keys | **Done** |
 | Google Drive upload / multi-browser library / share links | **Done** (optional; requires OAuth client ID) |
 | Full OS screen / multi-app (non-Chrome) overlay | **Partial** — use **Advanced** `getDisplayMedia` path; no OS-level float |
@@ -59,9 +63,9 @@ starts until the countdown finishes (Cancel / discard aborts without saving).
 
 Optional. Paste a **Chrome extension** OAuth client ID into `src/shared/driveConfig.ts` (see root [README](../../README.md#google-drive-optional-cloud-library)).
 
-- **OAuth client type:** Chrome extension — Item ID is the extension ID (`akpchobfndfddajiihkkdpnihihdicjc` with the packed manifest `key`), **not** the website.
+- **OAuth client type:** Chrome extension — Item ID must match the ID on `chrome://extensions` (`akpchobfndfddajiihkkdpnihihdicjc` when dist includes the manifest `key`; otherwise use whatever ID Chrome shows). Not the website.
 - **Consent screen URLs** (product funnel): home `https://mypipcam.earnyour.com`, privacy `https://mypipcam.earnyour.com/privacy`, terms `https://mypipcam.earnyour.com/terms`; authorized domain `earnyour.com`.
-- Auth still uses `chrome.identity`; the site does not replace the extension client ID.
+- Auth uses `chrome.identity` in the **background service worker** (pages message `GET_DRIVE_TOKEN` / `CONNECT_GOOGLE`); the site does not replace the extension client ID.
 
 ### Limits
 

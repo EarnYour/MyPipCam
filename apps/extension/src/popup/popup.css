@@ -158,6 +158,25 @@ body {
   line-height: 1.35;
 }
 
+.popup-step-label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.popup-tab-card {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 28%, transparent);
+  background: color-mix(in srgb, var(--color-border) 6%, var(--color-bg));
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
 .popup button.primary.stop {
   background: var(--color-primary);
 }

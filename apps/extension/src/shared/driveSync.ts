@@ -56,7 +56,20 @@ export type DriveConnectionStatus = {
 export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus> {
   const settings = await loadDriveSettings()
   const configured = isOAuthClientConfigured()
-  const signedIn = configured ? await hasDriveAuth() : false
+  let signedIn = false
+  if (configured) {
+    try {
+      // Status probes must not hang Settings / Library on identity messaging.
+      signedIn = await Promise.race([
+        hasDriveAuth(),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(false), 1500)
+        }),
+      ])
+    } catch {
+      signedIn = false
+    }
+  }
   return {
     configured,
     signedIn,
@@ -67,7 +80,7 @@ export async function getDriveConnectionStatus(): Promise<DriveConnectionStatus>
 }
 
 /** Interactive connect: OAuth + ensure MyPipCam Drive folder + persist folder ID. */
-export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
+async function connectGoogleDriveCore(): Promise<DriveConnectionStatus> {
   if (!isOAuthClientConfigured()) {
     throw new Error(
       'Paste your Google OAuth client ID into apps/extension/src/shared/driveConfig.ts (see README).',
@@ -81,6 +94,36 @@ export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
     folderName: folder.name,
   })
   return getDriveConnectionStatus()
+}
+
+/**
+ * Interactive connect. When chrome.identity is missing on the page (common on
+ * some extension pages), delegates to the service worker (`CONNECT_GOOGLE`).
+ */
+export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
+  if (!isOAuthClientConfigured()) {
+    throw new Error(
+      'Paste your Google OAuth client ID into apps/extension/src/shared/driveConfig.ts (see README).',
+    )
+  }
+
+  if (typeof chrome.identity?.getAuthToken !== 'function') {
+    const res = (await chrome.runtime.sendMessage({ type: 'CONNECT_GOOGLE' })) as
+      | { ok: true; status: DriveConnectionStatus }
+      | { ok: false; error?: string }
+      | undefined
+    if (!res?.ok) {
+      throw new Error(res?.error || 'Could not connect Google Drive.')
+    }
+    return res.status
+  }
+
+  return connectGoogleDriveCore()
+}
+
+/** SW-only entry used by CONNECT_GOOGLE (never messages back to self). */
+export async function connectGoogleDriveInBackground(): Promise<DriveConnectionStatus> {
+  return connectGoogleDriveCore()
 }
 
 export async function disconnectGoogleDrive(): Promise<void> {
