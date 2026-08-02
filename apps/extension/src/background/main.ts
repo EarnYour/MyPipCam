@@ -3,6 +3,7 @@
 // `*?script&loader` (hashed ESM loader under assets/) — executeScript cannot
 // run those loaders. Always inject the stable IIFE path below.
 import crxPipOverlayPath from '../content/pipOverlay.ts?script&iife'
+import { applyPopupPageDim } from '../content/popupDimApply'
 import {
   clearDriveAuthDirect,
   DriveAuthError,
@@ -273,8 +274,12 @@ async function focusHudWindow(): Promise<boolean> {
   return false
 }
 
+/** Narrow Loom-style left dock — chrome.windows popup (no frameless option). */
+const HUD_DOCK_WIDTH = 72
+const HUD_DOCK_HEIGHT = 400
+
 async function resolveHudAnchor(anchorTabId?: number): Promise<{ left: number; top: number }> {
-  const height = 420
+  const height = HUD_DOCK_HEIGHT
   try {
     let win: chrome.windows.Window | undefined
     if (typeof anchorTabId === 'number') {
@@ -284,21 +289,23 @@ async function resolveHudAnchor(anchorTabId?: number): Promise<{ left: number; t
       }
     }
     if (!win) win = await chrome.windows.getLastFocused()
-    const left = Math.max(8, (win.left ?? 0) + 16)
+    // Prefer just outside the browser's left edge; clamp onto the display if needed.
+    const besideLeft = (win.left ?? 0) - HUD_DOCK_WIDTH - 4
+    const left = Math.max(0, besideLeft >= 0 ? besideLeft : (win.left ?? 0) + 6)
     const top = Math.max(
-      8,
+      0,
       (win.top ?? 0) + Math.round(((win.height ?? 800) - height) / 2),
     )
     return { left, top }
   } catch {
-    return { left: 24, top: 120 }
+    return { left: 0, top: 120 }
   }
 }
 
 /**
- * Recording controls live in an extension popup so tabCapture never records
- * the stop/pause/timer dock. Always open focused + positioned beside the
- * captured window — otherwise focusCapturedTab buries an unfocused HUD.
+ * Recording controls live in a narrow extension popup dock so tabCapture never
+ * records stop/pause/timer chrome. Always open focused + pinned to the left of
+ * the captured window — otherwise focusCapturedTab buries an unfocused HUD.
  */
 async function openRecordingHud(options?: {
   driveCountdown?: boolean
@@ -329,8 +336,8 @@ async function openRecordingHud(options?: {
     const win = await chrome.windows.create({
       url,
       type: 'popup',
-      width: 320,
-      height: 420,
+      width: HUD_DOCK_WIDTH,
+      height: HUD_DOCK_HEIGHT,
       left,
       top,
       focused: true,
@@ -340,7 +347,14 @@ async function openRecordingHud(options?: {
       throw new Error('Recording controls window opened without an id')
     }
     // Second focus pass — create(..., focused:true) is flaky after tabCapture.
-    await chrome.windows.update(hudWindowId, { focused: true, drawAttention: true })
+    await chrome.windows.update(hudWindowId, {
+      focused: true,
+      drawAttention: true,
+      width: HUD_DOCK_WIDTH,
+      height: HUD_DOCK_HEIGHT,
+      left,
+      top,
+    })
     startLog('recording HUD opened', { windowId: hudWindowId, driveCountdown, left, top })
     return { ok: true }
   } catch (err) {
@@ -351,8 +365,8 @@ async function openRecordingHud(options?: {
       const win = await chrome.windows.create({
         url,
         type: 'normal',
-        width: 360,
-        height: 480,
+        width: HUD_DOCK_WIDTH + 16,
+        height: HUD_DOCK_HEIGHT + 40,
         left,
         top,
         focused: true,
@@ -1081,7 +1095,9 @@ async function stopLoomRecording(opts?: {
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
-  await closeHudWindow()
+  // Keep the HUD (often the STOP_LOOM_RECORDING sender) alive until save +
+  // navigation finish. Closing it first drops the message port and lets MV3
+  // suspend the SW before openLibraryTab / openEditorTab runs.
 
   // Always tear down page chrome first so Stop never leaves a stuck dock/PiP.
   await stopOverlay(tabId)
@@ -1101,6 +1117,7 @@ async function stopLoomRecording(opts?: {
       /* ignore */
     }
     await closeOffscreen()
+    await closeHudWindow()
     return { ok: true }
   }
 
@@ -1118,6 +1135,7 @@ async function stopLoomRecording(opts?: {
         /* ignore */
       }
       await closeOffscreen()
+      await closeHudWindow()
       // Treat empty/not-recording as a soft success after teardown — capture is dead.
       if (
         result?.reason === 'not-recording' ||
@@ -1133,27 +1151,35 @@ async function stopLoomRecording(opts?: {
 
     await closeOffscreen()
 
-    // Upload in the SW after offscreen is closed — chrome.identity is reliable here
-    // and avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP.
+    // Open Library / Editor immediately after local save — never wait on Drive.
+    if (result.id && opts?.openEditor) {
+      try {
+        await openEditorTab(result.id, 'trim')
+      } catch (err) {
+        console.warn('[MyPipCam] openEditorTab after stop failed:', err)
+        try {
+          await openLibraryTab(result.id)
+        } catch (libErr) {
+          console.warn('[MyPipCam] openLibraryTab fallback after stop failed:', libErr)
+        }
+      }
+    } else if (result.id) {
+      try {
+        await openLibraryTab(result.id)
+      } catch (err) {
+        console.warn('[MyPipCam] openLibraryTab after stop failed:', err)
+      }
+    }
+
+    // Upload in the SW after navigation — chrome.identity is reliable here and
+    // avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP. Fire-and-forget.
     if (result.id && isSafeRecordingId(result.id)) {
       void runDriveAutoUploadById(result.id).catch((err) => {
         console.error('[MyPipCam] Drive auto-upload failed:', err)
       })
     }
 
-    if (result.id && opts?.openEditor) {
-      try {
-        await openEditorTab(result.id, 'trim')
-      } catch {
-        await openLibraryTab(result.id)
-      }
-    } else {
-      const settings = await loadPipSettings()
-      if (settings.openLibraryOnFinish && result.id) {
-        await openLibraryTab(result.id)
-      }
-    }
-
+    await closeHudWindow()
     return { ok: true, id: result.id }
   } catch (err) {
     try {
@@ -1162,6 +1188,7 @@ async function stopLoomRecording(opts?: {
       /* ignore */
     }
     await closeOffscreen()
+    await closeHudWindow()
     return {
       ok: false,
       reason: errMessage(err, 'Could not stop recording.'),
@@ -1403,10 +1430,56 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * MV3 service worker is not killed while chrome.identity.getAuthToken waits
  * on the consent UI (often 30–120s).
  */
+/** Tab currently showing the popup dim scrim (cleared on port disconnect). */
+let popupDimTabId: number | null = null
+
+async function setPopupPageDim(tabId: number, visible: boolean): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: applyPopupPageDim,
+      args: [visible],
+    })
+  } catch {
+    // Restricted pages (chrome://, Web Store, etc.) cannot be scripted — ignore.
+  }
+}
+
+async function showPopupPageDimForActiveTab(): Promise<void> {
+  const session = await hydrateLoomSession()
+  if (session) return
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const url = tab?.url ?? ''
+    if (!tab?.id || !/^https?:/i.test(url)) return
+    popupDimTabId = tab.id
+    await setPopupPageDim(tab.id, true)
+  } catch {
+    /* ignore */
+  }
+}
+
+async function clearPopupPageDim(): Promise<void> {
+  const tabId = popupDimTabId
+  popupDimTabId = null
+  if (tabId == null) return
+  await setPopupPageDim(tabId, false)
+}
+
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'drive-connect') return
-  // Holding the port open is enough; ignore payload noise.
-  port.onMessage.addListener(() => {})
+  if (port.name === 'drive-connect') {
+    // Holding the port open is enough; ignore payload noise.
+    port.onMessage.addListener(() => {})
+    return
+  }
+
+  if (port.name !== 'popup-dim') return
+
+  void showPopupPageDimForActiveTab()
+  port.onDisconnect.addListener(() => {
+    void clearPopupPageDim()
+  })
 })
 
 // Periodic backlog drain — covers cases where the post-stop kick was missed.
@@ -1791,7 +1864,7 @@ function dispatchExtensionMessage(
           openEditor: Boolean(message.openEditor),
           fallbackTabId: sender.tab?.id,
         })
-        sendResponse(result)
+        replySafe(sendResponse, result)
       } catch (err) {
         // Last-resort teardown so Stop never leaves capture hanging.
         try {
@@ -1799,7 +1872,7 @@ function dispatchExtensionMessage(
         } catch {
           /* ignore */
         }
-        sendResponse({
+        replySafe(sendResponse, {
           ok: false,
           reason: errMessage(err, 'Could not stop recording.'),
         })

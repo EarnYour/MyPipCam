@@ -9,7 +9,10 @@
   --radius: 18px;
   --font-display: "Syne", sans-serif;
   --font-body: "Figtree", sans-serif;
-  --max: 68rem;
+  /* Shared content shell — header, hero, sections, footer */
+  --content-max: 68rem;
+  --content-pad-x: 1.25rem;
+  --max: var(--content-max);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -63,8 +66,10 @@ a:hover {
 
 .site-header__inner,
 .site-footer__inner,
-.wrap {
-  width: min(100% - 2.5rem, var(--max));
+.wrap,
+.hero__grid,
+.section__inner {
+  width: min(100% - (var(--content-pad-x) * 2), var(--content-max));
   margin-inline: auto;
 }
 
@@ -121,8 +126,6 @@ a:hover {
 }
 
 .hero__grid {
-  width: min(100% - 2.5rem, var(--max));
-  margin-inline: auto;
   display: grid;
   gap: clamp(2rem, 5vw, 3.5rem);
   align-items: center;
@@ -170,6 +173,20 @@ a:hover {
   animation: rise 0.9s var(--ease) 0.24s both;
 }
 
+/* Keep all hero CTAs on a single row on desktop */
+@media (min-width: 860px) {
+  .hero .cta-row {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .hero .cta-row .btn {
+    padding: 0.75rem 0.95rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -207,6 +224,23 @@ a:hover {
 .btn--ghost:hover {
   color: var(--brand);
   box-shadow: inset 0 0 0 1.5px var(--brand);
+}
+
+.btn--tip {
+  background: rgba(255, 94, 41, 0.08);
+  color: var(--brand);
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+
+.btn--tip:hover {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(255, 94, 41, 0.22);
+}
+
+.btn--tip-lg {
+  padding: 1rem 1.65rem;
+  font-size: 1.05rem;
 }
 
 .hero__visual {
@@ -282,7 +316,6 @@ a:hover {
 }
 
 .cta-row--center {
-  justify-content: center;
   margin-top: 1.5rem;
 }
 
@@ -448,18 +481,31 @@ a:hover {
   background: rgba(17, 19, 18, 0.06);
 }
 
-.tip-jar {
-  margin: 1.35rem 0 0;
-  max-width: 36rem;
-  color: var(--ink-faint);
-  font-size: 0.98rem;
+.section--support {
+  padding-top: 0.25rem;
 }
 
-.tip-jar a {
-  font-weight: 650;
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 0.16em;
+.section__inner--support {
+  padding: clamp(1.75rem, 4vw, 2.5rem);
+  border-radius: calc(var(--radius) + 6px);
+  background:
+    linear-gradient(145deg, rgba(255, 94, 41, 0.16), transparent 48%),
+    linear-gradient(300deg, rgba(125, 223, 154, 0.16), transparent 42%),
+    rgba(255, 255, 255, 0.62);
+  border: 1.5px solid rgba(255, 94, 41, 0.28);
+  box-shadow: 0 18px 40px rgba(255, 94, 41, 0.08);
+  text-align: left;
+}
+
+.section__inner--support h2 {
+  margin-bottom: 0.55rem;
+}
+
+.section__inner--support > p {
+  margin: 0 0 1.5rem;
+  max-width: 40rem;
+  color: var(--ink-soft);
+  font-size: 1.08rem;
 }
 
 .thanks-banner {
@@ -514,11 +560,6 @@ a:hover {
 
 .section {
   padding: 0 0 clamp(3.5rem, 8vw, 5.5rem);
-}
-
-.section__inner {
-  width: min(100% - 2.5rem, var(--max));
-  margin-inline: auto;
 }
 
 .section h2 {
@@ -589,7 +630,7 @@ a:hover {
 .faq {
   display: grid;
   gap: 0.65rem;
-  max-width: 42rem;
+  width: 100%;
 }
 
 .faq details {
@@ -690,7 +731,7 @@ a:hover {
 }
 
 .prose {
-  width: min(100% - 2.5rem, 46rem);
+  width: min(100% - (var(--content-pad-x) * 2), 46rem);
   margin: 0 auto 4rem;
   padding-bottom: 1rem;
 }

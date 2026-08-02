@@ -57,7 +57,7 @@
       href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;550;650;700&family=Syne:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="https://mypipcam.earnyour.com/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
 
     <script type="application/ld+json">
       {
@@ -174,8 +174,9 @@
         <nav class="nav" aria-label="Primary">
           <a href="#watch">Watch</a>
           <a href="#see-it">Screenshots</a>
-          <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
           <a href="#install">Install</a>
+          <a href="#support">Support</a>
+          <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
         </nav>
       </div>
     </header>
@@ -203,6 +204,12 @@
                 class="btn btn--primary"
                 href="https://github.com/EarnYour/MyPipCam"
                 >Download on GitHub</a
+              >
+              <a
+                class="btn btn--tip"
+                href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"
+                rel="noopener noreferrer"
+                >Support MyPipCam</a
               >
               <a class="btn btn--ghost" href="#watch">Watch the demo</a>
               <a
@@ -472,15 +479,27 @@
               >Agent / build notes</a
             >
           </div>
-          <p class="tip-jar">
-            MyPipCam is free and open source. If it helps your workflow,
+        </div>
+      </section>
+
+      <section class="section section--support" aria-labelledby="support-title" id="support">
+        <div class="section__inner section__inner--support">
+          <h2 id="support-title">Tip the project</h2>
+          <p>
+            Free &amp; open source — tips keep MyPipCam alive. Optional, any
+            amount, no paywall.
+          </p>
+          <div class="cta-row">
             <a
+              class="btn btn--primary btn--tip-lg"
               href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"
               rel="noopener noreferrer"
-              >leave a tip</a
+              >Leave a tip</a
             >
-            — any amount is appreciated.
-          </p>
+            <a class="btn btn--ghost" href="https://github.com/EarnYour/MyPipCam"
+              >Star on GitHub</a
+            >
+          </div>
         </div>
       </section>
 
@@ -578,7 +597,7 @@
     <div class="thanks-banner" id="thanks-banner" hidden role="status">
       <p>
         Thank you for the tip — it helps keep MyPipCam free and open source.
-        <a href="#install">Back to install</a>
+        <a href="#support">Back to support</a>
       </p>
       <button type="button" class="thanks-banner__dismiss" id="thanks-dismiss" aria-label="Dismiss">
         ×
