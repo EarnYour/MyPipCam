@@ -10,11 +10,23 @@
  *
  * Consent screen URLs: https://mypipcam.earnyour.com (authorized domain: earnyour.com).
  */
-const fromEnv =
-  typeof import.meta !== 'undefined' &&
-  typeof import.meta.env?.VITE_GOOGLE_OAUTH_CLIENT_ID === 'string'
-    ? import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID.trim()
-    : ''
+function readOAuthClientId(): string {
+  const fromImportMeta =
+    typeof import.meta !== 'undefined' &&
+    typeof import.meta.env?.VITE_GOOGLE_OAUTH_CLIENT_ID === 'string'
+      ? import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID.trim()
+      : ''
+  if (fromImportMeta) return fromImportMeta
+
+  // Config-time: vite.config loadEnv → process.env before manifest.config imports this.
+  // import.meta.env is only injected into Vite-transformed modules, not Node config imports.
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process
+  const fromProcess = proc?.env?.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? ''
+  return fromProcess
+}
+
+const fromEnv = readOAuthClientId()
 
 export const GOOGLE_OAUTH_CLIENT_ID =
   fromEnv && !fromEnv.startsWith('YOUR_CLIENT_ID')
