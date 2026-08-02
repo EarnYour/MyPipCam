@@ -175,7 +175,7 @@ async function tryAcquireMic(
   } catch (err) {
     if (isPermissionDismissed(err)) {
       console.warn(
-        '[MyPipCam][start] offscreen mic Permission dismissed — continuing without mic. Grant mic from the popup first (Allow microphone).',
+        '[MyPipCam][start] offscreen mic Permission dismissed — continuing without mic. Grant mic from the permission window first (popup → Allow microphone).',
         err,
       )
       return null

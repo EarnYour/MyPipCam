@@ -18,6 +18,7 @@ export default defineConfig({
         offscreen: 'src/offscreen/index.html',
         pip: 'src/pip/index.html',
         hud: 'src/hud/index.html',
+        micGrant: 'src/permissions/mic.html',
       },
       // Background entry must not emit import() — source uses static imports
       // only (see src/background/index.ts). Shared ESM chunks are OK for

@@ -1,4 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  MIC_GRANT_PAGE,
+  MIC_GRANT_STORAGE_KEY,
+  readMicGrantResult,
+  writeMicGrantResult,
+  type MicGrantResult,
+} from '../shared/micGrant'
 import { openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
   listAudioInputs,
@@ -19,7 +26,7 @@ type LoomStatus = {
 type DeviceOption = { deviceId: string; label: string }
 
 type PreflightStep = 'setup' | 'camera' | 'mic' | 'screen'
-/** Mic must be granted in this visible popup — offscreen cannot show Allow. */
+/** Mic must be granted via the visible grant window — popup/offscreen cannot show Allow. */
 type MicAccess = 'unknown' | 'granted' | 'denied' | 'skipped'
 
 function errMessage(err: unknown, fallback: string): string {
@@ -38,7 +45,7 @@ function formatStartError(reason: string | undefined | null, fallback: string): 
   const detail = typeof reason === 'string' ? reason.trim() : ''
   if (!detail) return fallback
   if (/permission dismissed|notallowed|permission denied/i.test(detail)) {
-    return 'Permission dismissed — allow Microphone for MyPipCam in this popup (Allow microphone), or choose Continue without mic. You can also check chrome://settings/content/microphone.'
+    return 'Permission dismissed — click Allow microphone to open the permission window, or choose Continue without mic. You can also check chrome://settings/content/microphone.'
   }
   if (/^could not start recording/i.test(detail)) return detail
   return `${fallback}: ${detail}`
@@ -117,6 +124,43 @@ export function PopupApp() {
   const [targetTab, setTargetTab] = useState<{ id: number; title: string; url: string } | null>(
     null,
   )
+  const micGrantPollRef = useRef<number | null>(null)
+  const micGrantWindowIdRef = useRef<number | null>(null)
+  const [micGrantWaiting, setMicGrantWaiting] = useState(false)
+
+  function stopMicGrantPoll() {
+    if (micGrantPollRef.current != null) {
+      window.clearInterval(micGrantPollRef.current)
+      micGrantPollRef.current = null
+    }
+  }
+
+  async function applyMicGrantResult(result: MicGrantResult | null): Promise<boolean> {
+    if (!result) return false
+    if (result.status === 'granted') {
+      stopMicGrantPoll()
+      setMicGrantWaiting(false)
+      setMicAccess('granted')
+      if (result.devices && result.devices.length > 0) {
+        setMics(result.devices)
+      }
+      setMicHint('Microphone allowed. Pick a device if needed, then continue.')
+      await refreshMicsFromPopup()
+      return true
+    }
+    if (result.status === 'denied' || result.status === 'error') {
+      stopMicGrantPoll()
+      setMicGrantWaiting(false)
+      setMicAccess('denied')
+      setMicHint(
+        result.reason && !/dismissed|denied|notallowed/i.test(result.reason)
+          ? result.reason
+          : 'Microphone blocked. In the grant window click Allow again, or reset: chrome://settings/content/microphone → remove MyPipCam if blocked. macOS: System Settings → Privacy & Security → Microphone → Google Chrome ON. Or Continue without mic.',
+      )
+      return true
+    }
+    return false
+  }
 
   async function probeMicPermissionState() {
     try {
@@ -137,42 +181,67 @@ export function PopupApp() {
   }
 
   /**
-   * Must run in this visible popup. Offscreen getUserMedia cannot show Chrome's
-   * Allow dialog and fails with "Permission dismissed".
+   * Open a dedicated extension window. Popup getUserMedia fails with
+   * "Permission dismissed" / no Chrome Allow UI — the grant page button works.
    */
   async function allowMicrophone() {
-    setBusy(true)
     setError(null)
-    setMicHint(null)
+    setMicGrantWaiting(true)
+    setMicHint('Permission window opened — click Allow microphone there, then Allow in Chrome’s dialog.')
+    stopMicGrantPoll()
+
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setMicAccess('denied')
-        setMicHint('This browser cannot request microphone access here.')
-        return
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...(micDeviceId ? { deviceId: { exact: micDeviceId } } : {}),
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-        video: false,
+      await writeMicGrantResult('pending')
+
+      const url = chrome.runtime.getURL(MIC_GRANT_PAGE)
+      const win = await chrome.windows.create({
+        url,
+        type: 'popup',
+        width: 440,
+        height: 340,
+        focused: true,
       })
-      for (const t of stream.getTracks()) t.stop()
-      setMicAccess('granted')
-      setMicHint('Microphone allowed for MyPipCam. You can pick a device below, then continue.')
-      await refreshMicsFromPopup()
+      micGrantWindowIdRef.current = typeof win?.id === 'number' ? win.id : null
+
+      const startedAt = Date.now()
+      micGrantPollRef.current = window.setInterval(() => {
+        void (async () => {
+          const result = await readMicGrantResult()
+          if (await applyMicGrantResult(result)) return
+
+          const winId = micGrantWindowIdRef.current
+          if (winId != null) {
+            try {
+              await chrome.windows.get(winId)
+            } catch {
+              stopMicGrantPoll()
+              const latest = await readMicGrantResult()
+              if (!(await applyMicGrantResult(latest))) {
+                setMicGrantWaiting(false)
+                setMicAccess((prev) => (prev === 'granted' || prev === 'skipped' ? prev : 'denied'))
+                setMicHint(
+                  'Permission window closed before Allow. Click Allow microphone again, or Continue without mic.',
+                )
+              }
+              return
+            }
+          }
+
+          if (Date.now() - startedAt > 120_000) {
+            stopMicGrantPoll()
+            setMicGrantWaiting(false)
+            setMicHint(
+              'Still waiting — click Allow microphone in the permission window (then Chrome’s Allow), or Continue without mic.',
+            )
+          }
+        })()
+      }, 350)
     } catch (err) {
+      setMicGrantWaiting(false)
       setMicAccess('denied')
-      const detail = errMessage(err, 'Microphone permission denied')
-      console.error('[MyPipCam][start] popup Allow microphone failed:', detail, err)
-      setMicHint(
-        /dismissed|denied|notallowed/i.test(detail)
-          ? 'Microphone blocked. Click the mic icon in the address bar for this extension popup, or open chrome://settings/content/microphone and allow MyPipCam. Or choose Continue without mic.'
-          : detail,
-      )
-    } finally {
-      setBusy(false)
+      const detail = errMessage(err, 'Could not open microphone permission window')
+      console.error('[MyPipCam][start] open mic grant window failed:', detail, err)
+      setMicHint(detail)
     }
   }
 
@@ -211,7 +280,7 @@ export function PopupApp() {
         setMics([])
         setMicHint(
           res?.reason ||
-            'Click Allow microphone in this popup first (not in Settings alone).',
+            'Click Allow microphone first (Allow in the permission window).',
         )
         return
       }
@@ -278,6 +347,11 @@ export function PopupApp() {
       setMicDeviceId(s.micDeviceId || '')
       setCameraDeviceId(s.cameraDeviceId || '')
       await probeMicPermissionState()
+      // Popup often closes when the grant window opens — pick up the result on reopen.
+      const grant = await readMicGrantResult()
+      if (await applyMicGrantResult(grant)) {
+        /* status/hint set */
+      }
       await refreshMics()
 
       // Surface start failures that happened after the popup was destroyed
@@ -303,6 +377,40 @@ export function PopupApp() {
         if (res) setStatus(res)
       })
       .catch(() => undefined)
+
+    const onStorageChanged: Parameters<typeof chrome.storage.onChanged.addListener>[0] = (
+      changes,
+      area,
+    ) => {
+      if (area !== 'session' || !changes[MIC_GRANT_STORAGE_KEY]) return
+      const next = changes[MIC_GRANT_STORAGE_KEY].newValue as MicGrantResult | undefined
+      void applyMicGrantResult(next ?? null)
+    }
+    chrome.storage.onChanged.addListener(onStorageChanged)
+
+    const onMessage = (
+      message: { type?: string; status?: string; reason?: string },
+      _sender: chrome.runtime.MessageSender,
+      sendResponse: (response?: unknown) => void,
+    ) => {
+      if (message?.type !== 'MIC_GRANT_RESULT') return
+      void (async () => {
+        await applyMicGrantResult({
+          status: message.status === 'granted' ? 'granted' : 'denied',
+          reason: message.reason,
+          at: Date.now(),
+        })
+        sendResponse({ ok: true })
+      })()
+      return true
+    }
+    chrome.runtime.onMessage.addListener(onMessage)
+
+    return () => {
+      stopMicGrantPoll()
+      chrome.storage.onChanged.removeListener(onStorageChanged)
+      chrome.runtime.onMessage.removeListener(onMessage)
+    }
   }, [])
 
   async function resolveActiveTab(): Promise<{ id: number; title: string; url: string } | null> {
@@ -332,7 +440,11 @@ export function PopupApp() {
   }
 
   function goToMicStep() {
-    void probeMicPermissionState()
+    void (async () => {
+      await probeMicPermissionState()
+      const grant = await readMicGrantResult()
+      await applyMicGrantResult(grant)
+    })()
     setStep('mic')
   }
 
@@ -392,16 +504,20 @@ export function PopupApp() {
 
   async function continueWithMic() {
     setError(null)
-    if (micAccess !== 'granted') {
-      setError('Click Allow microphone first (Chrome must show the Allow dialog in this popup).')
+    if (micAccess !== 'granted' && micAccess !== 'skipped') {
+      setError('Click Allow microphone (use the permission window), or Continue without mic.')
       return
     }
+    stopMicGrantPoll()
+    setMicGrantWaiting(false)
     await persistSetup()
     advanceAfterMic()
   }
 
   async function continueWithoutMic() {
     setError(null)
+    stopMicGrantPoll()
+    setMicGrantWaiting(false)
     setMicAccess('skipped')
     setMicHint('Continuing without microphone. Tab audio may still be captured.')
     await persistSetup()
@@ -670,8 +786,8 @@ export function PopupApp() {
             Step {stepIndex('mic', recordMode)} of {totalSteps(recordMode)} — Microphone
           </p>
           <p className="popup-hint">
-            Chrome must show an Allow dialog here. An invisible recorder cannot ask for mic
-            permission.
+            Opens a permission window — click <strong>Allow microphone</strong> there so Chrome can
+            show its Allow dialog. (This popup cannot.)
           </p>
           <p className={`popup-mic-status is-${micAccess}`} role="status">
             Status: <strong>{micAccessLabel(micAccess)}</strong>
@@ -679,10 +795,10 @@ export function PopupApp() {
           <button
             type="button"
             className="primary"
-            disabled={busy}
+            disabled={micGrantWaiting}
             onClick={() => void allowMicrophone()}
           >
-            {busy ? 'Asking…' : 'Allow microphone'}
+            {micGrantWaiting ? 'Waiting for grant window…' : 'Allow microphone'}
           </button>
           <label className="popup-field">
             <span>Microphone device</span>
@@ -705,7 +821,6 @@ export function PopupApp() {
             <button
               type="button"
               className="ghost"
-              disabled={busy}
               onClick={() => {
                 setError(null)
                 setStep(needsCamera(recordMode) ? 'camera' : 'setup')
@@ -716,14 +831,13 @@ export function PopupApp() {
             <button
               type="button"
               className="ghost"
-              disabled={busy}
               onClick={() => void continueWithoutMic()}
             >
               Continue without mic
             </button>
             <button
               className="primary"
-              disabled={busy || micAccess !== 'granted'}
+              disabled={micAccess !== 'granted' && micAccess !== 'skipped'}
               onClick={() => void continueWithMic()}
             >
               {needsScreen(recordMode) ? 'Next: choose tab' : 'Start countdown'}
