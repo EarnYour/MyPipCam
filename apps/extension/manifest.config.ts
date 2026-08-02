@@ -1,43 +1,84 @@
 import { defineManifest } from '@crxjs/vite-plugin'
+import { DRIVE_SCOPE, GOOGLE_OAUTH_CLIENT_ID } from './src/shared/driveConfig'
 
 export default defineManifest({
   manifest_version: 3,
   name: 'MyPipCam',
   description:
-    'Record screen + camera PiP like Loom. Local library and trim editor — no cloud.',
+    'Record this Chrome tab with a live draggable camera PiP (Loom-style). Local library and editor.',
   version: '0.1.0',
+  // PUBLIC key only → stable extension ID across unpacked reloads.
+  // ID: akpchobfndfddajiihkkdpnihihdicjc
+  // Matching PRIVATE key must never be committed (apps/extension/keys/*.pem).
+  // Forks/distributors: generate your own keypair (`openssl genrsa` / Chrome pack)
+  // and replace this field, or omit `key` and accept a new extension ID.
+  key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvt5e+6w3dk+PBuZiSG2Wr/TvaPOlrIVMlYRmYUzsJSupxWtXf2J+wEpXNxS8Tp7dGovM2jFsKNcroQGKIrJpZFPhczdPoZFXXqv1tMxMjhXh8hVqwDu7lZFsohOk2Cl+9YR4SOz3khMzOr0XX6hN2Pz7oTXWeRhjl6plncvn2MprWEsGutxOdig/C+j0F3uu7bsYhGghHgjV7QDzNugTlVLhQbHw0Bq0fSxTxy1HxoYVDytgu7MXze5cTp+heQu9ClVoH+G+CLldcmuMCGM0DJb2EN707eAI2EPVLpqs1Fh7YSxOBra2Hxw8krcy09gfj48GXqd1Ps1ZmzSjReGgYQIDAQAB',
+  icons: {
+    '16': 'icons/icon16.png',
+    '32': 'icons/icon32.png',
+    '48': 'icons/icon48.png',
+    '128': 'icons/icon128.png',
+  },
   action: {
     default_popup: 'src/popup/index.html',
     default_title: 'MyPipCam',
     default_icon: {
-      '16': 'public/icons/icon16.png',
-      '32': 'public/icons/icon32.png',
-      '48': 'public/icons/icon48.png',
-      '128': 'public/icons/icon128.png',
+      '16': 'icons/icon16.png',
+      '32': 'icons/icon32.png',
+      '48': 'icons/icon48.png',
+      '128': 'icons/icon128.png',
     },
   },
   background: {
     service_worker: 'src/background/index.ts',
     type: 'module',
   },
-  icons: {
-    '16': 'public/icons/icon16.png',
-    '32': 'public/icons/icon32.png',
-    '48': 'public/icons/icon48.png',
-    '128': 'public/icons/icon128.png',
+  permissions: [
+    'storage',
+    'unlimitedStorage',
+    'tabs',
+    'scripting',
+    'activeTab',
+    'tabCapture',
+    'offscreen',
+    'identity',
+  ],
+  oauth2: {
+    // Paste client ID once in src/shared/driveConfig.ts (imported here).
+    // Extension ID for Google Cloud Console: akpchobfndfddajiihkkdpnihihdicjc
+    client_id: GOOGLE_OAUTH_CLIENT_ID,
+    scopes: [DRIVE_SCOPE],
   },
-  permissions: ['storage', 'unlimitedStorage', 'tabs'],
+  // Required to inject the recording overlay into the captured http(s) tab.
+  // activeTab alone is not reliable across countdown/restart. See SECURITY.md.
+  host_permissions: ['http://*/*', 'https://*/*'],
+  web_accessible_resources: [
+    {
+      // Extension-origin camera PiP iframe + its bundled scripts (not page getUserMedia).
+      // MediaPipe WASM/model are loaded from the iframe via chrome.runtime.getURL.
+      // Camera start is gated by a registered channel token (see pip + background).
+      resources: [
+        'src/pip/index.html',
+        'assets/pip*.js',
+        'assets/backgroundBlur*.js',
+        'assets/modulepreload-polyfill*.js',
+        'mediapipe/**/*',
+      ],
+      matches: ['http://*/*', 'https://*/*'],
+    },
+  ],
   commands: {
     'start-recording': {
       suggested_key: {
         default: 'Ctrl+Shift+U',
         mac: 'Command+Shift+U',
       },
-      description: 'Start or focus MyPipCam recorder',
+      description: 'Start or stop MyPipCam tab recording',
     },
   },
   content_security_policy: {
-    extension_pages:
-      "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'",
+    // MV3 extension_pages cannot use blob: (Chrome rejects it as insecure).
+    // wasm-unsafe-eval is required for ffmpeg.wasm; load core/wasm via chrome.runtime.getURL (not toBlobURL).
+    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
   },
 })

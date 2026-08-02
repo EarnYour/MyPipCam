@@ -1,3 +1,17 @@
+export type TranscriptSegment = {
+  start: number
+  end: number
+  text: string
+}
+
+export type TranscriptData = {
+  text: string
+  segments: TranscriptSegment[]
+  language?: string
+  createdAt: number
+  provider: 'openai'
+}
+
 export type RecordingMeta = {
   id: string
   title: string
@@ -6,33 +20,69 @@ export type RecordingMeta = {
   mimeType: string
   sizeBytes: number
   thumbnail?: Blob
+  transcript?: TranscriptData
+  /** Google Drive file id when uploaded to the shared library folder. */
+  driveFileId?: string
+  driveWebViewLink?: string
+  driveShared?: boolean
+  /** Present only when the item exists on Drive but not locally (other device). */
+  driveOnly?: boolean
 }
 
 export type RecordingRecord = RecordingMeta & {
   blob: Blob
 }
 
+/** API keys stored only in chrome.storage.local (on-device). Never sync. */
+export type ApiSettings = {
+  openaiApiKey: string
+}
+
+export const DEFAULT_API_SETTINGS: ApiSettings = {
+  openaiApiKey: '',
+}
+
+/** Primary popup capture modes (MV3 tab / camera). */
+export type RecordMode = 'screen-cam' | 'screen' | 'cam'
+
+export type BubbleShape = 'circle' | 'square'
+
+/** Loom-style camera background effect (person segmentation). */
+export type BackgroundEffect = 'none' | 'blur'
+
 export type PipSettings = {
   cameraDeviceId: string | null
+  micDeviceId: string | null
+  recordMode: RecordMode
   bubbleX: number
   bubbleY: number
   bubbleSize: number
+  bubbleShape: BubbleShape
   borderColor: string
   shadow: boolean
   mirror: boolean
+  /** Person-sharp background blur (MediaPipe selfie segmenter). */
+  backgroundEffect: BackgroundEffect
   openLibraryOnFinish: boolean
 }
 
 export const DEFAULT_PIP_SETTINGS: PipSettings = {
   cameraDeviceId: null,
+  micDeviceId: null,
+  recordMode: 'screen-cam',
   bubbleX: 0.82,
   bubbleY: 0.78,
   bubbleSize: 0.18,
+  bubbleShape: 'circle',
   borderColor: '#ffffff',
   shadow: true,
   mirror: true,
+  backgroundEffect: 'none',
   openLibraryOnFinish: true,
 }
+
+/** Corner radius as a fraction of bubble side length (square shape). */
+export const SQUARE_CORNER_FRACTION = 0.16
 
 export const BORDER_PRESETS = [
   '#ffffff',

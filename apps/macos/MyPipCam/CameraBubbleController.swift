@@ -6,7 +6,8 @@ import SwiftUI
 final class CameraBubbleController: NSObject {
     private var panel: NSPanel?
     private let camera = CameraManager()
-    private let settings = BubbleSettings()
+    private let microphone = MicrophoneManager()
+    let settings = BubbleSettings()
     private let loginItem: LoginItemManager
     private var scrollMonitor: Any?
     private var sizeCancellable: AnyCancellable?
@@ -33,12 +34,14 @@ final class CameraBubbleController: NSObject {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
+        panel.acceptsMouseMovedEvents = true
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isReleasedWhenClosed = false
 
         let rootView = CameraBubbleView(
             camera: camera,
+            microphone: microphone,
             settings: settings,
             loginItem: loginItem,
             onQuit: { [weak self] in

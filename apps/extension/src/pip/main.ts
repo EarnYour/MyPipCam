@@ -1,0 +1,212 @@
+/**
+ * Camera runs in the extension origin (iframe), not the host page.
+ * Site camera blocks (address-bar ✕) do not apply here.
+ *
+ * Security: this page is web-accessible. Camera starts only after the
+ * background validates a short-lived channel token registered by the
+ * content script. postMessage commands require the same token.
+ */
+
+import {
+  createPersonBackgroundBlur,
+  isBlurEffect,
+  type PersonBackgroundBlur,
+} from '../shared/backgroundBlur'
+import { isPipChannelToken } from '../shared/security'
+import type { BackgroundEffect } from '../shared/types'
+
+const video = document.getElementById('cam') as HTMLVideoElement
+const canvas = document.getElementById('out') as HTMLCanvasElement
+let stream: MediaStream | null = null
+let effect: BackgroundEffect = 'none'
+let blurEngine: PersonBackgroundBlur | null = null
+let raf = 0
+let running = false
+
+const channelToken = (() => {
+  const raw = new URLSearchParams(location.search).get('ch')
+  return isPipChannelToken(raw) ? raw : ''
+})()
+
+function postToParent(payload: Record<string, unknown>) {
+  if (!channelToken) return
+  window.parent.postMessage({ ...payload, token: channelToken }, '*')
+}
+
+function readEffectFromQuery(): BackgroundEffect {
+  const params = new URLSearchParams(location.search)
+  return params.get('effect') === 'blur' ? 'blur' : 'none'
+}
+
+function setMirror(on: boolean) {
+  video.classList.toggle('mirror', on)
+  canvas.classList.toggle('mirror', on)
+}
+
+function showFallback(message: string) {
+  video.remove()
+  canvas.remove()
+  const el = document.createElement('div')
+  el.className = 'fallback'
+  el.textContent = message
+  document.body.appendChild(el)
+}
+
+function showSurface(mode: 'video' | 'canvas') {
+  video.classList.toggle('is-hidden', mode !== 'video')
+  canvas.classList.toggle('is-hidden', mode !== 'canvas')
+}
+
+function stopLoop() {
+  running = false
+  if (raf) {
+    cancelAnimationFrame(raf)
+    raf = 0
+  }
+}
+
+function drawLoop() {
+  if (!running) return
+  raf = requestAnimationFrame(drawLoop)
+  if (!blurEngine || !isBlurEffect(effect)) return
+  if (!video.videoWidth) return
+  const frame = blurEngine.process(video)
+  if (!frame) return
+  if (canvas.width !== frame.width || canvas.height !== frame.height) {
+    canvas.width = frame.width
+    canvas.height = frame.height
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.drawImage(frame, 0, 0)
+}
+
+async function applyEffect(next: BackgroundEffect) {
+  effect = next
+  if (!isBlurEffect(effect)) {
+    stopLoop()
+    showSurface('video')
+    return
+  }
+  try {
+    if (!blurEngine) {
+      blurEngine = await createPersonBackgroundBlur()
+    }
+    showSurface('canvas')
+    if (!running) {
+      running = true
+      drawLoop()
+    }
+  } catch (err) {
+    console.warn('[MyPipCam] background blur unavailable', err)
+    effect = 'none'
+    stopLoop()
+    showSurface('video')
+  }
+}
+
+async function startCamera(deviceId: string | null) {
+  const params = new URLSearchParams(location.search)
+  setMirror(params.get('mirror') !== '0')
+  const id = deviceId ?? params.get('deviceId')
+  effect = readEffectFromQuery()
+
+  try {
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop()
+      stream = null
+    }
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        ...(id ? { deviceId: { exact: id } } : {}),
+        width: { ideal: 640 },
+        height: { ideal: 640 },
+        frameRate: { ideal: 30 },
+      },
+      audio: false,
+    })
+    video.srcObject = stream
+    await video.play().catch(() => undefined)
+    await applyEffect(effect)
+    postToParent({ type: 'MPC_PIP_CAMERA', ok: true })
+  } catch (err) {
+    // Fallback without exact device if chosen cam fails
+    if (id) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 640 },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        })
+        video.srcObject = stream
+        await video.play().catch(() => undefined)
+        await applyEffect(effect)
+        postToParent({ type: 'MPC_PIP_CAMERA', ok: true })
+        return
+      } catch {
+        /* fall through */
+      }
+    }
+    const msg = err instanceof Error ? err.message : 'Camera unavailable'
+    showFallback('Allow camera for MyPipCam')
+    postToParent({ type: 'MPC_PIP_CAMERA', ok: false, reason: msg })
+  }
+}
+
+function stopCamera() {
+  stopLoop()
+  blurEngine?.close()
+  blurEngine = null
+  if (stream) {
+    for (const track of stream.getTracks()) track.stop()
+    stream = null
+  }
+  video.srcObject = null
+}
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window.parent) return
+  if (!channelToken) return
+  const data = event.data
+  if (!data || typeof data !== 'object') return
+  if (data.token !== channelToken) return
+  if (data.type === 'MPC_PIP_MIRROR') {
+    setMirror(Boolean(data.mirror))
+    if (data.deviceId != null) {
+      void startCamera(typeof data.deviceId === 'string' ? data.deviceId : null)
+    }
+  }
+  if (data.type === 'MPC_PIP_EFFECT') {
+    const next: BackgroundEffect = data.effect === 'blur' ? 'blur' : 'none'
+    void applyEffect(next)
+  }
+  if (data.type === 'MPC_PIP_STOP') {
+    stopCamera()
+  }
+})
+
+async function boot() {
+  if (!channelToken) {
+    showFallback('Camera overlay unavailable')
+    return
+  }
+  try {
+    const res = (await chrome.runtime.sendMessage({
+      type: 'VALIDATE_PIP_CHANNEL',
+      token: channelToken,
+    })) as { ok?: boolean } | undefined
+    if (!res?.ok) {
+      showFallback('Camera overlay unavailable')
+      return
+    }
+  } catch {
+    showFallback('Camera overlay unavailable')
+    return
+  }
+  void startCamera(null)
+}
+
+void boot()

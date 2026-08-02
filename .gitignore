@@ -1,7 +1,12 @@
 .DS_Store
 build/
 **/build/
+build-agent/
+**/build-agent/
+build-release/
+**/build-release/
 DerivedData/
+**/DerivedData/
 *.xcuserstate
 xcuserdata/
 *.moved-aside
@@ -18,3 +23,12 @@ dist/
 .env
 .env.*
 !.env.example
+*.pem
+*.p12
+*.p8
+*.mobileprovision
+*.bookmark
+*.bookmarks
+apps/extension/public/ffmpeg/
+apps/extension/public/mediapipe/
+apps/extension/keys/

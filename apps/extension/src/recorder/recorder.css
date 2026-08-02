@@ -1,7 +1,38 @@
 body {
   margin: 0;
   overflow: hidden;
-  background: #05070a;
+  background: var(--color-bg-secondary);
+  color: var(--color-on-dark);
+  color-scheme: dark;
+}
+
+/* Recorder is dark chrome — override light-page button/input defaults */
+body button:not(.primary):not(.danger) {
+  background: var(--bg-soft);
+  color: var(--color-on-dark);
+}
+
+body button:not(.primary):not(.danger):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-secondary) 22%, var(--bg-soft));
+}
+
+body button.ghost {
+  background: transparent;
+  color: var(--color-on-dark-muted);
+}
+
+body button.ghost:hover:not(:disabled) {
+  color: var(--color-on-dark);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+body input[type='text'],
+body input[type='search'],
+body input[type='password'],
+body select {
+  background: #1a1c1b;
+  color: var(--color-on-dark);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .recorder-shell {
@@ -12,61 +43,122 @@ body {
   place-items: center;
 }
 
-.recorder-stage {
-  position: relative;
-  max-width: 100vw;
-  max-height: 100vh;
-  background: #000;
-  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.55);
+.recorder-shell.is-live {
+  place-items: stretch;
+  padding: 0;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 94, 41, 0.14), transparent 55%),
+    var(--color-bg-secondary);
 }
 
-.recorder-stage canvas {
+.recorder-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+.canvas-host {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.recorder-stage canvas,
+.recorder-canvas {
   display: block;
-  max-width: 100vw;
-  max-height: 100vh;
-  width: auto;
-  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain;
+  background: #000;
+}
+
+.stage-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--color-bg-secondary) 55%, transparent);
+  z-index: 8;
+  pointer-events: none;
 }
 
 .recorder-hud {
   position: fixed;
   left: 50%;
-  bottom: 1.25rem;
+  bottom: 1rem;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  padding: 0.65rem 0.85rem;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.55rem 0.75rem;
   border-radius: 999px;
-  background: rgba(12, 16, 22, 0.88);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-on-dark);
   backdrop-filter: blur(12px);
-  z-index: 20;
+  z-index: 30;
+}
+
+.hud-size {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--color-on-dark-muted);
+}
+
+.hud-size input[type='range'] {
+  width: 88px;
+}
+
+.hud-swatches {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.hud-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--color-on-dark-muted);
+  user-select: none;
 }
 
 .rec-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 0 rgba(232, 93, 76, 0.55);
+  background: var(--color-primary);
+  box-shadow: 0 0 0 0 rgba(255, 94, 41, 0.55);
   animation: pulse 1.4s ease infinite;
+  flex-shrink: 0;
 }
 
 .rec-dot.idle {
-  background: var(--text-muted);
+  background: var(--color-on-dark-muted);
   animation: none;
 }
 
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(232, 93, 76, 0.5);
+    box-shadow: 0 0 0 0 rgba(255, 94, 41, 0.5);
   }
   70% {
-    box-shadow: 0 0 0 10px rgba(232, 93, 76, 0);
+    box-shadow: 0 0 0 10px rgba(255, 94, 41, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(232, 93, 76, 0);
+    box-shadow: 0 0 0 0 rgba(255, 94, 41, 0);
   }
 }
 
@@ -76,6 +168,20 @@ body {
   min-width: 3.5rem;
 }
 
+.surface-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 4.6rem;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(520px, calc(100vw - 2rem));
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--color-on-dark-muted);
+  z-index: 25;
+  pointer-events: none;
+}
+
 .recorder-settings {
   position: fixed;
   top: 1rem;
@@ -83,9 +189,10 @@ body {
   width: min(320px, calc(100vw - 2rem));
   padding: 1rem;
   border-radius: var(--radius);
-  background: rgba(18, 24, 32, 0.94);
-  border: 1px solid var(--border);
-  z-index: 20;
+  background: color-mix(in srgb, var(--color-bg-secondary) 94%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-on-dark);
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -101,7 +208,7 @@ body {
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.78rem;
-  color: var(--text-muted);
+  color: var(--color-on-dark-muted);
 }
 
 .swatches {
@@ -118,8 +225,23 @@ body {
   padding: 0;
 }
 
+.hud-swatches .swatch {
+  width: 18px;
+  height: 18px;
+}
+
 .swatch.active {
   border-color: #fff;
+}
+
+.swatch.shape-swatch {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: #fff;
+  background: color-mix(in srgb, var(--color-bg-secondary) 80%, #fff 8%);
+  border-radius: 6px;
 }
 
 .toggles {
@@ -146,7 +268,7 @@ body {
 }
 
 .idle-panel p {
-  color: var(--text-muted);
+  color: var(--color-on-dark-muted);
   margin: 0 0 1.25rem;
 }
 
@@ -156,18 +278,93 @@ body {
   margin-top: 0.75rem;
 }
 
-.pip-handle {
-  position: absolute;
+.pip-bubble {
+  position: fixed;
   border-radius: 50%;
   cursor: grab;
   touch-action: none;
-  z-index: 5;
-  outline: 2px dashed rgba(255, 255, 255, 0.35);
-  outline-offset: 2px;
+  z-index: 12;
+  overflow: visible;
+  border: 3px solid #fff;
+  box-sizing: border-box;
+  user-select: none;
 }
 
-.pip-handle:active {
+.pip-bubble.is-square {
+  border-radius: 16%;
+}
+
+.pip-bubble.is-dragging {
   cursor: grabbing;
+  z-index: 14;
+}
+
+.pip-bubble-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+  pointer-events: none;
+  background: #111;
+}
+
+.pip-bubble.is-square .pip-bubble-video {
+  border-radius: 16%;
+}
+
+.pip-bubble-video.mirror {
+  transform: scaleX(-1);
+}
+
+/* When blur is on, the compositor canvas draws the effect; keep this as a transparent drag shell. */
+.pip-bubble-video.is-blur-proxy {
+  opacity: 0;
+  background: transparent;
+}
+
+.pip-bubble-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  animation: ring-pulse 1.8s ease-in-out infinite;
+}
+
+.pip-bubble.is-square .pip-bubble-ring {
+  border-radius: 18%;
+}
+
+@keyframes ring-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pip-resize-handle {
+  position: absolute;
+  right: 4%;
+  bottom: 4%;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--color-primary);
+  cursor: nwse-resize;
+  touch-action: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+.pip-resize-handle:hover {
+  background: var(--accent-hover);
+  transform: none;
 }
 
 .status-toast {
@@ -175,10 +372,13 @@ body {
   top: 1rem;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(18, 24, 32, 0.95);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 95%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-on-dark);
   padding: 0.65rem 1rem;
   border-radius: 999px;
-  z-index: 30;
+  z-index: 40;
   font-size: 0.85rem;
+  max-width: min(480px, calc(100vw - 2rem));
+  text-align: center;
 }

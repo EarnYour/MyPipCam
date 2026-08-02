@@ -1,4 +1,10 @@
-import type { PipSettings } from '../shared/types'
+import type { BubbleShape, PipSettings } from '../shared/types'
+import { SQUARE_CORNER_FRACTION } from '../shared/types'
+import {
+  createPersonBackgroundBlur,
+  isBlurEffect,
+  type PersonBackgroundBlur,
+} from '../shared/backgroundBlur'
 
 export type CaptureBundle = {
   displayStream: MediaStream
@@ -41,17 +47,43 @@ function drawCover(
   ctx.drawImage(video, dx, dy, dw, dh)
 }
 
-function drawCircleCover(
+function roundedRectPath(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+function drawBubbleCover(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sourceW: number,
+  sourceH: number,
   cx: number,
   cy: number,
   radius: number,
   mirror: boolean,
   borderColor: string,
   shadow: boolean,
+  shape: BubbleShape = 'circle',
 ) {
-  if (!video.videoWidth) return
+  if (!sourceW) return
+
+  const size = radius * 2
+  const left = cx - radius
+  const top = cy - radius
+  const cornerR = shape === 'square' ? size * SQUARE_CORNER_FRACTION : radius
 
   ctx.save()
   if (shadow) {
@@ -60,17 +92,18 @@ function drawCircleCover(
     ctx.shadowOffsetY = Math.max(4, radius * 0.08)
   }
 
-  ctx.beginPath()
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-  ctx.closePath()
+  if (shape === 'square') {
+    roundedRectPath(ctx, left, top, size, size, cornerR)
+  } else {
+    ctx.beginPath()
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+    ctx.closePath()
+  }
   ctx.clip()
 
-  const size = radius * 2
-  const vw = video.videoWidth
-  const vh = video.videoHeight
-  const scale = Math.max(size / vw, size / vh)
-  const dw = vw * scale
-  const dh = vh * scale
+  const scale = Math.max(size / sourceW, size / sourceH)
+  const dw = sourceW * scale
+  const dh = sourceH * scale
   const dx = cx - dw / 2
   const dy = cy - dh / 2
 
@@ -79,13 +112,17 @@ function drawCircleCover(
     ctx.scale(-1, 1)
     ctx.translate(-cx, -cy)
   }
-  ctx.drawImage(video, dx, dy, dw, dh)
+  ctx.drawImage(source, dx, dy, dw, dh)
   ctx.restore()
 
   if (borderColor !== 'transparent') {
     ctx.save()
-    ctx.beginPath()
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+    if (shape === 'square') {
+      roundedRectPath(ctx, left, top, size, size, cornerR)
+    } else {
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+    }
     ctx.strokeStyle = borderColor
     ctx.lineWidth = Math.max(3, radius * 0.06)
     ctx.stroke()
@@ -130,7 +167,10 @@ export async function startCapture(settings: PipSettings): Promise<{
   stopDraw: () => void
   getBubbleRect: () => { x: number; y: number; size: number }
   setBubbleNorm: (x: number, y: number) => void
+  setBubbleSize: (size: number) => void
   updateSettings: (next: PipSettings) => void
+  setDrawCamera: (on: boolean) => void
+  displaySurface: string | undefined
 }> {
   const displayStream = await navigator.mediaDevices.getDisplayMedia({
     video: {
@@ -182,6 +222,28 @@ export async function startCapture(settings: PipSettings): Promise<{
   let bubbleY = settings.bubbleY
   let raf = 0
   let running = true
+  let drawCamera = true
+  let blurEngine: PersonBackgroundBlur | null = null
+  let blurInit: Promise<void> | null = null
+
+  const clampSize = (size: number) => Math.min(0.35, Math.max(0.1, size))
+
+  const ensureBlur = () => {
+    if (!isBlurEffect(liveSettings.backgroundEffect) || blurEngine || blurInit) return
+    blurInit = createPersonBackgroundBlur()
+      .then((engine) => {
+        blurEngine = engine
+      })
+      .catch((err) => {
+        console.warn('[MyPipCam] background blur unavailable', err)
+        liveSettings = { ...liveSettings, backgroundEffect: 'none' }
+      })
+      .finally(() => {
+        blurInit = null
+      })
+  }
+
+  ensureBlur()
 
   const draw = () => {
     if (!running) return
@@ -189,19 +251,36 @@ export async function startCapture(settings: PipSettings): Promise<{
     ctx.fillRect(0, 0, width, height)
     drawCover(ctx, displayVideo, width, height)
 
-    if (cameraVideo) {
+    if (cameraVideo && drawCamera) {
       const radius = (Math.min(width, height) * liveSettings.bubbleSize) / 2
       const cx = bubbleX * width
       const cy = bubbleY * height
-      drawCircleCover(
+      let source: CanvasImageSource = cameraVideo
+      let sourceW = cameraVideo.videoWidth
+      let sourceH = cameraVideo.videoHeight
+
+      if (isBlurEffect(liveSettings.backgroundEffect)) {
+        ensureBlur()
+        const blurred = blurEngine?.process(cameraVideo)
+        if (blurred && blurred.width > 0) {
+          source = blurred
+          sourceW = blurred.width
+          sourceH = blurred.height
+        }
+      }
+
+      drawBubbleCover(
         ctx,
-        cameraVideo,
+        source,
+        sourceW,
+        sourceH,
         cx,
         cy,
         radius,
         liveSettings.mirror,
         liveSettings.borderColor,
         liveSettings.shadow,
+        liveSettings.bubbleShape === 'square' ? 'square' : 'circle',
       )
     }
     raf = requestAnimationFrame(draw)
@@ -209,10 +288,16 @@ export async function startCapture(settings: PipSettings): Promise<{
   draw()
 
   const canvasStream = canvas.captureStream(30)
-  const displayAudio = displayStream.getAudioTracks()
+  const displayAudio = displayStream?.getAudioTracks?.() ?? []
   for (const track of displayAudio) {
     canvasStream.addTrack(track)
   }
+
+  const displayTrack = displayStream?.getVideoTracks?.()?.[0]
+  const displaySurface = displayTrack?.getSettings?.().displaySurface as string | undefined
+
+  // Class used by recorder CSS for contain-fit in the live stage
+  canvas.className = 'recorder-canvas'
 
   return {
     bundle: { displayStream, cameraStream, canvas, canvasStream, width, height },
@@ -221,6 +306,8 @@ export async function startCapture(settings: PipSettings): Promise<{
     stopDraw: () => {
       running = false
       cancelAnimationFrame(raf)
+      blurEngine?.close()
+      blurEngine = null
     },
     getBubbleRect: () => ({
       x: bubbleX,
@@ -231,9 +318,20 @@ export async function startCapture(settings: PipSettings): Promise<{
       bubbleX = Math.min(0.95, Math.max(0.05, x))
       bubbleY = Math.min(0.95, Math.max(0.05, y))
     },
-    updateSettings: (next) => {
-      liveSettings = { ...next }
+    setBubbleSize: (size) => {
+      liveSettings = { ...liveSettings, bubbleSize: clampSize(size) }
     },
+    updateSettings: (next) => {
+      liveSettings = {
+        ...next,
+        bubbleSize: clampSize(next.bubbleSize),
+      }
+      if (isBlurEffect(liveSettings.backgroundEffect)) ensureBlur()
+    },
+    setDrawCamera: (on: boolean) => {
+      drawCamera = on
+    },
+    displaySurface,
   }
 }
 

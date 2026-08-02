@@ -2,6 +2,23 @@ import AppKit
 import Combine
 import SwiftUI
 
+enum BubbleShape: String, CaseIterable, Identifiable {
+    case circle
+    case square
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .circle: return "Circle"
+        case .square: return "Square"
+        }
+    }
+
+    /// Corner radius as a fraction of bubble diameter (square only).
+    static let squareCornerFraction: CGFloat = 0.14
+}
+
 enum BorderPreset: String, CaseIterable, Identifiable {
     case transparent
     case white
@@ -88,6 +105,7 @@ final class BubbleSettings: ObservableObject {
     @AppStorage("customBorderHex") var customBorderHex: String = "#FFFFFF" {
         didSet { objectWillChange.send() }
     }
+    /// Border stroke thickness in points (1…12). Ignored when preset is Transparent.
     @AppStorage("borderWidth") var borderWidth: Double = 4 {
         didSet { objectWillChange.send() }
     }
@@ -100,10 +118,65 @@ final class BubbleSettings: ObservableObject {
     @AppStorage("bubbleSize") var bubbleSize: Double = 220 {
         didSet { objectWillChange.send() }
     }
+    @AppStorage("bubbleShape") var bubbleShapeRaw: String = BubbleShape.circle.rawValue {
+        didSet { objectWillChange.send() }
+    }
+    /// Overall bubble opacity (camera + border + shadow). Clamped to 0.3…1.0.
+    @AppStorage("bubbleOpacity") var bubbleOpacity: Double = 1.0 {
+        didSet { objectWillChange.send() }
+    }
+    /// Optional override for the Chrome extension ID used by “Open in Chrome…”.
+    /// Empty = use the stable ID from the extension manifest key
+    /// (`ExtensionLibraryOpener.defaultExtensionID`).
+    @AppStorage("chromeExtensionId") var chromeExtensionId: String = "" {
+        didSet { objectWillChange.send() }
+    }
+    /// Optional absolute path to `apps/extension/dist` for “Install Chrome Extension…”.
+    @AppStorage("chromeExtensionDistPath") var chromeExtensionDistPath: String = "" {
+        didSet { objectWillChange.send() }
+    }
+    /// Display path for the shared on-disk recording library (empty = not set).
+    @AppStorage("libraryFolderDisplayPath") var libraryFolderDisplayPath: String = "" {
+        didSet { objectWillChange.send() }
+    }
+
+    /// Security-scoped bookmark for the shared library folder.
+    var libraryFolderBookmark: Data? {
+        get { UserDefaults.standard.data(forKey: Self.libraryFolderBookmarkKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: Self.libraryFolderBookmarkKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.libraryFolderBookmarkKey)
+            }
+            objectWillChange.send()
+        }
+    }
+
+    var hasLibraryFolder: Bool {
+        libraryFolderBookmark != nil && !libraryFolderDisplayPath.isEmpty
+    }
+
+    static let libraryFolderBookmarkKey = "libraryFolderBookmark"
+
+    /// Extension ID for library URLs: override → auto-detect → packed-key default.
+    var resolvedChromeExtensionId: String {
+        ExtensionLibraryOpener.resolveExtensionID(preferred: chromeExtensionId)
+    }
 
     var borderPreset: BorderPreset {
         get { BorderPreset(rawValue: borderPresetRaw) ?? .white }
         set { borderPresetRaw = newValue.rawValue }
+    }
+
+    var bubbleShape: BubbleShape {
+        get { BubbleShape(rawValue: bubbleShapeRaw) ?? .circle }
+        set { bubbleShapeRaw = newValue.rawValue }
+    }
+
+    /// Corner radius for the square bubble mask (points).
+    func squareCornerRadius(for size: CGFloat) -> CGFloat {
+        size * BubbleShape.squareCornerFraction
     }
 
     var resolvedBorderColor: Color {
@@ -121,7 +194,13 @@ final class BubbleSettings: ObservableObject {
     }
 
     var effectiveBorderWidth: CGFloat {
-        borderPreset == .transparent ? 0 : CGFloat(borderWidth)
+        guard borderPreset != .transparent else { return 0 }
+        return CGFloat(min(12, max(1, borderWidth)))
+    }
+
+    /// Opacity applied to the visible bubble (30%–100%).
+    var effectiveBubbleOpacity: Double {
+        min(1, max(0.3, bubbleOpacity))
     }
 
     func applyPreset(_ preset: BorderPreset) {

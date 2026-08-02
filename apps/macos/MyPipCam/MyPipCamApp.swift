@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItemController = StatusItemController(
             loginItem: loginItem,
+            settings: bubble.settings,
+            libraryStore: .shared,
             onShowBubble: { bubble.showAgain() },
             onQuit: { bubble.quit() }
         )

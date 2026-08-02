@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>MyPipCam needs camera access to show your webcam or OBS Virtual Camera in a floating bubble.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MyPipCam needs microphone access so you can pick which mic to use when recording with OBS or the Chrome extension.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

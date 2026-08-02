@@ -16,6 +16,10 @@
 		A10000000000000000000007 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* StatusItemController.swift */; };
 		A10000000000000000000009 /* BorderColorPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* BorderColorPopover.swift */; };
 		A1000000000000000000000A /* LoginItemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* LoginItemManager.swift */; };
+		A1000000000000000000000B /* ExtensionLibraryOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* ExtensionLibraryOpener.swift */; };
+		A1000000000000000000000C /* MicrophoneManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* MicrophoneManager.swift */; };
+		A1000000000000000000000D /* LibraryFolderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* LibraryFolderStore.swift */; };
+		A1000000000000000000000E /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* LibraryView.swift */; };
 		A10000000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -29,6 +33,10 @@
 		A20000000000000000000007 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* BorderColorPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BorderColorPopover.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* LoginItemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemManager.swift; sourceTree = "<group>"; };
+		A2000000000000000000000E /* ExtensionLibraryOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionLibraryOpener.swift; sourceTree = "<group>"; };
+		A2000000000000000000000F /* MicrophoneManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* LibraryFolderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFolderStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000A /* MyPipCam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MyPipCam.entitlements; sourceTree = "<group>"; };
@@ -59,6 +67,7 @@
 			children = (
 				A20000000000000000000001 /* MyPipCamApp.swift */,
 				A20000000000000000000002 /* CameraManager.swift */,
+				A2000000000000000000000F /* MicrophoneManager.swift */,
 				A20000000000000000000003 /* CameraPreviewView.swift */,
 				A20000000000000000000004 /* CameraBubbleView.swift */,
 				A20000000000000000000005 /* CameraBubbleController.swift */,
@@ -66,6 +75,9 @@
 				A20000000000000000000007 /* StatusItemController.swift */,
 				A2000000000000000000000C /* BorderColorPopover.swift */,
 				A2000000000000000000000D /* LoginItemManager.swift */,
+				A2000000000000000000000E /* ExtensionLibraryOpener.swift */,
+				A20000000000000000000010 /* LibraryFolderStore.swift */,
+				A20000000000000000000011 /* LibraryView.swift */,
 				A20000000000000000000008 /* Assets.xcassets */,
 				A20000000000000000000009 /* Info.plist */,
 				A2000000000000000000000A /* MyPipCam.entitlements */,
@@ -152,6 +164,7 @@
 			files = (
 				A10000000000000000000001 /* MyPipCamApp.swift in Sources */,
 				A10000000000000000000002 /* CameraManager.swift in Sources */,
+				A1000000000000000000000C /* MicrophoneManager.swift in Sources */,
 				A10000000000000000000003 /* CameraPreviewView.swift in Sources */,
 				A10000000000000000000004 /* CameraBubbleView.swift in Sources */,
 				A10000000000000000000005 /* CameraBubbleController.swift in Sources */,
@@ -159,6 +172,9 @@
 				A10000000000000000000007 /* StatusItemController.swift in Sources */,
 				A10000000000000000000009 /* BorderColorPopover.swift in Sources */,
 				A1000000000000000000000A /* LoginItemManager.swift in Sources */,
+				A1000000000000000000000B /* ExtensionLibraryOpener.swift in Sources */,
+				A1000000000000000000000D /* LibraryFolderStore.swift in Sources */,
+				A1000000000000000000000E /* LibraryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -207,7 +223,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 977CN6XFAH;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MyPipCam/Info.plist;
@@ -232,7 +248,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 977CN6XFAH;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MyPipCam/Info.plist;

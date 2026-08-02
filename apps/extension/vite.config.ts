@@ -11,6 +11,8 @@ export default defineConfig({
         recorder: 'src/recorder/index.html',
         library: 'src/library/index.html',
         editor: 'src/editor/index.html',
+        offscreen: 'src/offscreen/index.html',
+        pip: 'src/pip/index.html',
       },
     },
   },

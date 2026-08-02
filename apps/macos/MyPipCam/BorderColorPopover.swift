@@ -7,6 +7,41 @@ struct BorderColorPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Appearance")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Shape")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Picker("Shape", selection: Binding(
+                    get: { settings.bubbleShape },
+                    set: { settings.bubbleShape = $0 }
+                )) {
+                    ForEach(BubbleShape.allCases) { shape in
+                        Text(shape.label).tag(shape)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Opacity")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int((settings.effectiveBubbleOpacity * 100).rounded()))%")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.bubbleOpacity, in: 0.3...1.0, step: 0.05)
+            }
+
+            Divider()
+
             Text("Border")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -52,7 +87,7 @@ struct BorderColorPopover: View {
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    TextField("#RRGGBB", text: $hexDraft)
+                    TextField("#RRGGBBAA", text: $hexDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
                         .onSubmit(applyHex)
@@ -70,10 +105,17 @@ struct BorderColorPopover: View {
 
             if settings.borderPreset != .transparent {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Thickness")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Slider(value: $settings.borderWidth, in: 1...10, step: 0.5)
+                    HStack {
+                        Text("Thickness")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(settings.borderWidth.rounded())) pt")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.borderWidth, in: 1...12, step: 1)
+                        .help("Border thickness")
                 }
             }
 
