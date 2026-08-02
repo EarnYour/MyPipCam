@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — MyPipCam</title>
+    <meta
+      name="description"
+      content="Privacy Policy for MyPipCam, the local-first Chrome extension and macOS companion by EarnYour Marketing."
+    />
+    <link rel="canonical" href="https://mypipcam.earnyour.com/privacy" />
+    <link rel="icon" href="/assets/logo.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;550;650;700&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <meta name="theme-color" content="#ff5e29" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand-mark" href="/">
+          <img src="/assets/logo.png" width="40" height="40" alt="" />
+          <span>MyPipCam</span>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
+          <a href="/privacy" aria-current="page">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="legal-hero">
+        <div class="wrap">
+          <h1>Privacy Policy</h1>
+          <p class="meta">Last updated: August 2, 2026</p>
+        </div>
+      </div>
+
+      <article class="prose">
+        <p>
+          This policy describes how <strong>MyPipCam</strong> (Chrome extension and
+          macOS companion app) handles information. MyPipCam is created by
+          <a href="https://earnyour.com">EarnYour Marketing</a> and published as
+          free open-source software on
+          <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>.
+        </p>
+        <p>
+          <strong>Product site:</strong>
+          <a href="https://mypipcam.earnyour.com">https://mypipcam.earnyour.com</a>.
+          The source of truth for this policy also lives in the repository
+          <code>PRIVACY.md</code>.
+        </p>
+        <p class="lead">
+          <strong>Short version:</strong> MyPipCam is local-first. Recordings and
+          secrets stay on your device unless <strong>you</strong> connect optional
+          cloud features. EarnYour Marketing does not run an analytics or telemetry
+          backend for this project as shipped.
+        </p>
+
+        <h2>1. Who this applies to</h2>
+        <p>
+          This policy covers the MyPipCam software you build or install from the
+          repository. It does not cover third-party services you choose to use
+          (OpenAI, Google, Apple, Chrome, etc.). Those have their own privacy
+          policies.
+        </p>
+
+        <h2>2. Local-first by design</h2>
+        <p>
+          MyPipCam is designed so core recording works without an EarnYour Marketing
+          account and without sending data to EarnYour Marketing.
+        </p>
+        <h3>What typically stays on your device</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Where it lives</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Video / audio recordings</td>
+              <td>
+                Browser IndexedDB and/or a library folder you choose on disk
+              </td>
+            </tr>
+            <tr>
+              <td>Thumbnails, edit metadata, optional local transcripts</td>
+              <td>Same local library</td>
+            </tr>
+            <tr>
+              <td>OpenAI API key</td>
+              <td>
+                <code>chrome.storage.local</code> in the extension (on-device; not
+                synced)
+              </td>
+            </tr>
+            <tr>
+              <td>Recorder preferences (devices, appearance, etc.)</td>
+              <td>
+                Extension: <code>chrome.storage</code> · macOS: app preferences
+                (UserDefaults)
+              </td>
+            </tr>
+            <tr>
+              <td>Google Drive folder ID (after you connect)</td>
+              <td>
+                <code>chrome.storage.sync</code> so your Chrome profile can reuse
+                the same Drive folder
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          EarnYour Marketing does <strong>not</strong> receive your recordings, API
+          keys, or camera/mic streams through the MyPipCam code as published in the
+          repository.
+        </p>
+
+        <h2>3. Permissions we ask for</h2>
+        <h3>Chrome extension</h3>
+        <ul>
+          <li>
+            <strong>Camera / microphone</strong> — for PiP camera and recording
+            audio when you start a capture
+          </li>
+          <li>
+            <strong>Tab or screen capture</strong> — when you record a tab or use
+            Advanced screen/window capture
+          </li>
+          <li>
+            <strong>Storage / file access</strong> — to keep a local library and
+            optionally write to a folder you pick
+          </li>
+        </ul>
+        <h3>macOS app</h3>
+        <ul>
+          <li>
+            <strong>Camera</strong> — to show the floating always-on-top camera
+            bubble (webcam, Continuity Camera, OBS Virtual Camera, etc.)
+          </li>
+          <li>
+            <strong>Microphone</strong> — so you can pick a preferred mic; the Mac
+            bubble itself does <strong>not</strong> record audio files. Actual
+            recording audio comes from OBS or the Chrome extension.
+          </li>
+        </ul>
+        <p>
+          macOS may prompt once per signed app identity. Camera and mic access are
+          controlled in <strong>System Settings → Privacy &amp; Security</strong>.
+        </p>
+
+        <h2>4. Optional features that leave your device</h2>
+        <p>
+          Nothing below happens unless you turn it on and authenticate or paste
+          credentials.
+        </p>
+        <h3>OpenAI transcription</h3>
+        <p>
+          If you enter an OpenAI API key in extension Settings and run
+          transcription, audio (or derived audio) is sent to OpenAI’s API using
+          <strong>your</strong> key. Handling of that media is governed by OpenAI’s
+          terms and privacy policy. The key is stored locally in
+          <code>chrome.storage.local</code>.
+        </p>
+        <h3>Google Drive</h3>
+        <p>
+          If you connect Google Drive, recordings you upload go to
+          <strong>your</strong> Google account under an app-created
+          <code>MyPipCam</code> folder (Drive <code>drive.file</code> scope). Folder
+          IDs and related settings may sync via Chrome sync storage. Google’s
+          policies apply to uploaded files and OAuth tokens.
+        </p>
+        <h3>Browser and OS vendors</h3>
+        <p>
+          Chrome and Apple may process permission prompts, crash reports, or other
+          system-level data according to their own products. That is outside
+          MyPipCam’s control.
+        </p>
+
+        <h2>5. Analytics and telemetry</h2>
+        <p>As of the last review of the repository’s published code:</p>
+        <ul>
+          <li>
+            There is <strong>no</strong> EarnYour Marketing analytics, marketing
+            pixel, or phone-home telemetry claimed or wired into MyPipCam for
+            product usage tracking.
+          </li>
+          <li>
+            Optional third-party APIs (OpenAI, Google) are used only for the
+            features you invoke.
+          </li>
+        </ul>
+        <p>
+          If a future release adds telemetry, it should be documented here and in
+          the changelog before shipping.
+        </p>
+
+        <h2>6. macOS camera bubble behavior</h2>
+        <p>
+          The macOS companion is a real always-on-top window that shows your
+          selected camera feed. It is meant to appear in desktop recordings (for
+          example OBS screen capture). It does not upload that feed to EarnYour
+          Marketing. What appears on your screen can be captured by any screen
+          recorder you run—just like any other window.
+        </p>
+
+        <h2>7. Sharing and “anyone with the link”</h2>
+        <p>
+          If you use Google Drive share links from the extension, people with the
+          link can view what you shared under Google’s access model. You choose
+          when to share and when to revoke access in Google Drive / Google Account
+          settings.
+        </p>
+
+        <h2>8. Children</h2>
+        <p>
+          MyPipCam is not directed at children. Do not use it to collect personal
+          information from children in violation of applicable law.
+        </p>
+
+        <h2>9. Changes</h2>
+        <p>
+          Privacy practices may change as the project evolves. Updates will be
+          reflected in the repository and on this page. Material changes to data
+          leaving the device should be called out clearly.
+        </p>
+
+        <h2>10. Contact</h2>
+        <p>
+          Privacy questions:
+          <a href="https://mypipcam.earnyour.com">mypipcam.earnyour.com</a>,
+          <a href="https://earnyour.com">earnyour.com</a>,
+          <a href="mailto:steven@earnyour.com">steven@earnyour.com</a>, or open a
+          GitHub issue.
+        </p>
+        <p>
+          Security vulnerabilities: see
+          <a
+            href="https://github.com/swmartinezdot33/MyPipCam/blob/master/SECURITY.md"
+            >SECURITY.md</a
+          >
+          (prefer GitHub Security Advisories).
+        </p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <p>© 2026 MyPipCam · EarnYour Marketing</p>
+        <nav aria-label="Footer">
+          <a href="/">Home</a>
+          <a href="/terms">Terms</a>
+          <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
