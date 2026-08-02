@@ -413,27 +413,6 @@ function overlayStyles(): string {
     .mpc-dock .mpc-stop:hover { background: #c91828; }
     .mpc-dock .mpc-stop svg { width: 13px; height: 13px; }
     .mpc-dock .mpc-discard { color: #ffb4a8; }
-    .mpc-dock .mpc-trim { position: relative; }
-    .mpc-dock .mpc-trim-label {
-      position: absolute;
-      left: calc(100% + 8px);
-      top: 50%;
-      transform: translateY(-50%);
-      white-space: nowrap;
-      padding: 6px 10px;
-      border-radius: 8px;
-      background: rgba(17, 19, 18, 0.94);
-      color: #fafaf7;
-      font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.12s ease;
-    }
-    .mpc-dock.is-expanded .mpc-trim:hover .mpc-trim-label,
-    .mpc-dock.is-expanded .mpc-trim:focus-visible .mpc-trim-label {
-      opacity: 1;
-    }
 
     /* Compact confirm / toast to the right of the dock (avoids window.confirm) */
     .mpc-dock-confirm {
@@ -853,11 +832,8 @@ function iconTrash(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>`
 }
 function iconRestart(): string {
-  // Circular arrow (rotate-ccw) — same stroke weight as trim/discard.
+  // Circular arrow (rotate-ccw) — same stroke weight as discard.
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
-}
-function iconTrim(): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a5 5 0 010 10H9"/></svg>`
 }
 function iconChevron(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`
@@ -875,7 +851,6 @@ class TabOverlay {
   private timerEl: HTMLSpanElement
   private stopBtn: HTMLButtonElement
   private pauseBtn: HTMLButtonElement
-  private trimBtn: HTMLButtonElement
   private restartBtn: HTMLButtonElement
   private discardBtn: HTMLButtonElement
   private confirmEl: HTMLDivElement
@@ -906,7 +881,7 @@ class TabOverlay {
   private dragging = false
   private menuOpen = false
   private camReady = false
-  private confirmAction: null | 'restart' | 'trim' | 'discard' = null
+  private confirmAction: null | 'restart' | 'discard' = null
   private confirmResolver: ((ok: boolean) => void) | null = null
 
   constructor(initial: BubbleState) {
@@ -1090,14 +1065,6 @@ class TabOverlay {
     const more = document.createElement('div')
     more.className = 'mpc-dock-more'
 
-    this.trimBtn = document.createElement('button')
-    this.trimBtn.type = 'button'
-    this.trimBtn.className = 'mpc-dock-btn mpc-trim'
-    this.trimBtn.dataset.mpcAction = 'trim'
-    this.trimBtn.title = 'Rewind & Trim'
-    this.trimBtn.setAttribute('aria-label', 'Rewind and trim — stop and open editor')
-    this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
-
     this.restartBtn = document.createElement('button')
     this.restartBtn.type = 'button'
     this.restartBtn.className = 'mpc-dock-btn'
@@ -1114,7 +1081,7 @@ class TabOverlay {
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
     this.discardBtn.innerHTML = iconTrash()
 
-    more.append(this.trimBtn, this.restartBtn, this.discardBtn)
+    more.append(this.restartBtn, this.discardBtn)
 
     this.confirmEl = document.createElement('div')
     this.confirmEl.className = 'mpc-dock-confirm'
@@ -1309,9 +1276,6 @@ class TabOverlay {
         break
       case 'pause':
         void this.togglePause()
-        break
-      case 'trim':
-        void this.requestTrimAndStop()
         break
       case 'restart':
         void this.requestRestart()
@@ -1740,42 +1704,6 @@ class TabOverlay {
     }
   }
 
-  private async requestTrimAndStop() {
-    if (this.stopping || this.restarting || this.confirmAction) return
-    if (this.state.phase === 'countdown') return
-    this.setDockExpanded(true)
-    const ok = await this.askDockConfirm(
-      'trim',
-      'Stop & trim?',
-      'Save this take and open the editor to trim the end.',
-    )
-    if (!ok) return
-    this.stopping = true
-    this.setDockBusy(true)
-    try {
-      const res = (await chrome.runtime.sendMessage({
-        type: 'STOP_LOOM_RECORDING',
-        openEditor: true,
-      })) as { ok?: boolean; reason?: string } | undefined
-      if (!res?.ok) {
-        this.stopping = false
-        this.setDockBusy(false)
-        this.showDockToast(res?.reason?.trim() || 'Could not stop recording to trim.')
-      }
-      // On success the overlay is torn down by the background.
-    } catch (err) {
-      // Context may invalidate after a successful stop — only surface real failures.
-      if (!chrome.runtime?.id) return
-      this.stopping = false
-      this.setDockBusy(false)
-      const msg =
-        err instanceof Error && err.message.trim()
-          ? err.message.trim()
-          : 'Could not stop recording to trim.'
-      this.showDockToast(msg)
-    }
-  }
-
   private async togglePause() {
     if (
       this.state.phase === 'countdown' ||
@@ -1846,7 +1774,7 @@ class TabOverlay {
   }
 
   private askDockConfirm(
-    action: 'restart' | 'trim' | 'discard',
+    action: 'restart' | 'discard',
     title: string,
     body: string,
   ): Promise<boolean> {
@@ -1855,8 +1783,7 @@ class TabOverlay {
     this.confirmAction = action
     this.confirmTitle.textContent = title
     this.confirmBody.textContent = body
-    this.confirmOkBtn.textContent =
-      action === 'restart' ? 'Restart' : action === 'trim' ? 'Trim' : 'Discard'
+    this.confirmOkBtn.textContent = action === 'restart' ? 'Restart' : 'Discard'
     this.confirmEl.classList.add('is-open')
     this.confirmEl.setAttribute('aria-label', title)
     this.confirmOkBtn.focus()
@@ -1897,7 +1824,6 @@ class TabOverlay {
   private setDockBusy(busy: boolean) {
     this.stopBtn.disabled = busy
     this.pauseBtn.disabled = busy
-    this.trimBtn.disabled = busy
     this.restartBtn.disabled = busy
     this.discardBtn.disabled = busy
     this.dockHead.disabled = busy

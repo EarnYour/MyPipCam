@@ -3,7 +3,7 @@
  *
  * When `?drive=1`, this window owns the 3→2→1 countdown (page overlay failed).
  * Otherwise the page overlay drives countdown; HUD mirrors status and provides
- * stop / pause / trim / restart / discard so chrome is never baked into video.
+ * stop / pause / restart / discard so chrome is never baked into video.
  */
 
 const params = new URLSearchParams(location.search)
@@ -20,7 +20,6 @@ const recActions = document.getElementById('recActions') as HTMLDivElement
 const stopBtn = document.getElementById('stop') as HTMLButtonElement
 const discardBtn = document.getElementById('discard') as HTMLButtonElement
 const pauseBtn = document.getElementById('pause') as HTMLButtonElement
-const trimBtn = document.getElementById('trim') as HTMLButtonElement
 const restartBtn = document.getElementById('restart') as HTMLButtonElement
 const cancelCountdownBtn = document.getElementById('cancelCountdown') as HTMLButtonElement
 const skipCountdownBtn = document.getElementById('skipCountdown') as HTMLButtonElement
@@ -56,7 +55,6 @@ function setBusy(next: boolean) {
     stopBtn,
     discardBtn,
     pauseBtn,
-    trimBtn,
     restartBtn,
     cancelCountdownBtn,
     skipCountdownBtn,
@@ -294,29 +292,6 @@ pauseBtn.addEventListener('click', () => {
     .catch((err: unknown) => {
       setBusy(false)
       setError(err instanceof Error ? err.message : 'Pause failed')
-    })
-})
-
-trimBtn.addEventListener('click', () => {
-  if (busy || phase === 'countdown') return
-  const ok = window.confirm(
-    'Stop and trim in editor?\n\nRecording will save, then open so you can trim the end.',
-  )
-  if (!ok) return
-  setBusy(true)
-  void chrome.runtime
-    .sendMessage({ type: 'STOP_LOOM_RECORDING', openEditor: true })
-    .then((res: { ok?: boolean; reason?: string } | undefined) => {
-      if (!res?.ok) {
-        setBusy(false)
-        setError(res?.reason?.trim() || 'Could not stop recording to trim.')
-        return
-      }
-      window.close()
-    })
-    .catch((err: unknown) => {
-      setBusy(false)
-      setError(err instanceof Error ? err.message : 'Trim failed')
     })
 })
 

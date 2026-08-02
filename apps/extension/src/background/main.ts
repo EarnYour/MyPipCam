@@ -19,7 +19,7 @@ import {
 } from '../shared/db'
 import { normalizeCameraFilter } from '../shared/cameraFilters'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
-import { openEditorTab, openLibraryTab, openRecorderTab } from '../shared/navigation'
+import { openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
   isContentScriptSender,
   isPipChannelToken,
@@ -1057,7 +1057,6 @@ async function failCaptureKeepOverlay(_tabId: number) {
 }
 
 async function stopLoomRecording(opts?: {
-  openEditor?: boolean
   /** Content-script sender tab — used when SW restarted and session was lost. */
   fallbackTabId?: number
 }): Promise<{
@@ -1075,7 +1074,7 @@ async function stopLoomRecording(opts?: {
   await setRecordingBadge(false)
   // Keep the HUD (often the STOP_LOOM_RECORDING sender) alive until save +
   // navigation finish. Closing it first drops the message port and lets MV3
-  // suspend the SW before openLibraryTab / openEditorTab runs.
+  // suspend the SW before openLibraryTab runs.
 
   // Always tear down page chrome first so Stop never leaves a stuck dock/PiP.
   await stopOverlay(tabId)
@@ -1129,19 +1128,9 @@ async function stopLoomRecording(opts?: {
 
     await closeOffscreen()
 
-    // Open Library / Editor immediately after local save — never wait on Drive.
-    if (result.id && opts?.openEditor) {
-      try {
-        await openEditorTab(result.id, 'trim')
-      } catch (err) {
-        console.warn('[MyPipCam] openEditorTab after stop failed:', err)
-        try {
-          await openLibraryTab(result.id)
-        } catch (libErr) {
-          console.warn('[MyPipCam] openLibraryTab fallback after stop failed:', libErr)
-        }
-      }
-    } else if (result.id) {
+    // Open Library immediately after local save — never wait on Drive.
+    // Trim/edit stays available from Library → Edit.
+    if (result.id) {
       try {
         await openLibraryTab(result.id)
       } catch (err) {
@@ -1850,7 +1839,6 @@ function dispatchExtensionMessage(
     void (async () => {
       try {
         const result = await stopLoomRecording({
-          openEditor: Boolean(message.openEditor),
           fallbackTabId: sender.tab?.id,
         })
         replySafe(sendResponse, result)
