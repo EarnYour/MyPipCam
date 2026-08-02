@@ -17,6 +17,10 @@ import {
   explainDriveAuthError,
   getAccessToken,
   hasDriveAuth,
+  INTERACTIVE_CONNECT_TIMEOUT_MS,
+  openDriveConnectKeepAlive,
+  raceTimeout,
+  sendDriveAuthMessage,
 } from './driveAuth'
 import { isOAuthClientConfigured } from './driveConfig'
 import {
@@ -132,42 +136,62 @@ export async function connectGoogleDrive(): Promise<DriveConnectionStatus> {
     return connectGoogleDriveCore()
   }
 
-  let res:
-    | { ok: true; status: DriveConnectionStatus }
-    | { ok: false; error?: string; reason?: string; code?: string }
-    | undefined
+  // Keep the SW awake for the full consent window; wake with a cheap ping first.
+  const keepAlive = openDriveConnectKeepAlive()
   try {
-    res = (await chrome.runtime.sendMessage({ type: 'CONNECT_GOOGLE' })) as typeof res
-  } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err)
-    throw new Error(explainDriveAuthError(raw || 'Could not reach background for Google Connect.'))
-  }
+    try {
+      await chrome.runtime.sendMessage({ type: 'PING' })
+    } catch {
+      /* SW may still handle CONNECT_GOOGLE after connect() woke it */
+    }
 
-  if (!res?.ok) {
-    const raw =
-      res?.error ||
-      res?.reason ||
-      (res == null
-        ? 'No response from background (reload the extension on chrome://extensions).'
-        : 'Could not connect Google Drive.')
-    throw new Error(explainDriveAuthError(raw, res?.code))
+    type ConnectRes =
+      | { ok: true; status: DriveConnectionStatus }
+      | { ok: false; error?: string; reason?: string; code?: string }
+
+    const res = await sendDriveAuthMessage<ConnectRes>(
+      { type: 'CONNECT_GOOGLE' },
+      INTERACTIVE_CONNECT_TIMEOUT_MS,
+    )
+
+    if (!res.ok) {
+      const raw = res.error || res.reason || 'Could not connect Google Drive.'
+      throw new Error(explainDriveAuthError(raw, res.code))
+    }
+    return res.status
+  } catch (err) {
+    if (err instanceof Error) throw err
+    throw new Error(
+      explainDriveAuthError(
+        String(err || 'Could not reach background for Google Connect.'),
+      ),
+    )
+  } finally {
+    try {
+      keepAlive?.disconnect()
+    } catch {
+      /* ignore */
+    }
   }
-  return res.status
 }
 
 /**
  * SW-only entry used by CONNECT_GOOGLE.
  * Starts getAuthToken immediately (caller should kick it off in the sync
  * onMessage path when possible), then finishes folder setup.
+ * Always settles within INTERACTIVE_CONNECT_TIMEOUT_MS so sendResponse fires.
  */
 export async function connectGoogleDriveInBackground(
   authPromise?: Promise<string>,
 ): Promise<DriveConnectionStatus> {
-  if (authPromise) {
-    await authPromise
-    return connectGoogleDriveCore({ tokenAlreadyFetched: true })
-  }
-  return connectGoogleDriveCore()
+  const run = authPromise
+    ? authPromise.then(() => connectGoogleDriveCore({ tokenAlreadyFetched: true }))
+    : connectGoogleDriveCore()
+  return raceTimeout(
+    run,
+    INTERACTIVE_CONNECT_TIMEOUT_MS,
+    'Google sign-in timed out. Finish the consent window within two minutes, or click Connect Google again.',
+  )
 }
 
 export async function disconnectGoogleDrive(): Promise<void> {

@@ -175,6 +175,9 @@ export async function clearDriveAuthDirect(): Promise<void> {
   })
 }
 
+/** Interactive Connect / consent can take well over 30s; SW + client must wait. */
+export const INTERACTIVE_CONNECT_TIMEOUT_MS = 120_000
+
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
     let settled = false
@@ -199,6 +202,41 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   })
 }
 
+/** Reject if `promise` does not settle within `ms` (always unblocks sendResponse). */
+export function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(
+        new DriveAuthError(
+          explainDriveAuthError(timeoutMessage, 'timeout'),
+          'timeout',
+        ),
+      )
+    }, ms)
+    promise.then(
+      (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
 export async function hasDriveAuthDirect(): Promise<boolean> {
   if (!isOAuthClientConfigured() || !identityApiAvailable()) return false
   // getAuthToken(interactive:false) can hang in some Chrome/identity states.
@@ -213,17 +251,37 @@ export async function hasDriveAuthDirect(): Promise<boolean> {
 
 /**
  * Message the SW. Silent probes stay short; interactive OAuth must wait for the
- * consent UI (often tens of seconds).
+ * consent UI (often 60s+). Pass timeoutMs 0 to wait until Chrome closes the port.
  */
-async function sendDriveAuthMessage<T>(
+export async function sendDriveAuthMessage<T>(
   payload: object,
   timeoutMs: number,
 ): Promise<T> {
   const send = chrome.runtime.sendMessage(payload) as Promise<T | undefined>
-  const res =
-    timeoutMs > 0
-      ? ((await withTimeout(send, timeoutMs, undefined)) as T | undefined)
-      : await send
+  let res: T | undefined
+  if (timeoutMs > 0) {
+    try {
+      res = await raceTimeout(
+        send,
+        timeoutMs,
+        'Google sign-in timed out waiting for the background service worker. Complete the consent window sooner, or reload the extension on chrome://extensions and try again.',
+      )
+    } catch (err) {
+      // Distinguish our race timeout from Chrome lastError / sendMessage failures.
+      if (err instanceof DriveAuthError && err.code === 'timeout') throw err
+      const raw = err instanceof Error ? err.message : String(err)
+      throw new DriveAuthError(
+        explainDriveAuthError(
+          raw ||
+            'No response from background. Reload the extension on chrome://extensions.',
+          'no_background',
+        ),
+        'no_background',
+      )
+    }
+  } else {
+    res = await send
+  }
   if (res == null) {
     throw new DriveAuthError(
       explainDriveAuthError(
@@ -234,6 +292,15 @@ async function sendDriveAuthMessage<T>(
     )
   }
   return res
+}
+
+/** Open a named port so the MV3 service worker stays awake during OAuth. */
+export function openDriveConnectKeepAlive(): chrome.runtime.Port | null {
+  try {
+    return chrome.runtime.connect({ name: 'drive-connect' })
+  } catch {
+    return null
+  }
 }
 
 /**

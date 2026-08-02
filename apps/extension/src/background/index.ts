@@ -760,16 +760,45 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 })
 
+/**
+ * Library Settings opens this port for the duration of Connect Google so the
+ * MV3 service worker is not killed while chrome.identity.getAuthToken waits
+ * on the consent UI (often 30–120s).
+ */
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'drive-connect') return
+  // Holding the port open is enough; ignore payload noise.
+  port.onMessage.addListener(() => {})
+})
+
+function replySafe(
+  sendResponse: (response: unknown) => void,
+  payload: unknown,
+): void {
+  try {
+    sendResponse(payload)
+  } catch (err) {
+    console.warn('[MyPipCam] sendResponse failed (message port closed):', err)
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Offscreen-targeted messages are handled by the offscreen document only.
   if (message?.target === 'offscreen') return false
 
+  // Extension pages (library Settings), content scripts, and SW-internal
+  // messages share chrome.runtime.id — all must be allowed for CONNECT_GOOGLE.
   if (!isTrustedExtensionSender(sender)) {
-    sendResponse({
+    replySafe(sendResponse, {
       ok: false,
       reason: 'untrusted-sender',
       error: 'Untrusted sender — reload MyPipCam from apps/extension/dist on chrome://extensions.',
     })
+    return false
+  }
+
+  if (message?.type === 'PING') {
+    replySafe(sendResponse, { ok: true })
     return false
   }
 
@@ -917,15 +946,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'CONNECT_GOOGLE') {
     // Start interactive getAuthToken in the sync listener body so Chrome still
     // treats this as a user-gesture continuation from Settings → sendMessage.
+    // Always return true + always reply (success, OAuth error, or timeout).
     const authPromise = getAccessTokenDirect(true)
     void (async () => {
       try {
         const status = await connectGoogleDriveInBackground(authPromise)
-        sendResponse({ ok: true, status })
+        replySafe(sendResponse, { ok: true, status })
       } catch (err) {
         const raw = errMessage(err, 'Could not connect Google Drive')
         console.error('[MyPipCam] CONNECT_GOOGLE failed:', raw, err)
-        sendResponse({
+        replySafe(sendResponse, {
           ok: false,
           error: explainDriveAuthError(
             raw,
