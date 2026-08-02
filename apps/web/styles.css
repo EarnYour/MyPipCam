@@ -170,6 +170,20 @@ a:hover {
   animation: rise 0.9s var(--ease) 0.24s both;
 }
 
+/* Keep all hero CTAs on a single row on desktop */
+@media (min-width: 860px) {
+  .hero .cta-row {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .hero .cta-row .btn {
+    padding: 0.75rem 0.95rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
