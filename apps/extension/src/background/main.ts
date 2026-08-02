@@ -850,7 +850,12 @@ async function startLoomRecording(
       }
     }
 
-    startLog('OFFSCREEN_PREPARE…', { recordMode, includeMic })
+    startLog('OFFSCREEN_PREPARE…', {
+      recordMode,
+      includeMic,
+      captureCursor: settings.captureCursor !== false,
+      captureQuality: settings.captureQuality,
+    })
     const prepareResult = await sendOffscreen<{ ok?: boolean; reason?: string }>({
       type: 'OFFSCREEN_PREPARE',
       streamId,
@@ -859,6 +864,8 @@ async function startLoomRecording(
       cameraDeviceId: cameraDeviceId ?? null,
       recordMode,
       cameraFilter: settings.cameraFilter,
+      captureCursor: settings.captureCursor !== false,
+      captureQuality: settings.captureQuality,
     })
 
     if (!prepareResult?.ok) {
@@ -1243,6 +1250,8 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
         cameraDeviceId: session.cameraDeviceId,
         recordMode: session.recordMode,
         cameraFilter: restartSettings.cameraFilter,
+        captureCursor: restartSettings.captureCursor !== false,
+        captureQuality: restartSettings.captureQuality,
       })
 
       if (!reset?.ok) {

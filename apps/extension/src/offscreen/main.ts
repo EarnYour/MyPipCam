@@ -25,6 +25,12 @@ import {
   type RecordingPart,
 } from '../shared/liveTrimMedia'
 import { preferredMimeType } from '../recorder/capture'
+import {
+  captureQualitySize,
+  cursorCaptureConstraint,
+  normalizeCaptureQuality,
+  type CaptureQuality,
+} from '../shared/types'
 
 type RecordMode = 'screen-cam' | 'screen' | 'cam'
 
@@ -36,6 +42,10 @@ type PrepareMessage = {
   cameraDeviceId?: string | null
   recordMode?: RecordMode
   cameraFilter?: CameraFilterId | string | null
+  /** Include mouse cursor in tab capture (default true). Not camera PiP. */
+  captureCursor?: boolean
+  /** Tab/screen capture resolution preset (default 4k). Not camera PiP. */
+  captureQuality?: CaptureQuality | string | null
   /** When true (legacy OFFSCREEN_START), start MediaRecorder immediately. */
   commit?: boolean
 }
@@ -89,39 +99,97 @@ function pickMimeType(): string {
   return preferredMimeType()
 }
 
-async function acquireTabStream(streamId: string): Promise<MediaStream> {
-  const videoConstraints = {
+async function applyTabTrackPrefs(
+  stream: MediaStream,
+  opts: { captureCursor: boolean; width: number; height: number },
+): Promise<MediaStream> {
+  const track = stream.getVideoTracks()[0]
+  if (!track) return stream
+  const cursor = cursorCaptureConstraint(opts.captureCursor)
+  // Best-effort: Chrome may ignore cursor/resolution on tabCapture surfaces.
+  try {
+    await track.applyConstraints({
+      width: { ideal: opts.width },
+      height: { ideal: opts.height },
+      frameRate: { ideal: 30 },
+      cursor,
+    } as MediaTrackConstraints)
+  } catch {
+    try {
+      await track.applyConstraints({
+        width: { ideal: opts.width },
+        height: { ideal: opts.height },
+        frameRate: { ideal: 30 },
+      })
+    } catch {
+      /* ignore */
+    }
+    try {
+      await track.applyConstraints({ cursor } as MediaTrackConstraints)
+    } catch {
+      /* ignore */
+    }
+  }
+  return stream
+}
+
+async function acquireTabStream(
+  streamId: string,
+  opts: { captureCursor?: boolean; captureQuality?: CaptureQuality | string | null } = {},
+): Promise<MediaStream> {
+  const captureCursor = opts.captureCursor !== false
+  const quality = normalizeCaptureQuality(opts.captureQuality)
+  const { width, height } = captureQualitySize(quality)
+  const cursor = cursorCaptureConstraint(captureCursor)
+
+  const buildVideoConstraints = (includePrefs: boolean) => ({
     mandatory: {
       chromeMediaSource: 'tab',
       chromeMediaSourceId: streamId,
       maxFrameRate: 30,
+      ...(includePrefs
+        ? {
+            cursor,
+            maxWidth: width,
+            maxHeight: height,
+          }
+        : {}),
     },
+  })
+
+  const tryAcquire = async (includePrefs: boolean, withAudio: boolean) => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: withAudio
+        ? {
+            mandatory: {
+              chromeMediaSource: 'tab',
+              chromeMediaSourceId: streamId,
+            },
+          }
+        : false,
+      video: buildVideoConstraints(includePrefs),
+    } as unknown as MediaStreamConstraints)
+    return applyTabTrackPrefs(stream, { captureCursor, width, height })
   }
 
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId,
-        },
-      },
-      video: videoConstraints,
-    } as unknown as MediaStreamConstraints)
+    return await tryAcquire(true, true)
   } catch (withAudio) {
     // Some tabs / Chrome builds reject tab audio — fall back to video-only.
     try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: videoConstraints,
-      } as unknown as MediaStreamConstraints)
+      return await tryAcquire(true, false)
     } catch (videoOnly) {
-      throw new Error(
-        errDetail(
-          videoOnly,
-          errDetail(withAudio, 'Tab capture getUserMedia failed'),
-        ),
-      )
+      // Retry without cursor/quality prefs if those constraints were rejected.
+      try {
+        return await tryAcquire(false, false)
+      } catch {
+        throw new Error(
+          errDetail(
+            videoOnly,
+            errDetail(withAudio, 'Tab capture getUserMedia failed'),
+          ),
+        )
+      }
     }
   }
 }
@@ -428,8 +496,10 @@ async function prepareRecording(msg: PrepareMessage) {
   } else {
     // Tab first — streamId expires in seconds; never delay it behind mic/cam.
     if (!msg.streamId) throw new Error('Missing tab stream id (tabCapture token expired or not granted)')
+    const captureCursor = msg.captureCursor !== false
+    const captureQuality = normalizeCaptureQuality(msg.captureQuality)
     try {
-      tabStream = await acquireTabStream(msg.streamId)
+      tabStream = await acquireTabStream(msg.streamId, { captureCursor, captureQuality })
     } catch (err) {
       throw new Error(
         errDetail(

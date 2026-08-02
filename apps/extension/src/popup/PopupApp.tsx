@@ -22,7 +22,13 @@ import {
   unlockMediaDeviceLabels,
 } from '../shared/settings'
 import { openShareGuidanceTab, writeShareSession } from '../shared/shareSession'
-import type { BackgroundEffect, RecordMode } from '../shared/types'
+import {
+  CAPTURE_QUALITY_OPTIONS,
+  normalizeCaptureQuality,
+  type BackgroundEffect,
+  type CaptureQuality,
+  type RecordMode,
+} from '../shared/types'
 
 type LoomStatus = {
   recording: boolean
@@ -170,6 +176,19 @@ function IconChevron() {
   )
 }
 
+function IconCursor({ className }: { className?: string } = {}) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <path
+        d="M5.5 4.5 10 18.5l2.2-5.3L18 11 5.5 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function IconBack() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
@@ -193,6 +212,8 @@ export function PopupApp() {
   const [micOn, setMicOn] = useState(true)
   const [backgroundEffect, setBackgroundEffect] = useState<BackgroundEffect>('none')
   const [cameraFilter, setCameraFilter] = useState<CameraFilterId>('none')
+  const [captureCursor, setCaptureCursor] = useState(true)
+  const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('4k')
   const [effectsOpen, setEffectsOpen] = useState(false)
   const [micDeviceId, setMicDeviceId] = useState('')
   const [cameraDeviceId, setCameraDeviceId] = useState('')
@@ -399,6 +420,8 @@ export function PopupApp() {
       setCameraOn(mode !== 'screen')
       setBackgroundEffect(s.backgroundEffect === 'blur' ? 'blur' : 'none')
       setCameraFilter(normalizeCameraFilter(s.cameraFilter))
+      setCaptureCursor(s.captureCursor !== false)
+      setCaptureQuality(normalizeCaptureQuality(s.captureQuality))
       setMicDeviceId(s.micDeviceId || '')
       setCameraDeviceId(s.cameraDeviceId || '')
       await probeMicPermissionState()
@@ -520,7 +543,26 @@ export function PopupApp() {
       cameraDeviceId: cameraDeviceId || null,
       backgroundEffect,
       cameraFilter,
+      captureCursor,
+      captureQuality,
     })
+  }
+
+  async function onToggleCaptureCursor(next: boolean) {
+    setCaptureCursor(next)
+    await savePipSettings({ captureCursor: next })
+    setHelper(
+      next
+        ? 'Mouse cursor will appear in tab recordings'
+        : 'Mouse cursor hidden in tab recordings',
+    )
+  }
+
+  async function onCaptureQualityChange(next: CaptureQuality) {
+    setCaptureQuality(next)
+    await savePipSettings({ captureQuality: next })
+    const label = CAPTURE_QUALITY_OPTIONS.find((o) => o.id === next)?.label ?? next
+    setHelper(`Tab capture quality: ${label} (camera PiP unchanged)`)
   }
 
   async function commitStart(tabId: number, streamId: string | null, mode: RecordMode, includeMic: boolean) {
@@ -949,6 +991,61 @@ export function PopupApp() {
                   onClick={() => void onToggleMic(!micOn)}
                 />
               </div>
+
+              {scope === 'tab' ? (
+                <>
+                  <div className={`loom-device ${captureCursor ? '' : 'is-off'}`}>
+                    <IconCursor className="loom-device-icon" />
+                    <div className="loom-device-meta">
+                      <span className="loom-device-name">Record mouse cursor</span>
+                      <span className="loom-device-hint">
+                        Tab/screen capture only — not the camera PiP
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`loom-toggle ${captureCursor ? 'is-on' : ''}`}
+                      role="switch"
+                      aria-checked={captureCursor}
+                      aria-label="Record mouse cursor in tab capture"
+                      title="Include the mouse cursor in tab/screen recordings (not the camera PiP)"
+                      disabled={busy}
+                      onClick={() => void onToggleCaptureCursor(!captureCursor)}
+                    />
+                  </div>
+
+                  <div className="loom-quality">
+                    <div className="loom-quality-head">
+                      <span className="loom-device-name">Video quality</span>
+                      <span className="loom-device-hint">
+                        Tab capture resolution — camera PiP unchanged
+                      </span>
+                    </div>
+                    <div
+                      className="loom-quality-seg"
+                      role="radiogroup"
+                      aria-label="Tab recording quality"
+                    >
+                      {CAPTURE_QUALITY_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={captureQuality === opt.id}
+                          className={`loom-quality-btn ${
+                            captureQuality === opt.id ? 'is-active' : ''
+                          }`}
+                          disabled={busy}
+                          title={`${opt.label} (${opt.width}×${opt.height})`}
+                          onClick={() => void onCaptureQualityChange(opt.id)}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <button
