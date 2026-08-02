@@ -17,7 +17,7 @@ import {
   setDriveAutoUpload,
   type DriveConnectionStatus,
 } from '../shared/driveSync'
-import { DRIVE_LIBRARY_FOLDER_NAME, isOAuthClientConfigured } from '../shared/driveConfig'
+import { DRIVE_LIBRARY_FOLDER_NAME, isOAuthClientConfigured, STABLE_EXTENSION_ID } from '../shared/driveConfig'
 import type { ApiSettings } from '../shared/types'
 
 type Props = {
@@ -46,6 +46,74 @@ export function SettingsPanel({
   const [driveErr, setDriveErr] = useState(false)
   const [drive, setDrive] = useState<DriveConnectionStatus | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [swHealth, setSwHealth] = useState<{
+    id: string
+    expectedId: string
+    idMatch: boolean
+    ready: boolean
+    bootError: string | null
+    reachable: boolean
+    detail?: string
+  } | null>(null)
+
+  const refreshSwHealth = useCallback(async () => {
+    const expectedId = STABLE_EXTENSION_ID
+    const liveId = chrome.runtime.id
+    try {
+      const res = (await Promise.race([
+        chrome.runtime.sendMessage({ type: 'GET_SW_HEALTH' }) as Promise<{
+          ok?: boolean
+          id?: string
+          expectedId?: string
+          idMatch?: boolean
+          ready?: boolean
+          bootError?: string | null
+        }>,
+        new Promise<null>((resolve) => {
+          window.setTimeout(() => resolve(null), 2000)
+        }),
+      ])) as {
+        ok?: boolean
+        id?: string
+        expectedId?: string
+        idMatch?: boolean
+        ready?: boolean
+        bootError?: string | null
+      } | null
+
+      if (!res) {
+        setSwHealth({
+          id: liveId,
+          expectedId,
+          idMatch: liveId === expectedId,
+          ready: false,
+          bootError: null,
+          reachable: false,
+          detail: 'No response from service worker within 2s.',
+        })
+        return
+      }
+      setSwHealth({
+        id: res.id || liveId,
+        expectedId: res.expectedId || expectedId,
+        idMatch: res.idMatch ?? liveId === expectedId,
+        ready: Boolean(res.ready),
+        bootError: res.bootError ?? null,
+        reachable: true,
+      })
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      setSwHealth({
+        id: liveId,
+        expectedId,
+        idMatch: liveId === expectedId,
+        ready: false,
+        bootError: null,
+        reachable: false,
+        detail,
+      })
+    }
+  }, [])
 
   const refreshFolder = useCallback(async () => {
     try {
@@ -113,13 +181,16 @@ export function SettingsPanel({
       } finally {
         if (!cancelled) setLoaded(true)
       }
-      // Drive status is best-effort after the panel is already usable.
-      if (!cancelled) await refreshDrive()
+      // Health + Drive are best-effort after the panel is already usable.
+      if (!cancelled) {
+        await refreshSwHealth()
+        await refreshDrive()
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [open, refreshFolder, refreshDrive])
+  }, [open, refreshFolder, refreshDrive, refreshSwHealth])
 
   if (!open) return null
 
@@ -271,6 +342,67 @@ export function SettingsPanel({
           <p className="muted">Loading…</p>
         ) : (
           <div className="settings-body">
+            <section className="settings-section">
+              <h3>Extension health</h3>
+              <p className="muted feature-note">
+                Load unpacked from <code>apps/extension/dist</code> only (after{' '}
+                <code>npm run build</code>). Wrong folder = random extension ID and a dead
+                background worker.
+              </p>
+              {swHealth && (
+                <div className="folder-status" style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
+                  <div>
+                    ID: <code>{swHealth.id}</code>
+                    {!swHealth.idMatch && (
+                      <>
+                        {' '}
+                        <strong style={{ color: '#ff8a7a' }}>
+                          — mismatch (expected <code>{swHealth.expectedId}</code>)
+                        </strong>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    Service worker:{' '}
+                    {!swHealth.reachable
+                      ? 'unreachable'
+                      : swHealth.ready
+                        ? 'ready'
+                        : 'booting / main failed'}
+                    {swHealth.bootError ? ` — ${swHealth.bootError}` : ''}
+                    {swHealth.detail ? ` — ${swHealth.detail}` : ''}
+                  </div>
+                </div>
+              )}
+              {swHealth && (!swHealth.idMatch || !swHealth.reachable || !swHealth.ready) && (
+                <p className="settings-warn">
+                  Remove every MyPipCam entry on chrome://extensions → Load unpacked → select{' '}
+                  <code>apps/extension/dist</code> → confirm ID{' '}
+                  <code>{STABLE_EXTENSION_ID}</code> → open “service worker” and check the console.
+                </p>
+              )}
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => void refreshSwHealth()}
+                >
+                  Re-check background
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE' }).catch(() => {})
+                    setDriveMsg('Sent stop-capture to background (clears orphaned tab sharing).')
+                    setDriveErr(false)
+                  }}
+                >
+                  Stop orphaned sharing
+                </button>
+              </div>
+            </section>
+
             <section className="settings-section">
               <h3>Recording library</h3>
               <p className="muted feature-note">

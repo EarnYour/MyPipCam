@@ -309,15 +309,31 @@ export function PopupApp() {
     })) as { ok?: boolean; reason?: string } | undefined
 
     if (res == null) {
+      // Stream may already be held by offscreen — force teardown so Sharing clears.
+      try {
+        await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE', tabId })
+      } catch {
+        /* SW dead */
+      }
       setError(
-        'Could not start recording: no response from background. Open chrome://extensions, click Reload on MyPipCam, then try again.',
+        'Could not start recording: no response from background. Remove ALL MyPipCam copies on chrome://extensions, then Load unpacked → apps/extension/dist only. Confirm ID is akpchobfndfddajiihkkdpnihihdicjc, then click the service worker link and retry. If Chrome still says “Sharing…”, click Stop sharing in the toolbar.',
       )
       return
     }
     if (!res.ok) {
       const reason = res.reason?.trim() || 'Background returned ok:false with no reason'
       console.error('[MyPipCam popup] start failed:', reason)
-      setError(formatStartError(reason, 'Could not start recording'))
+      try {
+        await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE', tabId })
+      } catch {
+        /* ignore */
+      }
+      setError(
+        formatStartError(
+          `${reason} If Chrome still shows “Sharing…”, click Stop sharing in the toolbar.`,
+          'Could not start recording',
+        ),
+      )
       return
     }
     window.close()

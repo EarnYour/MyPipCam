@@ -42,6 +42,7 @@ export default defineManifest({
     'tabCapture',
     'offscreen',
     'identity',
+    'alarms',
   ],
   oauth2: {
     // Paste client ID once in src/shared/driveConfig.ts (imported here).
