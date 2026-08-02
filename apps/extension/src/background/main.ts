@@ -12,6 +12,10 @@ import {
   invalidateAccessTokenDirect,
 } from '../shared/driveAuth'
 import { connectGoogleDriveInBackground } from '../shared/driveSync'
+import {
+  runDriveAutoUploadById,
+  runPendingDriveAutoUploads,
+} from '../shared/db'
 import { normalizeCameraFilter } from '../shared/cameraFilters'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
 import { openEditorTab, openLibraryTab, openRecorderTab } from '../shared/navigation'
@@ -1107,6 +1111,14 @@ async function stopLoomRecording(opts?: {
 
     await closeOffscreen()
 
+    // Upload in the SW after offscreen is closed — chrome.identity is reliable here
+    // and avoids nested GET_DRIVE_TOKEN during OFFSCREEN_STOP.
+    if (result.id && isSafeRecordingId(result.id)) {
+      void runDriveAutoUploadById(result.id).catch((err) => {
+        console.error('[MyPipCam] Drive auto-upload failed:', err)
+      })
+    }
+
     if (result.id && opts?.openEditor) {
       try {
         await openEditorTab(result.id, 'trim')
@@ -1369,6 +1381,18 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(() => {})
 })
 
+// Periodic backlog drain — covers cases where the post-stop kick was missed.
+try {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== 'mypipcam-sw-keepalive') return
+    void runPendingDriveAutoUploads().catch((err) => {
+      console.warn('[MyPipCam] pending Drive auto-upload flush failed:', err)
+    })
+  })
+} catch {
+  /* alarms permission missing in unexpected builds */
+}
+
 function replySafe(
   sendResponse: (response: unknown) => void,
   payload: unknown,
@@ -1489,6 +1513,27 @@ function dispatchExtensionMessage(
         sendResponse({
           ok: false,
           reason: errMessage(err, 'Microphone permission failed'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'DRIVE_AUTO_UPLOAD') {
+    void (async () => {
+      const id = typeof message.id === 'string' ? message.id : ''
+      if (!isSafeRecordingId(id)) {
+        replySafe(sendResponse, { ok: false, reason: 'invalid-id' })
+        return
+      }
+      try {
+        const result = await runDriveAutoUploadById(id)
+        replySafe(sendResponse, { ok: true, ...result })
+      } catch (err) {
+        console.error('[MyPipCam] DRIVE_AUTO_UPLOAD failed:', err)
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Drive auto-upload failed'),
         })
       }
     })()
