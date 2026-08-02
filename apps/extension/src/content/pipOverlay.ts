@@ -5,7 +5,7 @@
  *
  * Stop / pause / timer / trim live in the extension HUD window so they are
  * never baked into the recorded video. Mounted in a closed Shadow DOM under
- * a fixed max-z host. Prefer Popover top-layer via showPopover().
+ * a fixed max-z host — never the Popover API (see ensureMount).
  */
 
 import {
@@ -91,8 +91,9 @@ let hostReattachObserver: MutationObserver | null = null
 function overlayStyles(): string {
   return `
     /*
-     * Host uses popover=manual + showPopover() for top-layer, with fixed
-     * fallback styles if Popover API is unavailable.
+     * Host is a plain fixed full-viewport shell (no Popover API).
+     * Popover left the host stuck under UA [popover]:not(:popover-open) {
+     * display:none !important } which author CSS cannot override.
      */
     :host {
       all: initial !important;
@@ -114,23 +115,6 @@ function overlayStyles(): string {
       pointer-events: none !important;
       z-index: 2147483647 !important;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
-    }
-    :host(:popover-open) {
-      display: block !important;
-      opacity: 1 !important;
-      visibility: visible !important;
-      position: fixed !important;
-      inset: 0 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-      max-width: none !important;
-      max-height: none !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: none !important;
-      overflow: visible !important;
-      background: transparent !important;
-      pointer-events: none !important;
     }
     * { box-sizing: border-box; }
 
@@ -421,49 +405,33 @@ function applyHostInlineStyles(host: HTMLElement) {
   for (const [k, v] of props) host.style.setProperty(k, v, 'important')
 }
 
-/** Open top-layer when supported; strip popover if showPopover is unavailable. */
-function ensureHostTopLayer(host: HTMLElement) {
-  applyHostInlineStyles(host)
-  const canPopover =
-    typeof host.showPopover === 'function' && 'popover' in HTMLElement.prototype
-  if (!canPopover) {
-    try {
-      host.removeAttribute('popover')
-    } catch {
-      /* ignore */
+/** Strip any leftover popover attrs and force the fixed max-z shell styles. */
+function prepareHostShell(host: HTMLElement) {
+  try {
+    if (typeof host.hidePopover === 'function' && host.matches(':popover-open')) {
+      host.hidePopover()
     }
-    return false
+  } catch {
+    /* ignore */
   }
   try {
-    host.setAttribute('popover', 'manual')
-    // Already open — calling again can throw; ignore.
-    if (!host.matches(':popover-open')) {
-      host.showPopover()
-    }
-    applyHostInlineStyles(host)
-    return host.matches(':popover-open')
-  } catch (err) {
-    console.warn('[MyPipCam][start] showPopover failed:', err)
-    try {
-      host.removeAttribute('popover')
-    } catch {
-      /* ignore */
-    }
-    applyHostInlineStyles(host)
-    return false
+    host.removeAttribute('popover')
+  } catch {
+    /* ignore */
   }
+  applyHostInlineStyles(host)
 }
 
 function watchHostAttached(host: HTMLElement) {
   hostReattachObserver?.disconnect()
-  // Only re-mount when the host is removed. Re-running showPopover/styles on
-  // every page mutation causes PiP compositing flicker (glitchy square).
+  // Only re-mount when the host is removed. Re-running host styles on every
+  // page mutation causes PiP compositing flicker (glitchy square).
   hostReattachObserver = new MutationObserver(() => {
     if (host.isConnected) return
     const parent = document.body ?? document.documentElement
     if (!parent) return
     parent.appendChild(host)
-    ensureHostTopLayer(host)
+    prepareHostShell(host)
   })
   hostReattachObserver.observe(document.documentElement, {
     childList: true,
@@ -500,7 +468,8 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
   }
   const rect = host.getBoundingClientRect()
   const cs = getComputedStyle(host)
-  const topLayer = host.hasAttribute('popover') && host.matches(':popover-open')
+  // Legacy field: we no longer use Popover; report fixed-shell as "topLayer".
+  const topLayer = !host.hasAttribute('popover') && cs.position === 'fixed'
   const display = cs.display
   const visible =
     display !== 'none' &&
@@ -523,7 +492,7 @@ function readHostVisibility(phase: string | null, countdownVisible: boolean): Ov
 
 function ensureMount(): OverlayMount {
   if (overlayMount?.host.isConnected) {
-    ensureHostTopLayer(overlayMount.host)
+    prepareHostShell(overlayMount.host)
     return overlayMount
   }
 
@@ -548,7 +517,8 @@ function ensureMount(): OverlayMount {
   const host = document.createElement('div')
   host.id = HOST_ID
   host.setAttribute('data-mypipcam', 'overlay')
-  host.setAttribute('popover', 'manual')
+  // Never use the Popover API here — see overlayStyles() comment.
+  host.removeAttribute('popover')
   applyHostInlineStyles(host)
 
   // Closed shadow: page CSS cannot hide/move our countdown/bubble.
@@ -564,8 +534,8 @@ function ensureMount(): OverlayMount {
     throw new Error('Page has no document.body — cannot mount recording overlay')
   }
   parent.appendChild(host)
-  const topLayer = ensureHostTopLayer(host)
-  console.log('[MyPipCam][start] overlay host mounted', { topLayer, id: HOST_ID })
+  prepareHostShell(host)
+  console.log('[MyPipCam][start] overlay host mounted', { topLayer: false, id: HOST_ID })
   watchHostAttached(host)
 
   overlayMount = { host, layer, shadow }
@@ -717,35 +687,23 @@ class TabOverlay {
         effectBlur,
       )
 
-      sizeSm.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setSize(0.12)
-      })
-      sizeMd.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setSize(0.18)
-      })
-      sizeLg.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setSize(0.26)
-      })
-      shapeCircle.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setShape('circle')
-      })
-      shapeSquare.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setShape('square')
-      })
-      effectNone.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setBackgroundEffect('none')
-      })
-      effectBlur.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.setBackgroundEffect('blur')
-      })
-      this.menuBtn.addEventListener('click', (e) => {
+      // pointerdown (not click): document capture closeMenu + drag surface can
+      // swallow click during live tabCapture; apply on pointerdown instead.
+      const bindMenuAction = (btn: HTMLButtonElement, action: () => void) => {
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          action()
+        })
+      }
+      bindMenuAction(sizeSm, () => this.setSize(0.12))
+      bindMenuAction(sizeMd, () => this.setSize(0.18))
+      bindMenuAction(sizeLg, () => this.setSize(0.26))
+      bindMenuAction(shapeCircle, () => this.setShape('circle'))
+      bindMenuAction(shapeSquare, () => this.setShape('square'))
+      bindMenuAction(effectNone, () => this.setBackgroundEffect('none'))
+      bindMenuAction(effectBlur, () => this.setBackgroundEffect('blur'))
+      this.menuBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault()
         e.stopPropagation()
         this.toggleMenu()
@@ -892,7 +850,7 @@ class TabOverlay {
 
   getVisibility(): OverlayVisibility {
     const host = overlayMount?.host
-    if (host) ensureHostTopLayer(host)
+    if (host) prepareHostShell(host)
     const countdownVisible =
       this.state.phase === 'countdown' &&
       !this.countdownEl.classList.contains('is-hidden')
@@ -923,7 +881,16 @@ class TabOverlay {
     const prevDevice = this.state.cameraDeviceId
     const prevEffect = this.state.backgroundEffect
     const prevFilter = this.state.cameraFilter
-    const next = { ...partial }
+    // Only apply defined keys — PIP_OVERLAY_UPDATE often sends a partial
+    // (e.g. cameraFilter alone). Spreading undefined wiped size/x/y to NaN and
+    // made mid-recording Small/Medium/Large + shape appear broken.
+    const next: Partial<BubbleState> = {}
+    for (const key of Object.keys(partial) as Array<keyof BubbleState>) {
+      const value = partial[key]
+      if (value !== undefined) {
+        ;(next as Record<string, unknown>)[key] = value
+      }
+    }
     if (next.borderColor != null) {
       next.borderColor = sanitizeCssColor(next.borderColor)
     }
@@ -931,13 +898,19 @@ class TabOverlay {
       next.cameraFilter = normalizeCameraFilter(next.cameraFilter)
     }
     this.state = { ...this.state, ...next }
+    // Recover from a previously corrupted size (NaN / non-finite).
+    if (!Number.isFinite(this.state.size)) {
+      this.state.size = clamp(0.18, SIZE_MIN, SIZE_MAX)
+    }
+    if (!Number.isFinite(this.state.x)) this.state.x = 0.82
+    if (!Number.isFinite(this.state.y)) this.state.y = 0.78
     if (this.state.recordMode === 'screen') this.bubble.classList.add('is-hidden')
     else this.bubble.classList.remove('is-hidden')
     this.apply()
     if (
       this.frame &&
-      ((partial.mirror != null && partial.mirror !== prevMirror) ||
-        (partial.cameraDeviceId != null && partial.cameraDeviceId !== prevDevice))
+      ((next.mirror != null && next.mirror !== prevMirror) ||
+        (next.cameraDeviceId !== undefined && next.cameraDeviceId !== prevDevice))
     ) {
       this.frame.contentWindow?.postMessage(
         {
@@ -951,8 +924,8 @@ class TabOverlay {
     }
     if (
       this.frame &&
-      partial.backgroundEffect != null &&
-      partial.backgroundEffect !== prevEffect
+      next.backgroundEffect != null &&
+      next.backgroundEffect !== prevEffect
     ) {
       this.frame.contentWindow?.postMessage(
         {
@@ -965,8 +938,8 @@ class TabOverlay {
     }
     if (
       this.frame &&
-      partial.cameraFilter != null &&
-      partial.cameraFilter !== prevFilter
+      next.cameraFilter != null &&
+      next.cameraFilter !== prevFilter
     ) {
       this.frame.contentWindow?.postMessage(
         {
@@ -977,10 +950,10 @@ class TabOverlay {
         '*',
       )
     }
-    if (partial.phase === 'recording' && this.state.phase === 'recording') {
+    if (next.phase === 'recording' && this.state.phase === 'recording') {
       this.enterRecordingUi()
     }
-    if (partial.phase === 'paused') {
+    if (next.phase === 'paused') {
       this.setPausedUi(true)
     }
   }
@@ -1075,6 +1048,11 @@ class TabOverlay {
   }
 
   private apply() {
+    if (!Number.isFinite(this.state.size)) {
+      this.state.size = clamp(0.18, SIZE_MIN, SIZE_MAX)
+    }
+    if (!Number.isFinite(this.state.x)) this.state.x = 0.82
+    if (!Number.isFinite(this.state.y)) this.state.y = 0.78
     const vw = window.innerWidth
     const vh = window.innerHeight
     const diameter = Math.max(BUBBLE_MIN_PX, Math.min(vw, vh) * this.state.size)
@@ -1110,22 +1088,30 @@ class TabOverlay {
 
   private persist() {
     if (this.state.mode === 'live') {
-      void chrome.runtime.sendMessage({
-        type: 'LOOM_BUBBLE_MOVED',
-        x: this.state.x,
-        y: this.state.y,
-        size: this.state.size,
-      })
+      try {
+        void chrome.runtime.sendMessage({
+          type: 'LOOM_BUBBLE_MOVED',
+          x: this.state.x,
+          y: this.state.y,
+          size: this.state.size,
+        })
+      } catch {
+        /* SW asleep — local visual already updated */
+      }
       return
     }
-    void chrome.storage.session.set({
-      pipOverlayLive: {
-        x: this.state.x,
-        y: this.state.y,
-        size: this.state.size,
-        at: Date.now(),
-      },
-    })
+    try {
+      void chrome.storage.session.set({
+        pipOverlayLive: {
+          x: this.state.x,
+          y: this.state.y,
+          size: this.state.size,
+          at: Date.now(),
+        },
+      })
+    } catch {
+      /* ignore */
+    }
   }
 
   private setSize(size: number) {
@@ -1138,42 +1124,71 @@ class TabOverlay {
   private setShape(shape: BubbleShape) {
     this.state.shape = shape
     this.apply()
-    void chrome.runtime.sendMessage({
-      type: 'LOOM_BUBBLE_SHAPE',
-      bubbleShape: shape,
-    })
+    try {
+      void chrome.runtime.sendMessage({
+        type: 'LOOM_BUBBLE_SHAPE',
+        bubbleShape: shape,
+      })
+    } catch {
+      /* SW asleep — local visual already updated */
+    }
     this.closeMenu()
   }
 
   private setBackgroundEffect(effect: BackgroundEffect) {
     this.state.backgroundEffect = effect
-    this.frame?.contentWindow?.postMessage(
-      { type: 'MPC_PIP_EFFECT', token: this.pipChannelToken, effect },
-      '*',
-    )
-    void chrome.runtime.sendMessage({
-      type: 'LOOM_BUBBLE_EFFECT',
-      backgroundEffect: effect,
-    })
+    try {
+      this.frame?.contentWindow?.postMessage(
+        { type: 'MPC_PIP_EFFECT', token: this.pipChannelToken, effect },
+        '*',
+      )
+    } catch {
+      /* iframe may be gone */
+    }
+    try {
+      void chrome.runtime.sendMessage({
+        type: 'LOOM_BUBBLE_EFFECT',
+        backgroundEffect: effect,
+      })
+    } catch {
+      /* SW asleep — local visual already updated */
+    }
     this.closeMenu()
+  }
+
+  private syncMenuPointerGate() {
+    // While the menu is open, disable the full-bubble drag hit-target so it
+    // cannot steal pointerdown from Small/Medium/Large (common during capture).
+    if (this.dragSurface) {
+      this.dragSurface.style.pointerEvents = this.menuOpen ? 'none' : 'auto'
+    }
   }
 
   private toggleMenu() {
     this.menuOpen = !this.menuOpen
     this.menu?.classList.toggle('is-open', this.menuOpen)
     this.bubble.classList.toggle('is-menu-open', this.menuOpen)
+    this.syncMenuPointerGate()
   }
 
   private closeMenu() {
     this.menuOpen = false
     this.menu?.classList.remove('is-open')
     this.bubble.classList.remove('is-menu-open')
+    this.syncMenuPointerGate()
   }
 
   private onMoveDown(e: PointerEvent) {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
     if (target.closest('.mpc-menu-btn') || target.closest('.mpc-menu')) return
+    // Menu open + click on bubble chrome: dismiss only — don't start a drag.
+    if (this.menuOpen) {
+      e.preventDefault()
+      e.stopPropagation()
+      this.closeMenu()
+      return
+    }
     e.preventDefault()
     e.stopPropagation()
     this.closeMenu()
@@ -1289,12 +1304,12 @@ if (!window[INSTALL_KEY]) {
         cameraDeviceId: message.cameraDeviceId ?? null,
         phase: message.phase === 'recording' ? 'recording' : 'countdown',
       })
-      // Sanity: host must be in the document, top-layer open, and not zero-sized.
+      // Sanity: host must be in the document and not zero-sized.
       const host = overlayMount?.host
       if (!host?.isConnected) {
         throw new Error('Recording overlay failed to attach to the page')
       }
-      // Popover top-layer can take a frame to apply :popover-open styles.
+      // One frame lets layout settle after mount before the visibility probe.
       requestAnimationFrame(() => {
         try {
           if (!overlay) throw new Error('Recording overlay disappeared after mount')
@@ -1396,14 +1411,17 @@ if (!window[INSTALL_KEY]) {
     return true
   }
   if (message?.type === 'PIP_OVERLAY_UPDATE' && overlay) {
-    const patch: Partial<BubbleState> = {
-      x: message.x,
-      y: message.y,
-      size: message.size,
-      mirror: message.mirror,
-      borderColor: message.borderColor,
-      shadow: message.shadow,
-      cameraDeviceId: message.cameraDeviceId,
+    const patch: Partial<BubbleState> = {}
+    if (typeof message.x === 'number' && Number.isFinite(message.x)) patch.x = message.x
+    if (typeof message.y === 'number' && Number.isFinite(message.y)) patch.y = message.y
+    if (typeof message.size === 'number' && Number.isFinite(message.size)) {
+      patch.size = message.size
+    }
+    if (typeof message.mirror === 'boolean') patch.mirror = message.mirror
+    if (message.borderColor != null) patch.borderColor = message.borderColor
+    if (typeof message.shadow === 'boolean') patch.shadow = message.shadow
+    if (message.cameraDeviceId === null || typeof message.cameraDeviceId === 'string') {
+      patch.cameraDeviceId = message.cameraDeviceId
     }
     if (message.bubbleShape === 'square' || message.bubbleShape === 'circle') {
       patch.shape = message.bubbleShape

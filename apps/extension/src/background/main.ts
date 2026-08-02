@@ -1836,32 +1836,59 @@ function dispatchExtensionMessage(
       sendResponse({ ok: false, reason: 'untrusted-sender' })
       return false
     }
-    const x = typeof message.x === 'number' ? message.x : undefined
-    const y = typeof message.y === 'number' ? message.y : undefined
-    const size = typeof message.size === 'number' ? message.size : undefined
-    void savePipSettings({
-      bubbleX: x,
-      bubbleY: y,
-      bubbleSize: size,
-    })
+    const patch: {
+      bubbleX?: number
+      bubbleY?: number
+      bubbleSize?: number
+    } = {}
+    if (typeof message.x === 'number' && Number.isFinite(message.x)) patch.bubbleX = message.x
+    if (typeof message.y === 'number' && Number.isFinite(message.y)) patch.bubbleY = message.y
+    if (typeof message.size === 'number' && Number.isFinite(message.size)) {
+      patch.bubbleSize = message.size
+    }
+    if (Object.keys(patch).length > 0) void savePipSettings(patch)
     sendResponse({ ok: true })
     return false
   }
 
   if (message?.type === 'LOOM_BUBBLE_SHAPE') {
-    void savePipSettings({
-      bubbleShape: message.bubbleShape === 'square' ? 'square' : 'circle',
-    })
-    sendResponse({ ok: true })
-    return false
+    const bubbleShape = message.bubbleShape === 'square' ? 'square' : 'circle'
+    void (async () => {
+      await savePipSettings({ bubbleShape })
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            bubbleShape,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true })
+    })()
+    return true
   }
 
   if (message?.type === 'LOOM_BUBBLE_EFFECT') {
-    void savePipSettings({
-      backgroundEffect: message.backgroundEffect === 'blur' ? 'blur' : 'none',
-    })
-    sendResponse({ ok: true })
-    return false
+    const backgroundEffect = message.backgroundEffect === 'blur' ? 'blur' : 'none'
+    void (async () => {
+      await savePipSettings({ backgroundEffect })
+      const session = (await hydrateLoomSession()) ?? loomSession
+      if (session?.tabId) {
+        try {
+          await chrome.tabs.sendMessage(session.tabId, {
+            type: 'PIP_OVERLAY_UPDATE',
+            backgroundEffect,
+          })
+        } catch {
+          /* overlay may be gone */
+        }
+      }
+      sendResponse({ ok: true })
+    })()
+    return true
   }
 
   if (message?.type === 'LOOM_BUBBLE_FILTER') {
