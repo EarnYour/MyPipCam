@@ -11,8 +11,6 @@
         --fg: #fafaf7;
         --muted: #a8a8a0;
         --primary: #ff5e29;
-        --ok: #3dcea0;
-        --danger: #ff6b5a;
         --border: rgba(255, 255, 255, 0.12);
       }
       * {
@@ -22,36 +20,35 @@
       body {
         margin: 0;
         width: 100%;
-        height: 100%;
+        min-height: 100%;
         background: var(--bg);
         color: var(--fg);
-        font: 600 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font: 600 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
       }
       body {
         display: flex;
         flex-direction: column;
-        padding: 16px 16px 14px;
-        gap: 10px;
+        padding: 20px;
+        gap: 12px;
       }
       h1 {
         margin: 0;
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 750;
-        letter-spacing: 0.01em;
       }
       .sub {
         margin: 0;
         color: var(--muted);
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 500;
       }
       .status {
-        margin: 2px 0 0;
-        padding: 10px 12px;
-        border-radius: 10px;
+        margin: 4px 0 0;
+        padding: 12px 14px;
+        border-radius: 12px;
         border: 1px solid var(--border);
         background: rgba(255, 255, 255, 0.04);
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 650;
       }
       .status.is-ok {
@@ -67,23 +64,17 @@
       .help {
         margin: 0;
         color: var(--muted);
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 500;
         line-height: 1.45;
-      }
-      .help code {
-        font-size: 10.5px;
-        color: #e8e8e0;
       }
       .devices {
         margin: 0;
         padding: 0;
         list-style: none;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 500;
         color: var(--muted);
-        max-height: 72px;
-        overflow: auto;
       }
       .devices li {
         padding: 2px 0;
@@ -93,46 +84,50 @@
       }
       .row {
         display: flex;
+        flex-direction: column;
         gap: 8px;
         margin-top: auto;
       }
       button {
-        flex: 1;
         border: 1px solid var(--border);
-        border-radius: 10px;
+        border-radius: 12px;
         background: rgba(255, 255, 255, 0.06);
         color: var(--fg);
-        font: 650 12px/1 ui-sans-serif, system-ui, sans-serif;
-        padding: 12px 8px;
+        font: 700 15px/1 ui-sans-serif, system-ui, sans-serif;
+        padding: 14px 12px;
         cursor: pointer;
       }
       button:hover {
         background: rgba(255, 255, 255, 0.1);
       }
       button.primary {
-        background: rgba(255, 94, 41, 0.28);
-        border-color: rgba(255, 94, 41, 0.55);
-        color: #ffe8e0;
-        font-weight: 750;
+        background: rgba(255, 94, 41, 0.35);
+        border-color: rgba(255, 94, 41, 0.65);
+        color: #fff4ee;
+        font-size: 16px;
       }
       button:disabled {
         opacity: 0.55;
         cursor: default;
       }
+      button.ghost {
+        font-size: 13px;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
-    <h1>Allow microphone</h1>
+    <h1>Allow microphone for MyPipCam</h1>
     <p class="sub">
-      Click the button below — Chrome’s Allow dialog appears in <em>this</em> window (not the
-      extension popup).
+      Click the orange button. Chrome should show an <strong>Allow</strong> prompt near the top of
+      this window (address bar / permission bubble). Choose <strong>Allow</strong>.
     </p>
     <p class="status" id="status" role="status">Ready — click Allow microphone</p>
     <ul class="devices" id="devices"></ul>
     <p class="help" id="help" hidden></p>
     <div class="row">
-      <button type="button" id="allow" class="primary">Allow microphone</button>
-      <button type="button" id="close">Close</button>
+      <button type="button" id="allow" class="primary" autofocus>Allow microphone</button>
+      <button type="button" id="close" class="ghost">Close</button>
     </div>
     <script type="module" src="./mic.ts"></script>
   </body>

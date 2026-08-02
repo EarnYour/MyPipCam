@@ -181,24 +181,28 @@ export function PopupApp() {
   }
 
   /**
-   * Open a dedicated extension window. Popup getUserMedia fails with
-   * "Permission dismissed" / no Chrome Allow UI — the grant page button works.
+   * Open a dedicated extension window (type:normal — not type:popup).
+   * Popup getUserMedia and tiny popup windows often get "Permission dismissed"
+   * with no Chrome Allow UI; a normal window can show the address-bar prompt.
    */
   async function allowMicrophone() {
     setError(null)
     setMicGrantWaiting(true)
-    setMicHint('Permission window opened — click Allow microphone there, then Allow in Chrome’s dialog.')
+    setMicHint(
+      'Grant window opened — click Allow microphone there, then Allow in Chrome’s prompt at the top of that window.',
+    )
     stopMicGrantPoll()
 
     try {
       await writeMicGrantResult('pending')
 
       const url = chrome.runtime.getURL(MIC_GRANT_PAGE)
+      // type:'normal' (not 'popup') so Chrome can show the mic Allow bubble.
       const win = await chrome.windows.create({
         url,
-        type: 'popup',
-        width: 440,
-        height: 340,
+        type: 'normal',
+        width: 560,
+        height: 480,
         focused: true,
       })
       micGrantWindowIdRef.current = typeof win?.id === 'number' ? win.id : null
@@ -220,7 +224,7 @@ export function PopupApp() {
                 setMicGrantWaiting(false)
                 setMicAccess((prev) => (prev === 'granted' || prev === 'skipped' ? prev : 'denied'))
                 setMicHint(
-                  'Permission window closed before Allow. Click Allow microphone again, or Continue without mic.',
+                  'Grant window closed before Allow. Click Allow microphone again, or Continue without mic.',
                 )
               }
               return
@@ -231,7 +235,7 @@ export function PopupApp() {
             stopMicGrantPoll()
             setMicGrantWaiting(false)
             setMicHint(
-              'Still waiting — click Allow microphone in the permission window (then Chrome’s Allow), or Continue without mic.',
+              'Still waiting — Allow in the grant window (Chrome prompt at top), or Continue without mic.',
             )
           }
         })()
@@ -382,7 +386,7 @@ export function PopupApp() {
       changes,
       area,
     ) => {
-      if (area !== 'session' || !changes[MIC_GRANT_STORAGE_KEY]) return
+      if ((area !== 'session' && area !== 'local') || !changes[MIC_GRANT_STORAGE_KEY]) return
       const next = changes[MIC_GRANT_STORAGE_KEY].newValue as MicGrantResult | undefined
       void applyMicGrantResult(next ?? null)
     }
@@ -786,8 +790,8 @@ export function PopupApp() {
             Step {stepIndex('mic', recordMode)} of {totalSteps(recordMode)} — Microphone
           </p>
           <p className="popup-hint">
-            Opens a permission window — click <strong>Allow microphone</strong> there so Chrome can
-            show its Allow dialog. (This popup cannot.)
+            Opens a grant window — click <strong>Allow microphone</strong> there, then{' '}
+            <strong>Allow</strong> in Chrome’s prompt (this popup cannot show it).
           </p>
           <p className={`popup-mic-status is-${micAccess}`} role="status">
             Status: <strong>{micAccessLabel(micAccess)}</strong>

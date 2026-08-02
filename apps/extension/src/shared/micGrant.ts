@@ -1,4 +1,4 @@
-/** Session storage key + helpers for the mic permission grant window. */
+/** Storage helpers for the mic permission grant page. */
 
 export const MIC_GRANT_STORAGE_KEY = 'micGrantResult'
 
@@ -17,13 +17,24 @@ export const MIC_GRANT_PAGE = 'src/permissions/mic.html'
 
 export async function readMicGrantResult(): Promise<MicGrantResult | null> {
   try {
-    const stored = await chrome.storage.session.get(MIC_GRANT_STORAGE_KEY)
-    const value = stored[MIC_GRANT_STORAGE_KEY] as MicGrantResult | undefined
-    if (!value || typeof value !== 'object' || typeof value.status !== 'string') return null
-    return value
+    const session = await chrome.storage.session.get(MIC_GRANT_STORAGE_KEY)
+    const fromSession = session[MIC_GRANT_STORAGE_KEY] as MicGrantResult | undefined
+    if (fromSession && typeof fromSession === 'object' && typeof fromSession.status === 'string') {
+      return fromSession
+    }
   } catch {
-    return null
+    /* ignore */
   }
+  try {
+    const local = await chrome.storage.local.get(MIC_GRANT_STORAGE_KEY)
+    const fromLocal = local[MIC_GRANT_STORAGE_KEY] as MicGrantResult | undefined
+    if (fromLocal && typeof fromLocal === 'object' && typeof fromLocal.status === 'string') {
+      return fromLocal
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
 }
 
 export async function writeMicGrantResult(
@@ -36,5 +47,8 @@ export async function writeMicGrantResult(
     ...(options?.reason ? { reason: options.reason } : {}),
     ...(options?.devices ? { devices: options.devices } : {}),
   }
-  await chrome.storage.session.set({ [MIC_GRANT_STORAGE_KEY]: payload })
+  await Promise.all([
+    chrome.storage.session.set({ [MIC_GRANT_STORAGE_KEY]: payload }),
+    chrome.storage.local.set({ [MIC_GRANT_STORAGE_KEY]: payload }),
+  ])
 }

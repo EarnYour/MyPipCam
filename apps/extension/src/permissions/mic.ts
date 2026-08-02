@@ -1,9 +1,9 @@
 /**
  * Visible extension page for microphone permission.
  *
- * Must NOT call getUserMedia on bare page-load — Chrome often returns
- * "Permission dismissed" with no UI unless there is a real user gesture.
- * The Allow button click is that gesture.
+ * Must run getUserMedia from a real click (user gesture). Page-load calls are
+ * often "Permission dismissed" with no UI. Prefer a normal window/tab (not a
+ * type:popup chrome window) so Chrome can show the Allow bubble.
  *
  * Always use plain { audio: true } — never empty deviceId: { exact }.
  */
@@ -17,7 +17,7 @@ const allowBtn = document.getElementById('allow') as HTMLButtonElement
 const closeBtn = document.getElementById('close') as HTMLButtonElement
 
 const RESET_HELP =
-  'Reset Chrome: open chrome://settings/content/microphone → find MyPipCam → Allow (or remove from Block). On macOS also: System Settings → Privacy & Security → Microphone → turn ON Google Chrome.'
+  'Still blocked? 1) chrome://settings/content/microphone → MyPipCam → Allow (remove from Block). 2) macOS System Settings → Privacy & Security → Microphone → turn ON Google Chrome. Then click Allow microphone again.'
 
 let closeTimer: number | null = null
 
@@ -55,7 +55,7 @@ async function listMicDevices(): Promise<MicGrantDevice[]> {
 
 function renderDevices(devices: MicGrantDevice[]) {
   devicesEl.innerHTML = ''
-  for (const d of devices.slice(0, 6)) {
+  for (const d of devices.slice(0, 8)) {
     const li = document.createElement('li')
     li.textContent = d.label
     devicesEl.appendChild(li)
@@ -70,14 +70,14 @@ async function notifyPopup(status: 'granted' | 'denied', reason?: string) {
       reason,
     })
   } catch {
-    /* popup may be closed — session storage is the source of truth */
+    /* popup may be closed — storage is the source of truth */
   }
 }
 
 async function requestMic() {
   allowBtn.disabled = true
   showHelp(false)
-  setStatus('Waiting for Chrome Allow dialog…', 'pending')
+  setStatus('Look for Chrome’s Allow prompt at the top of this window…', 'pending')
   await writeMicGrantResult('pending')
 
   try {
@@ -97,14 +97,20 @@ async function requestMic() {
 
     setStatus(
       devices.length > 0
-        ? `Microphone allowed (${devices.length} device${devices.length === 1 ? '' : 's'}). Closing…`
-        : 'Microphone allowed. Closing…',
+        ? `Microphone allowed (${devices.length} device${devices.length === 1 ? '' : 's'}). You can close this and continue in the popup.`
+        : 'Microphone allowed. You can close this and continue in the popup.',
       'ok',
     )
     showHelp(false)
-    allowBtn.textContent = 'Allowed'
+    allowBtn.textContent = 'Allowed ✓'
     if (closeTimer != null) window.clearTimeout(closeTimer)
-    closeTimer = window.setTimeout(() => window.close(), 1100)
+    closeTimer = window.setTimeout(() => {
+      try {
+        window.close()
+      } catch {
+        /* tab may not close itself */
+      }
+    }, 1400)
   } catch (err) {
     const detail = errDetail(err)
     console.error('[MyPipCam] mic grant page failed:', detail, err)
@@ -113,7 +119,7 @@ async function requestMic() {
 
     setStatus(
       /dismissed|denied|notallowed/i.test(detail)
-        ? 'Microphone blocked or dismissed — see reset steps below'
+        ? 'No Allow dialog / blocked — follow reset steps below'
         : detail,
       'bad',
     )
@@ -131,6 +137,6 @@ closeBtn.addEventListener('click', () => {
   window.close()
 })
 
-// Mark pending so the popup knows a grant window is open (do not call getUserMedia yet).
 void writeMicGrantResult('pending')
 setStatus('Ready — click Allow microphone', 'pending')
+allowBtn.focus()

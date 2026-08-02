@@ -132,7 +132,9 @@ function isPermissionDismissed(err: unknown): boolean {
 }
 
 async function acquireMic(deviceId: string | null | undefined): Promise<MediaStream> {
-  const tryGet = async (exactId: string | null) =>
+  // Match grant page first: plain { audio: true } after a visible Allow.
+  const tryPlain = () => navigator.mediaDevices.getUserMedia({ audio: true })
+  const tryEnhanced = (exactId: string | null) =>
     navigator.mediaDevices.getUserMedia({
       audio: {
         ...(exactId ? { deviceId: { exact: exactId } } : {}),
@@ -142,24 +144,36 @@ async function acquireMic(deviceId: string | null | undefined): Promise<MediaStr
       video: false,
     })
 
-  try {
-    return await tryGet(deviceId ?? null)
-  } catch (first) {
-    if (deviceId) {
+  if (deviceId) {
+    try {
+      return await tryEnhanced(deviceId)
+    } catch (first) {
       try {
-        return await tryGet(null)
+        return await tryPlain()
       } catch (second) {
         throw new Error(
           errDetail(
             second,
-            errDetail(first, 'Microphone unavailable — allow mic access for MyPipCam'),
+            errDetail(first, 'Microphone unavailable — allow mic in the MyPipCam grant window'),
           ),
         )
       }
     }
-    throw new Error(
-      errDetail(first, 'Microphone unavailable — allow mic access for MyPipCam in Chrome'),
-    )
+  }
+
+  try {
+    return await tryPlain()
+  } catch (first) {
+    try {
+      return await tryEnhanced(null)
+    } catch (second) {
+      throw new Error(
+        errDetail(
+          second,
+          errDetail(first, 'Microphone unavailable — allow mic in the MyPipCam grant window'),
+        ),
+      )
+    }
   }
 }
 
