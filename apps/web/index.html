@@ -3,40 +3,168 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MyPipCam — Local screen &amp; camera PiP recorder</title>
+    <title>MyPipCam — Screen Recording with Camera PiP (Chrome + Mac)</title>
     <meta
       name="description"
-      content="MyPipCam is a local-first screen and camera picture-in-picture recorder: Chrome extension plus macOS companion. Created by EarnYour Marketing."
+      content="Free open-source screen recording with a live camera picture-in-picture: Chrome extension for capture and editing, plus a macOS always-on-top PiP bubble. Local-first by EarnYour Marketing."
     />
     <link rel="canonical" href="https://mypipcam.earnyour.com/" />
-    <link rel="icon" href="/assets/logo.png" type="image/png" />
+    <link rel="icon" href="https://mypipcam.earnyour.com/assets/logo.png" type="image/png" />
+    <link rel="apple-touch-icon" href="https://mypipcam.earnyour.com/assets/logo.png" />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="#ff5e29" />
+    <meta name="author" content="EarnYour Marketing" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MyPipCam" />
+    <meta property="og:locale" content="en_US" />
+    <meta
+      property="og:title"
+      content="MyPipCam — Screen Recording with Camera PiP"
+    />
+    <meta
+      property="og:description"
+      content="Local-first Chrome extension and macOS companion for screen recording with a live camera picture-in-picture."
+    />
+    <meta property="og:url" content="https://mypipcam.earnyour.com/" />
+    <meta
+      property="og:image"
+      content="https://mypipcam.earnyour.com/assets/og-image.jpg"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MyPipCam — local screen and camera PiP recorder" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="MyPipCam — Screen Recording with Camera PiP"
+    />
+    <meta
+      name="twitter:description"
+      content="Free open-source Chrome extension and Mac companion for screen recording with a live camera PiP bubble."
+    />
+    <meta
+      name="twitter:image"
+      content="https://mypipcam.earnyour.com/assets/og-image.jpg"
+    />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;550;650;700&family=Syne:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css" />
-    <meta property="og:title" content="MyPipCam" />
-    <meta
-      property="og:description"
-      content="Local screen/camera PiP recorder — Chrome extension + Mac companion."
-    />
-    <meta property="og:url" content="https://mypipcam.earnyour.com/" />
-    <meta property="og:image" content="https://mypipcam.earnyour.com/assets/logo.png" />
-    <meta name="theme-color" content="#ff5e29" />
+    <link rel="stylesheet" href="https://mypipcam.earnyour.com/styles.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://earnyour.com/#organization",
+            "name": "EarnYour Marketing",
+            "url": "https://earnyour.com",
+            "email": "steven@earnyour.com",
+            "logo": "https://mypipcam.earnyour.com/assets/logo.png"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://mypipcam.earnyour.com/#website",
+            "url": "https://mypipcam.earnyour.com/",
+            "name": "MyPipCam",
+            "description": "Local-first screen recording with camera picture-in-picture for Chrome and macOS.",
+            "publisher": { "@id": "https://earnyour.com/#organization" },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://mypipcam.earnyour.com/#software",
+            "name": "MyPipCam",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": "macOS, Chrome",
+            "url": "https://mypipcam.earnyour.com/",
+            "downloadUrl": "https://github.com/swmartinezdot33/MyPipCam",
+            "image": "https://mypipcam.earnyour.com/assets/logo.png",
+            "description": "Free open-source screen and camera picture-in-picture recorder: Chrome extension plus macOS always-on-top camera companion.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "author": { "@id": "https://earnyour.com/#organization" },
+            "publisher": { "@id": "https://earnyour.com/#organization" },
+            "license": "https://github.com/swmartinezdot33/MyPipCam/blob/master/LICENSE",
+            "codeRepository": "https://github.com/swmartinezdot33/MyPipCam",
+            "isAccessibleForFree": true
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://mypipcam.earnyour.com/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "What is MyPipCam?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "MyPipCam is a free, open-source toolkit for screen recording with a live camera picture-in-picture. It includes a Chrome extension for capture and editing, and a macOS companion that shows an always-on-top camera bubble."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is MyPipCam a Loom alternative?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "MyPipCam is inspired by picture-in-picture screen-recording workflows. It is free, local-first, and open source. It is not affiliated with Loom; “Loom-style” is descriptive only."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Where are my recordings stored?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "By default, recordings stay on your device in the browser or a local library folder you choose. Optional Google Drive upload and OpenAI transcription only run when you connect those services."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "How do I install MyPipCam?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Get the Chrome extension and macOS app from the GitHub repository at https://github.com/swmartinezdot33/MyPipCam. Follow the README for build and install steps."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Who makes MyPipCam?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "MyPipCam is created by EarnYour Marketing (https://earnyour.com) and published under the MIT License. Support: steven@earnyour.com."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <header class="site-header">
       <div class="site-header__inner">
-        <a class="brand-mark" href="/">
-          <img src="/assets/logo.png" width="40" height="40" alt="" />
+        <a class="brand-mark" href="https://mypipcam.earnyour.com/">
+          <img
+            src="https://mypipcam.earnyour.com/assets/logo.png"
+            width="40"
+            height="40"
+            alt="MyPipCam logo"
+          />
           <span>MyPipCam</span>
         </a>
         <nav class="nav" aria-label="Primary">
           <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
+          <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
+          <a href="https://mypipcam.earnyour.com/terms">Terms</a>
         </nav>
       </div>
     </header>
@@ -47,16 +175,16 @@
           <div>
             <img
               class="hero__logo"
-              src="/assets/logo.png"
+              src="https://mypipcam.earnyour.com/assets/logo.png"
               width="120"
               height="120"
-              alt="MyPipCam app icon"
+              alt="MyPipCam app icon showing a camera PiP on a screen"
             />
             <h1 id="brand-title">MyPipCam</h1>
             <p class="hero__lede">
-              Local-first screen and camera picture-in-picture recording — a Chrome
-              extension for capture and editing, plus a macOS companion for an
-              always-on-top camera bubble.
+              Screen recording with a live camera picture-in-picture — a free,
+              local-first Chrome extension and macOS companion. An honest
+              Loom-style workflow without a SaaS lock-in.
             </p>
             <div class="cta-row">
               <a
@@ -64,8 +192,11 @@
                 href="https://github.com/swmartinezdot33/MyPipCam"
                 >View on GitHub</a
               >
-              <a class="btn btn--ghost" href="/privacy">Privacy</a>
-              <a class="btn btn--ghost" href="/terms">Terms</a>
+              <a
+                class="btn btn--ghost"
+                href="https://github.com/swmartinezdot33/MyPipCam#readme"
+                >Install from source</a
+              >
             </div>
           </div>
           <div class="hero__visual" aria-hidden="true">
@@ -77,38 +208,95 @@
 
       <section class="section" aria-labelledby="how-title">
         <div class="section__inner">
-          <h2 id="how-title">What it does</h2>
+          <h2 id="how-title">Screen capture, camera PiP, local library</h2>
           <p>
-            Record your screen or tab with a live camera PiP, keep clips in a local
-            library, and optionally connect Google Drive or OpenAI transcription —
-            only when you choose to.
+            Record a Chrome tab or your screen with a draggable camera overlay,
+            keep clips on your device, and use a floating Mac camera bubble when
+            you need desktop-wide picture-in-picture for OBS or any screen
+            recorder.
           </p>
           <ul class="feature-list">
             <li>
               <strong>Chrome extension</strong>
               <p>
-                Tab or screen capture with a draggable camera PiP, local library,
-                trim/cut editor, and optional Drive upload.
+                Tab or screen capture with a live camera PiP, local recording
+                library, trim/cut editor, and optional Google Drive upload.
               </p>
             </li>
             <li>
-              <strong>macOS companion</strong>
+              <strong>macOS PiP bubble</strong>
               <p>
-                Floating always-on-top camera window for OBS and desktop
-                recording workflows.
+                Always-on-top camera window for Continuity Camera, webcams, or
+                virtual cameras — ideal for desktop recording workflows.
               </p>
             </li>
             <li>
-              <strong>Open source</strong>
+              <strong>Open source &amp; free</strong>
               <p>
-                Free MIT-licensed software. Source, builds, and docs live on
-                GitHub.
+                MIT-licensed. Build and install from
+                <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
+                — no paid account required for core recording.
               </p>
             </li>
           </ul>
+        </div>
+      </section>
+
+      <section class="section section--faq" aria-labelledby="faq-title">
+        <div class="section__inner">
+          <h2 id="faq-title">Frequently asked questions</h2>
+          <div class="faq">
+            <details open>
+              <summary>What is MyPipCam?</summary>
+              <p>
+                A free, open-source toolkit for screen recording with a live
+                camera picture-in-picture: Chrome extension for capture and
+                editing, plus a macOS always-on-top camera companion.
+              </p>
+            </details>
+            <details>
+              <summary>Is MyPipCam a Loom alternative?</summary>
+              <p>
+                It’s inspired by picture-in-picture screen-recording workflows —
+                local-first and open source. It is not affiliated with Loom;
+                “Loom-style” is descriptive only.
+              </p>
+            </details>
+            <details>
+              <summary>Where are my recordings stored?</summary>
+              <p>
+                On your device by default (browser storage or a folder you
+                choose). Optional Drive upload and OpenAI transcription only run
+                when you connect those services. See the
+                <a href="https://mypipcam.earnyour.com/privacy">Privacy Policy</a>.
+              </p>
+            </details>
+            <details>
+              <summary>How do I install MyPipCam?</summary>
+              <p>
+                Get the extension and macOS app from
+                <a href="https://github.com/swmartinezdot33/MyPipCam"
+                  >GitHub</a
+                >
+                and follow the README for build and install steps.
+              </p>
+            </details>
+            <details>
+              <summary>Who makes MyPipCam?</summary>
+              <p>
+                Created by
+                <a href="https://earnyour.com">EarnYour Marketing</a>. Support:
+                <a href="mailto:steven@earnyour.com">steven@earnyour.com</a>.
+              </p>
+            </details>
+          </div>
           <p class="credit">
             Created by
             <a href="https://earnyour.com">EarnYour Marketing</a>
+            ·
+            <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
+            ·
+            <a href="https://mypipcam.earnyour.com/terms">Terms</a>
             · Support:
             <a href="mailto:steven@earnyour.com">steven@earnyour.com</a>
           </p>
@@ -121,8 +309,8 @@
         <p>© 2026 MyPipCam · EarnYour Marketing</p>
         <nav aria-label="Footer">
           <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
+          <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
+          <a href="https://mypipcam.earnyour.com/terms">Terms</a>
           <a href="https://earnyour.com">EarnYour</a>
         </nav>
       </div>

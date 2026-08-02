@@ -337,6 +337,48 @@ a:hover {
   font-size: 0.95rem;
 }
 
+.faq {
+  display: grid;
+  gap: 0.65rem;
+  max-width: 42rem;
+}
+
+.faq details {
+  border-bottom: 1px solid rgba(17, 19, 18, 0.1);
+  padding: 0.35rem 0 0.85rem;
+}
+
+.faq summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+  list-style: none;
+  padding: 0.35rem 0;
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq summary::after {
+  content: "+";
+  float: right;
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.faq details[open] summary::after {
+  content: "–";
+}
+
+.faq p {
+  margin: 0.35rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+}
+
 .site-footer {
   border-top: 1px solid rgba(17, 19, 18, 0.08);
   padding: 1.5rem 0 2.25rem;
