@@ -1,0 +1,101 @@
+import SwiftUI
+
+struct BorderColorPopover: View {
+    @ObservedObject var settings: BubbleSettings
+    @State private var hexDraft: String = ""
+    @State private var hexError = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Border")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 8), count: 5), spacing: 8) {
+                ForEach(BorderPreset.allCases.filter { $0 != .custom }) { preset in
+                    Button {
+                        settings.applyPreset(preset)
+                        if let hex = preset.hex {
+                            hexDraft = hex
+                        }
+                        hexError = false
+                    } label: {
+                        ZStack {
+                            if preset == .transparent {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.35), lineWidth: 1)
+                                    .background(
+                                        Image(systemName: "circle.slash")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                    )
+                            } else {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(HexColor.color(from: preset.hex ?? "#FFFFFF") ?? .white)
+                            }
+
+                            if settings.borderPreset == preset {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                            }
+                        }
+                        .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help(preset.label)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Custom hex")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    TextField("#RRGGBB", text: $hexDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .onSubmit(applyHex)
+
+                    Button("Apply", action: applyHex)
+                        .keyboardShortcut(.defaultAction)
+                }
+
+                if hexError {
+                    Text("Use #RRGGBB or #RRGGBBAA")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.red)
+                }
+            }
+
+            if settings.borderPreset != .transparent {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Thickness")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Slider(value: $settings.borderWidth, in: 1...10, step: 0.5)
+                }
+            }
+
+            Toggle("Drop shadow", isOn: $settings.showShadow)
+                .font(.system(size: 12, weight: .medium))
+        }
+
+        .padding(14)
+        .frame(width: 220)
+        .onAppear {
+            hexDraft = settings.borderPreset == .transparent
+                ? ""
+                : (settings.borderPreset.hex ?? settings.customBorderHex)
+        }
+    }
+
+    private func applyHex() {
+        if settings.applyCustomHex(hexDraft) {
+            hexError = false
+            hexDraft = settings.customBorderHex
+        } else {
+            hexError = true
+        }
+    }
+}
