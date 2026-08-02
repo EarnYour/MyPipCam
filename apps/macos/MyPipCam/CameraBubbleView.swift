@@ -265,43 +265,35 @@ struct CameraBubbleView: View {
     private func installDismissMonitors() {
         removeDismissMonitors()
 
-        let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
-            // Escape
-            if event.keyCode == 53 {
-                dismissControls()
+        let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { // Escape
+                self.dismissControls()
                 return nil
             }
             return event
         }
 
-        // Clicks in other apps / outside this panel
-        let globalMouse = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [self] _ in
-            guard !showBorderPopover else { return }
-            dismissControls()
+        // Clicks in other apps dismiss the toolbar.
+        let globalMouse = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+            guard !self.showBorderPopover else { return }
+            self.dismissControls()
         }
 
-        // Clicks elsewhere in this app (e.g. menu bar), but not on the bubble panel
-        let localMouse = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [self] event in
-            guard !showBorderPopover else { return event }
-            if event.window !== (event.window as NSWindow?), false {
+        // Clicks in this app that aren't on the bubble panel (e.g. menu bar).
+        let localMouse = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            guard !self.showBorderPopover else { return event }
+            if let window = event.window, window is BubblePanel {
                 return event
             }
-            // Only dismiss when the click isn't on our bubble's window.
-            // Events targeting the bubble panel should keep controls interactive.
-            if let window = event.window, window.contentView is NSHostingView<CameraBubbleView> {
-                return event
-            }
-            // Menu / popover windows spawned from the bubble should not dismiss.
-            if let window = event.window, window != window.contentView?.window {
-                return event
-            }
-            if event.window == nil || !(event.window is BubblePanel) {
-                // Delay so button actions inside the bar still fire first when appropriate.
-                DispatchQueue.main.async {
-                    if !self.showBorderPopover {
-                        self.dismissControls()
-                    }
+            // Allow popover / menu windows attached to the bubble.
+            if let window = event.window, window.level != .normal, !(window is BubblePanel) {
+                // Still dismiss for unrelated app windows; keep transient UI.
+                if window.className.contains("Popover") || window.className.contains("Menu") {
+                    return event
                 }
+            }
+            if !(event.window is BubblePanel) {
+                self.dismissControls()
             }
             return event
         }
@@ -319,8 +311,8 @@ struct CameraBubbleView: View {
     private func dismissControls() {
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.18)) {
-                showControls = false
-                showBorderPopover = false
+                self.showControls = false
+                self.showBorderPopover = false
             }
         }
     }

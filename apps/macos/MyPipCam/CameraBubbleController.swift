@@ -10,7 +10,7 @@ final class CameraBubbleController: NSObject {
     private let loginItem: LoginItemManager
     private var scrollMonitor: Any?
     private var sizeCancellable: AnyCancellable?
-    private let padding: CGFloat = 28
+    private let padding: CGFloat = CameraBubbleView.shadowPadding
 
     init(loginItem: LoginItemManager) {
         self.loginItem = loginItem
