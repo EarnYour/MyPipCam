@@ -98,29 +98,40 @@ function mixToMono(buffer: AudioBuffer): Float32Array {
   return out
 }
 
+/** Normalize an unordered pair into a TimeRange. */
+export function normalizeRange(a: number, b: number): TimeRange {
+  return a <= b ? { start: a, end: b } : { start: b, end: a }
+}
+
+/** Merge overlapping/adjacent ranges (sorted). */
+export function mergeRanges(ranges: TimeRange[], gap = 0.02): TimeRange[] {
+  const sorted = [...ranges]
+    .filter((r) => r.end > r.start + gap)
+    .sort((a, b) => a.start - b.start)
+  const merged: TimeRange[] = []
+  for (const r of sorted) {
+    const last = merged[merged.length - 1]
+    if (last && r.start <= last.end + gap) {
+      last.end = Math.max(last.end, r.end)
+    } else {
+      merged.push({ ...r })
+    }
+  }
+  return merged
+}
+
 /** Merge overlapping/adjacent remove ranges, then invert into keep segments within [inSec, outSec]. */
 export function keepSegmentsFromRemoves(
   inSec: number,
   outSec: number,
   removes: TimeRange[],
 ): TimeRange[] {
-  const clipped = removes
-    .map((r) => ({
+  const merged = mergeRanges(
+    removes.map((r) => ({
       start: Math.max(inSec, r.start),
       end: Math.min(outSec, r.end),
-    }))
-    .filter((r) => r.end > r.start + 0.02)
-    .sort((a, b) => a.start - b.start)
-
-  const merged: TimeRange[] = []
-  for (const r of clipped) {
-    const last = merged[merged.length - 1]
-    if (last && r.start <= last.end + 0.02) {
-      last.end = Math.max(last.end, r.end)
-    } else {
-      merged.push({ ...r })
-    }
-  }
+    })),
+  )
 
   const keeps: TimeRange[] = []
   let cursor = inSec
@@ -134,4 +145,12 @@ export function keepSegmentsFromRemoves(
     keeps.push({ start: cursor, end: outSec })
   }
   return keeps
+}
+
+/** True when t falls inside any range (half-open [start, end)). */
+export function rangeContaining(ranges: TimeRange[], t: number): TimeRange | null {
+  for (const r of ranges) {
+    if (t >= r.start && t < r.end) return r
+  }
+  return null
 }
