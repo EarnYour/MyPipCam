@@ -1,0 +1,15 @@
+apps/macos
+apps/extension
+scripts
+.git
+**/.DS_Store
+**/node_modules
+**/dist
+**/build
+**/build-agent
+**/build-release
+**/DerivedData
+*.log
+*.pem
+.env
+.env.*
