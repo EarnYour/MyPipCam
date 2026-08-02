@@ -9,8 +9,8 @@
       content="Free Loom-style screen recording with camera PiP: Chrome extension, Mac bubble, Google Drive sync, share links with view counts, and a local library folder. By EarnYour Marketing."
     />
     <link rel="canonical" href="https://mypipcam.earnyour.com/" />
-    <link rel="icon" href="https://mypipcam.earnyour.com/assets/logo.png" type="image/png" />
-    <link rel="apple-touch-icon" href="https://mypipcam.earnyour.com/assets/logo.png" />
+    <link rel="icon" href="/assets/logo.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/assets/logo.png" />
     <meta name="robots" content="index,follow" />
     <meta name="theme-color" content="#ff5e29" />
     <meta name="author" content="EarnYour Marketing" />
@@ -55,7 +55,7 @@
       href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;550;650;700&family=Syne:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="https://mypipcam.earnyour.com/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
 
     <script type="application/ld+json">
       {
@@ -98,6 +98,18 @@
             "license": "https://github.com/swmartinezdot33/MyPipCam/blob/master/LICENSE",
             "codeRepository": "https://github.com/swmartinezdot33/MyPipCam",
             "isAccessibleForFree": true
+          },
+          {
+            "@type": "VideoObject",
+            "@id": "https://mypipcam.earnyour.com/#promo-video",
+            "name": "MyPipCam in 45 seconds — tab recording with camera PiP",
+            "description": "Watch the full MyPipCam flow: click the extension, start a Tab + Cam recording, countdown, draggable camera bubble on the page, stop, library, and a share link that tracks views.",
+            "thumbnailUrl": "https://mypipcam.earnyour.com/assets/promo/mypipcam-promo-poster.jpg",
+            "contentUrl": "https://mypipcam.earnyour.com/assets/promo/mypipcam-promo.mp4",
+            "uploadDate": "2026-08-02",
+            "duration": "PT46S",
+            "inLanguage": "en",
+            "publisher": { "@id": "https://earnyour.com/#organization" }
           },
           {
             "@type": "FAQPage",
@@ -160,9 +172,9 @@
   <body>
     <header class="site-header">
       <div class="site-header__inner">
-        <a class="brand-mark" href="https://mypipcam.earnyour.com/">
+        <a class="brand-mark" href="/">
           <img
-            src="https://mypipcam.earnyour.com/assets/logo.png"
+            src="/assets/logo.png"
             width="40"
             height="40"
             alt="MyPipCam logo"
@@ -170,9 +182,11 @@
           <span>MyPipCam</span>
         </a>
         <nav class="nav" aria-label="Primary">
+          <a href="#screenshots">Screenshots</a>
+          <a href="#install">Install</a>
           <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-          <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
-          <a href="https://mypipcam.earnyour.com/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
         </nav>
       </div>
     </header>
@@ -183,7 +197,7 @@
           <div>
             <img
               class="hero__logo"
-              src="https://mypipcam.earnyour.com/assets/logo.png"
+              src="/assets/logo.png"
               width="120"
               height="120"
               alt="MyPipCam app icon showing a camera PiP on a screen"
@@ -199,18 +213,44 @@
               <a
                 class="btn btn--primary"
                 href="https://github.com/swmartinezdot33/MyPipCam"
-                >View on GitHub</a
+                >Get it on GitHub</a
               >
-              <a
-                class="btn btn--ghost"
-                href="https://github.com/swmartinezdot33/MyPipCam#readme"
-                >Install from source</a
-              >
+              <a class="btn btn--ghost" href="#install">Install in ~2 minutes</a>
             </div>
           </div>
           <div class="hero__visual" aria-hidden="true">
             <span class="pip"></span>
             <span class="mint-dot"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--video" aria-labelledby="video-title">
+        <div class="section__inner">
+          <h2 id="video-title">See MyPipCam in 45 seconds</h2>
+          <p>
+            The whole flow, end to end: click the extension, start a Tab + Cam
+            recording, talk over a live camera bubble, stop, and share a link
+            that counts views.
+          </p>
+          <div class="promo-video">
+            <video
+              controls
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="metadata"
+              poster="/assets/promo/mypipcam-promo-poster.jpg"
+              aria-label="MyPipCam promo video: recording a Chrome tab with a camera picture-in-picture, then sharing a link with view tracking"
+            >
+              <source
+                src="/assets/promo/mypipcam-promo.mp4"
+                type="video/mp4"
+              />
+              Your browser doesn’t support embedded video —
+              <a href="/assets/promo/mypipcam-promo.mp4">download the MP4</a>.
+            </video>
           </div>
         </div>
       </section>
@@ -249,6 +289,68 @@
               </p>
             </li>
           </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="shots-title" id="screenshots">
+        <div class="section__inner">
+          <h2 id="shots-title">A look inside</h2>
+          <p>
+            The real product surfaces: the popup where you start, the on-page
+            recording UI, your library, and the share view that reports back.
+          </p>
+          <div class="shot-grid">
+            <figure class="shot shot--tall">
+              <img
+                src="/assets/screenshots/popup.png"
+                alt="MyPipCam extension popup with Current tab scope, camera and microphone toggles, and an orange Start Recording button"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>One-click start.</strong> Pick your source, toggle
+                camera and mic, add effects or background blur — hit record.
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="/assets/screenshots/recording.png"
+                alt="A webpage being recorded: draggable orange-ringed camera bubble over the page, with the MyPipCam dock showing timer, stop, pause, and discard controls"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Recording, Loom-style.</strong> Countdown, draggable
+                camera bubble, slim control dock — controls never end up in
+                your video.
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="/assets/screenshots/library.png"
+                alt="MyPipCam library grid showing recording cards with thumbnails, durations, Drive badges, and view counts"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Your library, local-first.</strong> Every clip on your
+                machine — with Drive badges and view counts when you opt in.
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="/assets/screenshots/detail-share.png"
+                alt="Recording detail view with player, share link to mypipcam.earnyour.com, view count, and download and editor actions"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Share &amp; track.</strong> Copy a
+                <code>mypipcam.earnyour.com/w/…</code> link, watch the view
+                count come back. Links can auto-expire after 30 days.
+              </figcaption>
+            </figure>
+          </div>
         </div>
       </section>
 
@@ -295,11 +397,63 @@
               <p>
                 Drive and OpenAI only run after you connect them. Disconnect
                 anytime. See the
-                <a href="https://mypipcam.earnyour.com/privacy">Privacy Policy</a>
+                <a href="/privacy">Privacy Policy</a>
                 for what stays on-device vs. optional cloud.
               </p>
             </li>
           </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="install-title" id="install">
+        <div class="section__inner">
+          <h2 id="install-title">Install in about two minutes</h2>
+          <p>
+            MyPipCam isn’t on the Chrome Web Store — you build it from source
+            (Node.js 20+) and load it unpacked. Free forever, MIT licensed, no
+            account needed.
+          </p>
+          <ol class="install-steps">
+            <li>
+              <strong>1 · Clone &amp; build</strong>
+              <pre><code>git clone https://github.com/swmartinezdot33/MyPipCam.git
+cd MyPipCam/apps/extension
+npm install
+cp .env.example .env.local
+npm run build</code></pre>
+            </li>
+            <li>
+              <strong>2 · Load in Chrome</strong>
+              <p>
+                Open <code>chrome://extensions</code>, enable
+                <strong>Developer mode</strong>, click
+                <strong>Load unpacked</strong>, and select the
+                <code>apps/extension/dist</code> folder.
+              </p>
+            </li>
+            <li>
+              <strong>3 · Record</strong>
+              <p>
+                Pin MyPipCam, open any http(s) page, click the icon →
+                <strong>Start recording</strong>. Shortcut:
+                <code>⌘⇧U</code> (Mac) / <code>Ctrl+Shift+U</code>. Optional:
+                connect Google Drive from Library → Settings for cloud sync and
+                view-tracked share links.
+              </p>
+            </li>
+          </ol>
+          <div class="cta-row">
+            <a
+              class="btn btn--primary"
+              href="https://github.com/swmartinezdot33/MyPipCam"
+              >Clone on GitHub</a
+            >
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/swmartinezdot33/MyPipCam/blob/master/AGENTS.md"
+              >Full setup guide (AGENTS.md)</a
+            >
+          </div>
         </div>
       </section>
 
@@ -351,18 +505,18 @@
                 On your device by default (browser storage or a folder you
                 choose). Optional Drive upload and OpenAI transcription only run
                 when you connect those services. See the
-                <a href="https://mypipcam.earnyour.com/privacy">Privacy Policy</a>.
+                <a href="/privacy">Privacy Policy</a>.
               </p>
             </details>
             <details>
               <summary>How do I install MyPipCam?</summary>
               <p>
-                Get the extension and macOS app from
-                <a href="https://github.com/swmartinezdot33/MyPipCam"
-                  >GitHub</a
-                >
-                and follow the README. After install, connect Drive from Library
-                → Settings if you want cloud sync and share views.
+                Follow the <a href="#install">two-minute install steps</a>:
+                clone from
+                <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>,
+                build the extension, and load it unpacked in Chrome. After
+                install, connect Drive from Library → Settings if you want
+                cloud sync and share views.
               </p>
             </details>
             <details>
@@ -378,9 +532,9 @@
             Created by
             <a href="https://earnyour.com">EarnYour Marketing</a>
             ·
-            <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
+            <a href="/privacy">Privacy</a>
             ·
-            <a href="https://mypipcam.earnyour.com/terms">Terms</a>
+            <a href="/terms">Terms</a>
             · Support:
             <a href="mailto:steven@earnyour.com">steven@earnyour.com</a>
           </p>
@@ -393,8 +547,8 @@
         <p>© 2026 MyPipCam · EarnYour Marketing</p>
         <nav aria-label="Footer">
           <a href="https://github.com/swmartinezdot33/MyPipCam">GitHub</a>
-          <a href="https://mypipcam.earnyour.com/privacy">Privacy</a>
-          <a href="https://mypipcam.earnyour.com/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
           <a href="https://earnyour.com">EarnYour</a>
         </nav>
       </div>

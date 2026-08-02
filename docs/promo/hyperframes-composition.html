@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>MyPipCam Promo</title>
+    <script src="./vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Figtree"; font-style: normal; font-weight: 400; src: url("./fonts/figtree-latin-400-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Figtree"; font-style: normal; font-weight: 500; src: url("./fonts/figtree-latin-500-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Figtree"; font-style: normal; font-weight: 600; src: url("./fonts/figtree-latin-600-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Figtree"; font-style: normal; font-weight: 700; src: url("./fonts/figtree-latin-700-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Syne"; font-style: normal; font-weight: 700; src: url("./fonts/syne-latin-700-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Syne"; font-style: normal; font-weight: 800; src: url("./fonts/syne-latin-800-normal.woff2") format("woff2"); }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px; height: 1080px; overflow: hidden; background: #fafaf7;
+        font-family: "Figtree", system-ui, sans-serif;
+      }
+      :root {
+        --brand: #ff5e29;
+        --mint: #7ddf9a;
+        --cream: #fafaf7;
+        --cream-deep: #f0efe8;
+        --ink: #111312;
+        --ink-soft: rgba(17, 19, 18, 0.72);
+        --ink-faint: rgba(17, 19, 18, 0.45);
+      }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      .clip { position: absolute; inset: 0; }
+      #base-clip { z-index: 0; }
+      #s1 { z-index: 10; }
+      #s2 { z-index: 20; }
+      #s3 { z-index: 30; }
+      #s4 { z-index: 40; }
+      #s5 { z-index: 50; }
+      #s6 { z-index: 60; }
+
+      .stage {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 90% 55% at 8% -10%, rgba(255, 94, 41, 0.16), transparent 55%),
+          radial-gradient(ellipse 70% 45% at 92% 8%, rgba(125, 223, 154, 0.2), transparent 50%),
+          linear-gradient(165deg, #fafaf7 0%, #f0efe8 60%, #ebe8df 100%);
+      }
+      .wrap { position: absolute; inset: 0; opacity: 0; }
+      #base-fill { position: absolute; inset: 0; background: #fafaf7; }
+
+      .display { font-family: "Syne", sans-serif; letter-spacing: -0.03em; }
+
+      /* ---------- Logo mark ---------- */
+      .mark { position: relative; }
+      .mark .mark-screen {
+        width: 100%; height: 100%; border-radius: 18%;
+        background: linear-gradient(145deg, #171b19, #1c211f 55%, #24302a);
+        box-shadow: 0 24px 48px rgba(17, 19, 18, 0.22);
+      }
+      .mark .mark-pip {
+        position: absolute; left: 10%; bottom: 10%;
+        width: 44%; height: 44%; border-radius: 50%;
+        background: var(--brand);
+        box-shadow: 0 0 0 6px rgba(255, 94, 41, 0.25);
+      }
+      .mark .mark-dot {
+        position: absolute; right: 16%; top: 16%;
+        width: 9%; height: 9%; border-radius: 50%;
+        background: var(--mint);
+      }
+
+      /* ---------- Oversized cursor ---------- */
+      .cursor { position: absolute; left: 0; top: 0; width: 64px; height: 64px; z-index: 90; }
+      .cursor svg { display: block; width: 100%; height: 100%; filter: drop-shadow(0 6px 12px rgba(17,19,18,0.35)); }
+      .ripple {
+        position: absolute; width: 90px; height: 90px; border-radius: 50%;
+        background: rgba(255, 94, 41, 0.35); opacity: 0; z-index: 85;
+      }
+
+      /* ---------- Browser mockup ---------- */
+      .browser {
+        position: absolute; left: 50%; top: 50%; margin-left: -730px; margin-top: -440px;
+        width: 1460px; height: 880px;
+        border-radius: 22px; background: #fff;
+        box-shadow: 0 40px 90px rgba(17, 19, 18, 0.22), 0 0 0 1px rgba(17, 19, 18, 0.06);
+        overflow: hidden;
+      }
+      .chrome-bar {
+        height: 68px; background: #f2f1ec; display: flex; align-items: center;
+        gap: 18px; padding: 0 24px; border-bottom: 1px solid rgba(17, 19, 18, 0.08);
+      }
+      .lights { display: flex; gap: 9px; }
+      .light { width: 15px; height: 15px; border-radius: 50%; }
+      .light.r { background: #ff5f57; } .light.y { background: #febc2e; } .light.g { background: #28c840; }
+      .urlbar {
+        flex: 1; height: 40px; border-radius: 999px; background: #fff;
+        display: flex; align-items: center; padding: 0 20px;
+        color: var(--ink-faint); font-size: 19px; font-weight: 550;
+        box-shadow: inset 0 0 0 1px rgba(17, 19, 18, 0.08);
+      }
+      .ext-slot { position: relative; width: 44px; height: 44px; }
+      .ext-icon {
+        width: 44px; height: 44px; border-radius: 12px;
+        background: linear-gradient(145deg, #171b19, #24302a);
+        display: grid; place-items: center;
+      }
+      .ext-icon .pip-mini {
+        width: 20px; height: 20px; border-radius: 50%;
+        background: var(--brand); box-shadow: 0 0 0 3px rgba(255, 94, 41, 0.35);
+      }
+      .page { position: relative; height: 812px; background: #fbfbf9; padding: 44px 56px; }
+      .ph { border-radius: 12px; background: #eceae3; }
+      .ph.dark { background: #e2e0d7; }
+
+      /* ---------- Scene 1 : hook ---------- */
+      #s1-mark { width: 190px; height: 190px; margin: 0 auto; opacity: 0; }
+      #s1-inner {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center; gap: 38px;
+      }
+      #s1-title { font-size: 128px; font-weight: 800; color: var(--ink); line-height: 1.02; }
+      #s1-title .w { display: inline-block; opacity: 0; }
+      #s1-title .accent { color: var(--brand); }
+      #s1-sub {
+        font-size: 34px; font-weight: 550; color: var(--ink-soft); opacity: 0;
+        display: flex; align-items: center; gap: 16px; justify-content: center;
+      }
+      #s1-sub .chip {
+        display: inline-block; padding: 8px 22px; border-radius: 999px;
+        background: rgba(125, 223, 154, 0.28); color: #1c5233; font-weight: 650;
+      }
+
+      /* ---------- Scene 2 : popup ---------- */
+      #s2-browser { opacity: 0; }
+      #s2-popup {
+        position: absolute; top: 78px; right: 18px; width: 384px;
+        border-radius: 20px; background: #fff;
+        box-shadow: 0 30px 70px rgba(17, 19, 18, 0.28), 0 0 0 1px rgba(17, 19, 18, 0.07);
+        padding: 26px; opacity: 0; z-index: 40;
+      }
+      .popup-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+      .popup-head .pip-mini2 {
+        width: 30px; height: 30px; border-radius: 9px;
+        background: linear-gradient(145deg, #171b19, #24302a);
+        display: grid; place-items: center;
+      }
+      .popup-head .pip-mini2 i {
+        display: block; width: 14px; height: 14px; border-radius: 50%;
+        background: var(--brand);
+      }
+      .popup-head b { font-family: "Syne", sans-serif; font-size: 22px; letter-spacing: -0.02em; }
+      .modes { display: flex; gap: 8px; margin-bottom: 20px; }
+      .mode {
+        flex: 1; text-align: center; font-size: 16px; font-weight: 650;
+        padding: 11px 4px; border-radius: 12px; color: var(--ink-soft);
+        box-shadow: inset 0 0 0 1.5px rgba(17, 19, 18, 0.12);
+      }
+      .mode.on { background: var(--ink); color: #fff; box-shadow: none; }
+      .rowline {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 13px 2px; border-top: 1px solid rgba(17, 19, 18, 0.07);
+        font-size: 17px; font-weight: 550; color: var(--ink);
+      }
+      .rowline .lbl { display: flex; align-items: center; gap: 10px; }
+      .rowline .ico { font-size: 19px; }
+      .switch {
+        position: relative; width: 50px; height: 28px; border-radius: 999px;
+        background: rgba(17, 19, 18, 0.18); display: inline-block;
+      }
+      .knob {
+        position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+        border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(17,19,18,0.25);
+        display: block;
+      }
+      #s2-start {
+        margin-top: 18px; width: 100%; padding: 16px 0; border-radius: 999px;
+        background: var(--brand); color: #fff; text-align: center;
+        font-size: 20px; font-weight: 700;
+        box-shadow: 0 12px 30px rgba(255, 94, 41, 0.35);
+      }
+      #s2-startring {
+        position: absolute; left: 50%; bottom: 24px; margin-left: -34px;
+        width: 68px; height: 68px; border-radius: 999px;
+        background: rgba(255, 94, 41, 0.3); opacity: 0;
+      }
+      #s2-cap {
+        position: absolute; left: 50%; bottom: 54px; margin-left: -430px; width: 860px;
+        text-align: center; font-size: 30px; font-weight: 650; color: var(--ink);
+        opacity: 0; z-index: 45;
+      }
+      #s2-cap .hl { color: var(--brand); }
+
+      /* ---------- Scene 3 : countdown + pip ---------- */
+      .count {
+        position: absolute; left: 50%; top: 46%; width: 300px; margin-left: -150px; margin-top: -150px;
+        text-align: center; font-family: "Syne", sans-serif; font-size: 260px; font-weight: 800;
+        color: var(--ink); opacity: 0; line-height: 300px;
+      }
+      #s3-bubble {
+        position: absolute; left: 90px; bottom: 70px; width: 190px; height: 190px;
+        border-radius: 50%; opacity: 0; z-index: 50;
+        background: linear-gradient(160deg, #2a3430, #1a201d);
+        box-shadow: 0 0 0 7px var(--brand), 0 0 0 14px rgba(255, 94, 41, 0.22), 0 24px 48px rgba(17,19,18,0.4);
+        overflow: hidden;
+      }
+      #s3-bubble .head {
+        position: absolute; left: 50%; top: 26%; width: 66px; height: 66px; margin-left: -33px;
+        border-radius: 50%; background: #c9c4b8; display: block;
+      }
+      #s3-bubble .body {
+        position: absolute; left: 50%; top: 63%; width: 130px; height: 90px; margin-left: -65px;
+        border-radius: 60px 60px 0 0; background: #c9c4b8; display: block;
+      }
+      #s3-dock {
+        position: absolute; left: 26px; top: 50%; width: 74px; margin-top: -160px;
+        border-radius: 999px; background: rgba(17, 19, 18, 0.92);
+        padding: 20px 0 14px; display: flex; flex-direction: column; align-items: center; gap: 18px;
+        box-shadow: 0 18px 40px rgba(17, 19, 18, 0.35);
+        opacity: 0; z-index: 55;
+      }
+      #s3-dock .rec { position: relative; width: 16px; height: 16px; display: block; }
+      #s3-dock .rec i { position: absolute; inset: 0; border-radius: 50%; background: #ff4b4b; display: block; }
+      #s3-dock .t { color: #fff; font-size: 15px; font-weight: 650; letter-spacing: 0.04em; }
+      #s3-dock .db {
+        width: 42px; height: 42px; border-radius: 50%; background: rgba(250,250,247,0.12);
+        display: grid; place-items: center; color: #fff; font-size: 17px;
+      }
+      #s3-dock .db.stop { background: #ff4b4b; }
+      #s3-dock .db.stop i { display: block; width: 14px; height: 14px; border-radius: 3px; background: #fff; }
+      #s3-cap {
+        position: absolute; left: 50%; bottom: 44px; margin-left: -510px; width: 1020px;
+        padding: 20px 0; border-radius: 999px; background: rgba(17, 19, 18, 0.92);
+        color: #fff; text-align: center; font-size: 29px; font-weight: 650;
+        opacity: 0; z-index: 60;
+      }
+      #s3-cap .hl { color: var(--mint); }
+
+      /* ---------- Scene 4 : library ---------- */
+      #s4-inner { position: absolute; inset: 0; padding: 90px 160px; opacity: 0; }
+      #s4-head { display: flex; align-items: baseline; gap: 24px; margin-bottom: 44px; }
+      #s4-head h2 { font-family: "Syne", sans-serif; font-size: 64px; letter-spacing: -0.03em; color: var(--ink); }
+      #s4-head span { font-size: 26px; font-weight: 550; color: var(--ink-faint); }
+      #s4-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; }
+      .card {
+        border-radius: 20px; background: #fff; overflow: hidden; opacity: 0;
+        box-shadow: 0 18px 44px rgba(17, 19, 18, 0.12), 0 0 0 1px rgba(17, 19, 18, 0.05);
+      }
+      .thumb { position: relative; height: 210px; }
+      .thumb .dur {
+        position: absolute; right: 14px; bottom: 12px; padding: 4px 12px; border-radius: 8px;
+        background: rgba(17, 19, 18, 0.82); color: #fff; font-size: 16px; font-weight: 650;
+      }
+      .thumb .pipdot {
+        position: absolute; left: 16px; bottom: 12px; width: 44px; height: 44px; border-radius: 50%;
+        background: linear-gradient(160deg, #2a3430, #1a201d);
+        box-shadow: 0 0 0 3.5px var(--brand); display: block;
+      }
+      .cardmeta { padding: 18px 20px 20px; }
+      .cardmeta b { display: block; font-size: 21px; color: var(--ink); margin-bottom: 7px; }
+      .cardmeta .sub { display: flex; gap: 14px; font-size: 16.5px; font-weight: 550; color: var(--ink-faint); }
+      .cardmeta .views { color: #1c5233; background: rgba(125, 223, 154, 0.3); padding: 1px 10px; border-radius: 999px; }
+      .t1 { background: linear-gradient(135deg, #ffd9c9, #ff8f66); }
+      .t2 { background: linear-gradient(135deg, #d7f5e0, #8fe3ac); }
+      .t3 { background: linear-gradient(135deg, #eceae3, #cfccc0); }
+      .t4 { background: linear-gradient(135deg, #ffe9df, #ffb597); }
+      .t5 { background: linear-gradient(135deg, #e2f7e9, #a9ecc0); }
+      .t6 { background: linear-gradient(135deg, #f2f1ec, #d8d5ca); }
+
+      /* ---------- Scene 5 : detail + share ---------- */
+      #s5-inner { position: absolute; inset: 0; padding: 84px 150px; display: flex; gap: 54px; opacity: 0; }
+      #s5-player {
+        position: relative; flex: 1.45; border-radius: 24px; overflow: hidden;
+        background: linear-gradient(135deg, #ffd9c9, #ff8f66);
+        box-shadow: 0 30px 70px rgba(17, 19, 18, 0.18);
+      }
+      #s5-player .playbtn {
+        position: absolute; left: 50%; top: 50%; width: 110px; height: 110px; margin: -55px 0 0 -55px;
+        border-radius: 50%; background: rgba(17, 19, 18, 0.85); display: grid; place-items: center;
+      }
+      #s5-player .playbtn i {
+        display: block; width: 0; height: 0; margin-left: 8px;
+        border-style: solid; border-width: 22px 0 22px 36px; border-color: transparent transparent transparent #fff;
+      }
+      #s5-player .pbubble {
+        position: absolute; left: 34px; bottom: 30px; width: 120px; height: 120px; border-radius: 50%;
+        background: linear-gradient(160deg, #2a3430, #1a201d);
+        box-shadow: 0 0 0 5px var(--brand), 0 14px 30px rgba(17,19,18,0.35); display: block;
+      }
+      #s5-player .scrub {
+        position: absolute; left: 34px; right: 34px; bottom: 0; height: 8px;
+        background: rgba(255, 255, 255, 0.45); border-radius: 999px; margin-bottom: 20px; overflow: hidden;
+        display: block;
+      }
+      #s5-player .scrub i { display: block; width: 100%; height: 100%; background: var(--brand); }
+      #s5-rail { flex: 1; display: flex; flex-direction: column; gap: 22px; }
+      #s5-rail h3 { font-family: "Syne", sans-serif; font-size: 46px; letter-spacing: -0.03em; color: var(--ink); line-height: 1.1; }
+      #s5-rail .meta { font-size: 22px; font-weight: 550; color: var(--ink-faint); }
+      #s5-share {
+        position: relative; display: flex; align-items: center; justify-content: center; gap: 12px;
+        padding: 20px 0; border-radius: 999px; background: var(--brand); color: #fff;
+        font-size: 24px; font-weight: 700; box-shadow: 0 14px 34px rgba(255, 94, 41, 0.35);
+      }
+      .ghostbtn {
+        display: flex; align-items: center; justify-content: center; gap: 12px;
+        padding: 18px 0; border-radius: 999px; color: var(--ink);
+        font-size: 22px; font-weight: 650; box-shadow: inset 0 0 0 2px rgba(17, 19, 18, 0.16);
+      }
+      #s5-linkchip {
+        display: flex; align-items: center; gap: 14px; padding: 18px 22px; border-radius: 16px;
+        background: #fff; box-shadow: 0 12px 30px rgba(17, 19, 18, 0.1), 0 0 0 1px rgba(17, 19, 18, 0.06);
+        font-size: 21px; font-weight: 650; color: var(--ink); opacity: 0;
+      }
+      #s5-linkchip .lk { color: var(--brand); }
+      #s5-views {
+        display: flex; align-items: center; gap: 16px; padding: 16px 22px; border-radius: 16px;
+        background: rgba(125, 223, 154, 0.25); color: #1c5233;
+        font-size: 22px; font-weight: 650; opacity: 0;
+      }
+      #s5-toast {
+        position: absolute; left: 50%; top: 44px; width: 320px; margin-left: -160px;
+        padding: 16px 0; border-radius: 999px; background: rgba(17, 19, 18, 0.92); color: #fff;
+        text-align: center; font-size: 22px; font-weight: 650; opacity: 0; z-index: 70;
+      }
+      #s5-toast .ok { color: var(--mint); }
+
+      /* ---------- Scene 6 : CTA ---------- */
+      #s6-inner {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center; gap: 30px;
+      }
+      #s6-mark { width: 150px; height: 150px; opacity: 0; }
+      #s6-title { font-size: 148px; font-weight: 800; color: var(--ink); letter-spacing: -0.045em; line-height: 1; opacity: 0; }
+      #s6-sub { font-size: 32px; font-weight: 550; color: var(--ink-soft); opacity: 0; }
+      #s6-btns { display: flex; gap: 22px; margin-top: 8px; }
+      #s6-gh, #s6-web { opacity: 0; }
+      #s6-gh {
+        padding: 24px 52px; border-radius: 999px; background: var(--brand); color: #fff;
+        font-size: 28px; font-weight: 700; box-shadow: 0 16px 40px rgba(255, 94, 41, 0.35);
+      }
+      #s6-web {
+        padding: 24px 52px; border-radius: 999px; color: var(--ink);
+        font-size: 28px; font-weight: 650; box-shadow: inset 0 0 0 2.5px rgba(17, 19, 18, 0.2);
+      }
+      #s6-urls { font-size: 25px; font-weight: 600; color: var(--ink-soft); opacity: 0; }
+      #s6-urls .u { color: var(--brand); }
+      #s6-foot { position: absolute; bottom: 54px; left: 0; width: 100%; text-align: center;
+        font-size: 22px; font-weight: 550; color: var(--ink-faint); opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="46"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- opaque stage ground for the full runtime -->
+      <div id="base-clip" class="clip" data-start="0" data-duration="46" data-track-index="0">
+        <div id="base-fill"></div>
+      </div>
+
+      <!-- ============ Scene 1 : hook ============ -->
+      <section id="s1" class="clip" data-start="0" data-duration="6.5" data-track-index="1">
+        <div id="s1-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s1-inner">
+            <div id="s1-mark" class="mark">
+              <div class="mark-screen"></div>
+              <div class="mark-pip"></div>
+              <div id="s1-mint" class="mark-dot"></div>
+            </div>
+            <h1 id="s1-title" class="display">
+              <span class="w">Record</span> <span class="w">your</span> <span class="w">tab.</span><br />
+              <span class="w accent">Face</span> <span class="w accent">included.</span>
+            </h1>
+            <p id="s1-sub"><span class="chip">Free &amp; open source</span> <span>MyPipCam — Loom-style recording, no lock-in</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Scene 2 : popup / start ============ -->
+      <section id="s2" class="clip" data-start="6" data-duration="8.5" data-track-index="2">
+        <div id="s2-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s2-browser" class="browser">
+            <div class="chrome-bar">
+              <div class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+              <div class="urlbar">acme.app/projects/checkout-redesign</div>
+              <div class="ext-slot"><div class="ext-icon"><span class="pip-mini"></span></div></div>
+            </div>
+            <div class="page">
+              <div class="ph dark" style="width: 380px; height: 44px; margin-bottom: 30px;"></div>
+              <div class="ph" style="width: 900px; height: 26px; margin-bottom: 16px;"></div>
+              <div class="ph" style="width: 760px; height: 26px; margin-bottom: 42px;"></div>
+              <div style="display: flex; gap: 28px;">
+                <div class="ph" style="flex: 1; height: 340px;"></div>
+                <div class="ph dark" style="flex: 1; height: 340px;"></div>
+                <div class="ph" style="flex: 1; height: 340px;"></div>
+              </div>
+              <div id="s2-popupripple" class="ripple" style="right: 0px; top: -40px; width: 70px; height: 70px;"></div>
+              <div id="s2-popup">
+                <div class="popup-head"><span class="pip-mini2"><i></i></span><b>MyPipCam</b></div>
+                <div class="modes">
+                  <div class="mode on">Tab + Cam</div>
+                  <div class="mode">Tab only</div>
+                  <div class="mode">Cam only</div>
+                </div>
+                <div class="rowline">
+                  <span class="lbl"><span class="ico">🎥</span> Camera</span>
+                  <span id="s2-sw1" class="switch"><span id="s2-knob1" class="knob"></span></span>
+                </div>
+                <div class="rowline">
+                  <span class="lbl"><span class="ico">🎙️</span> Microphone</span>
+                  <span id="s2-sw2" class="switch"><span id="s2-knob2" class="knob"></span></span>
+                </div>
+                <div id="s2-start">Start recording</div>
+                <div id="s2-startring"></div>
+              </div>
+            </div>
+          </div>
+          <p id="s2-cap">Click the extension → pick <span class="hl">Tab&nbsp;+&nbsp;Cam</span> → Start recording</p>
+          <div id="s2-cursor" class="cursor">
+            <svg viewBox="0 0 24 24"><path d="M5 2 L19 13 L12.6 13.8 L16 21 L13 22.3 L9.6 15.2 L5 19 Z" fill="#fff" stroke="#111312" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Scene 3 : countdown + PiP bubble ============ -->
+      <section id="s3" class="clip" data-start="14" data-duration="9.5" data-track-index="1">
+        <div id="s3-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s3-browser" class="browser">
+            <div class="chrome-bar">
+              <div class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+              <div class="urlbar">acme.app/projects/checkout-redesign</div>
+              <div class="ext-slot"><div class="ext-icon"><span class="pip-mini"></span></div></div>
+            </div>
+            <div class="page">
+              <div class="ph dark" style="width: 380px; height: 44px; margin-bottom: 30px;"></div>
+              <div class="ph" style="width: 900px; height: 26px; margin-bottom: 16px;"></div>
+              <div class="ph" style="width: 760px; height: 26px; margin-bottom: 42px;"></div>
+              <div style="display: flex; gap: 28px;">
+                <div class="ph" style="flex: 1; height: 340px;"></div>
+                <div class="ph dark" style="flex: 1; height: 340px;"></div>
+                <div class="ph" style="flex: 1; height: 340px;"></div>
+              </div>
+              <div id="s3-c3" class="count">3</div>
+              <div id="s3-c2" class="count">2</div>
+              <div id="s3-c1" class="count">1</div>
+              <div id="s3-bubble"><span class="head"></span><span class="body"></span></div>
+              <div id="s3-dock">
+                <span class="rec"><i id="s3-recdot"></i></span>
+                <span class="t">00:12</span>
+                <span class="db stop"><i></i></span>
+                <span class="db">⏸</span>
+                <span class="db">🗑</span>
+              </div>
+            </div>
+          </div>
+          <p id="s3-cap">A live camera bubble on your page — <span class="hl">controls are never baked into your video</span></p>
+        </div>
+      </section>
+
+      <!-- ============ Scene 4 : library ============ -->
+      <section id="s4" class="clip" data-start="23" data-duration="7.5" data-track-index="2">
+        <div id="s4-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s4-inner">
+            <div id="s4-head"><h2>Library</h2><span>Every recording, saved locally — yours.</span></div>
+            <div id="s4-grid">
+              <div id="s4-card1" class="card">
+                <div class="thumb t1"><span class="pipdot"></span><span class="dur">2:41</span></div>
+                <div class="cardmeta"><b>Sprint demo — checkout flow</b>
+                  <div class="sub"><span>Today</span><span class="views">👁 12 views</span></div></div>
+              </div>
+              <div class="card s4c">
+                <div class="thumb t2"><span class="pipdot"></span><span class="dur">1:08</span></div>
+                <div class="cardmeta"><b>Onboarding walkthrough</b>
+                  <div class="sub"><span>Yesterday</span><span class="views">👁 34 views</span></div></div>
+              </div>
+              <div class="card s4c">
+                <div class="thumb t3"><span class="pipdot"></span><span class="dur">0:47</span></div>
+                <div class="cardmeta"><b>Bug repro: cart badge</b>
+                  <div class="sub"><span>Yesterday</span><span>Drive ✓</span></div></div>
+              </div>
+              <div class="card s4c">
+                <div class="thumb t4"><span class="pipdot"></span><span class="dur">3:15</span></div>
+                <div class="cardmeta"><b>Client feedback loop</b>
+                  <div class="sub"><span>Mon</span><span class="views">👁 8 views</span></div></div>
+              </div>
+              <div class="card s4c">
+                <div class="thumb t5"><span class="pipdot"></span><span class="dur">1:52</span></div>
+                <div class="cardmeta"><b>API docs tour</b>
+                  <div class="sub"><span>Mon</span><span>Drive ✓</span></div></div>
+              </div>
+              <div class="card s4c">
+                <div class="thumb t6"><span class="pipdot"></span><span class="dur">0:31</span></div>
+                <div class="cardmeta"><b>Standup async update</b>
+                  <div class="sub"><span>Last week</span><span>Local</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div id="s4-cursor" class="cursor">
+            <svg viewBox="0 0 24 24"><path d="M5 2 L19 13 L12.6 13.8 L16 21 L13 22.3 L9.6 15.2 L5 19 Z" fill="#fff" stroke="#111312" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Scene 5 : share + views ============ -->
+      <section id="s5" class="clip" data-start="30" data-duration="8.5" data-track-index="1">
+        <div id="s5-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s5-inner">
+            <div id="s5-player">
+              <span class="playbtn"><i></i></span>
+              <span class="pbubble"></span>
+              <span class="scrub"><i></i></span>
+            </div>
+            <div id="s5-rail">
+              <h3 class="display">Sprint demo — checkout flow</h3>
+              <div class="meta">2:41 · recorded today · saved to your library</div>
+              <div id="s5-share">🔗 Share</div>
+              <div id="s5-linkchip"><span>🔗</span><span class="lk">mypipcam.earnyour.com/w/9fk2q</span></div>
+              <div id="s5-views"><span>👁</span><span><b>12 views</b> · last viewed 2 min ago · link expires in 30 days</span></div>
+              <div class="ghostbtn">⬇ Download</div>
+              <div class="ghostbtn">✂ Open editor</div>
+            </div>
+          </div>
+          <div id="s5-toast">Link copied <span class="ok">✓</span></div>
+          <div id="s5-shareripple" class="ripple"></div>
+          <div id="s5-cursor" class="cursor">
+            <svg viewBox="0 0 24 24"><path d="M5 2 L19 13 L12.6 13.8 L16 21 L13 22.3 L9.6 15.2 L5 19 Z" fill="#fff" stroke="#111312" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Scene 6 : CTA ============ -->
+      <section id="s6" class="clip" data-start="38" data-duration="8" data-track-index="2">
+        <div id="s6-wrap" class="wrap">
+          <div class="stage"></div>
+          <div id="s6-inner">
+            <div id="s6-mark" class="mark">
+              <div class="mark-screen"></div>
+              <div class="mark-pip"></div>
+              <div class="mark-dot"></div>
+            </div>
+            <h1 id="s6-title" class="display">MyPipCam</h1>
+            <p id="s6-sub">Free · Open source · Local-first · Optional Drive sync</p>
+            <div id="s6-btns">
+              <div id="s6-gh">Get it on GitHub</div>
+              <div id="s6-web">Install free</div>
+            </div>
+            <p id="s6-urls"><span class="u">github.com/swmartinezdot33/MyPipCam</span> &nbsp;·&nbsp; mypipcam.earnyour.com</p>
+          </div>
+          <p id="s6-foot">By EarnYour Marketing · MIT licensed · Not affiliated with Loom</p>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* ================= Scene 1 : hook (0 – 6.5) ================= */
+      tl.fromTo("#s1-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 0);
+      tl.fromTo("#s1-mark", { opacity: 0, scale: 0.7, y: 30 }, { opacity: 1, scale: 1, y: 0, duration: 0.7, ease: "back.out(1.6)" }, 0.3);
+      tl.fromTo("#s1-title .w", { opacity: 0, y: 46 }, { opacity: 1, y: 0, duration: 0.65, stagger: 0.09, ease: "power3.out" }, 0.7);
+      tl.fromTo("#s1-sub", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 1.5);
+      tl.to("#s1-mint", { scale: 1.5, duration: 0.45, ease: "sine.inOut", repeat: 5, yoyo: true }, 1.2);
+      tl.to("#s1-inner", { scale: 1.04, duration: 4.0, ease: "sine.inOut" }, 2.2);
+      tl.to("#s1-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 6.0);
+
+      /* ================= Scene 2 : popup / start (6 – 14.5) ================= */
+      tl.fromTo("#s2-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 6.0);
+      tl.fromTo("#s2-browser", { opacity: 0, y: 60, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "power3.out" }, 6.4);
+      // cursor flies to the extension icon (icon sits ~ top right of browser)
+      tl.fromTo("#s2-cursor", { x: 1500, y: 1010 }, { x: 1580, y: 155, duration: 0.9, ease: "power2.inOut" }, 7.2);
+      tl.to("#s2-cursor", { scale: 0.85, duration: 0.12, ease: "power1.in" }, 8.15);
+      tl.to("#s2-cursor", { scale: 1, duration: 0.16, ease: "power1.out" }, 8.27);
+      tl.fromTo("#s2-popupripple", { opacity: 0.6, scale: 0.3 }, { opacity: 0, scale: 2.0, duration: 0.55, ease: "power1.out" }, 8.15);
+      // popup drops
+      tl.fromTo("#s2-popup", { opacity: 0, y: -18, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" }, 8.4);
+      // toggles flick on
+      tl.to("#s2-knob1", { x: 22, duration: 0.25, ease: "power2.out" }, 9.2);
+      tl.to("#s2-sw1", { backgroundColor: "#ff5e29", duration: 0.25 }, 9.2);
+      tl.to("#s2-knob2", { x: 22, duration: 0.25, ease: "power2.out" }, 9.55);
+      tl.to("#s2-sw2", { backgroundColor: "#ff5e29", duration: 0.25 }, 9.55);
+      tl.fromTo("#s2-cap", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 9.9);
+      // cursor moves down to Start recording
+      tl.to("#s2-cursor", { x: 1445, y: 700, duration: 0.85, ease: "power2.inOut" }, 10.6);
+      tl.to("#s2-cursor", { scale: 0.85, duration: 0.12, ease: "power1.in" }, 11.55);
+      tl.to("#s2-cursor", { scale: 1, duration: 0.16, ease: "power1.out" }, 11.67);
+      tl.fromTo("#s2-startring", { opacity: 0.7, scale: 0.4 }, { opacity: 0, scale: 2.4, duration: 0.6, ease: "power1.out" }, 11.55);
+      tl.to("#s2-start", { scale: 0.96, duration: 0.12, ease: "power1.in" }, 11.55);
+      tl.to("#s2-start", { scale: 1, duration: 0.2, ease: "power1.out" }, 11.67);
+      // gentle push-in on the browser as we head to the countdown
+      tl.to("#s2-browser", { scale: 1.03, y: -10, duration: 1.9, ease: "sine.inOut" }, 12.1);
+      tl.to("#s2-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 14.0);
+
+      /* ================= Scene 3 : countdown + PiP (14 – 23.5) ================= */
+      tl.fromTo("#s3-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 14.0);
+      // countdown 3 → 2 → 1
+      tl.fromTo("#s3-c3", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, 14.7);
+      tl.to("#s3-c3", { opacity: 0, scale: 1.2, duration: 0.24, ease: "power1.in" }, 15.35);
+      tl.fromTo("#s3-c2", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, 15.7);
+      tl.to("#s3-c2", { opacity: 0, scale: 1.2, duration: 0.24, ease: "power1.in" }, 16.35);
+      tl.fromTo("#s3-c1", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, 16.7);
+      tl.to("#s3-c1", { opacity: 0, scale: 1.2, duration: 0.24, ease: "power1.in" }, 17.35);
+      // PiP bubble pops in and gets dragged across the page
+      tl.fromTo("#s3-bubble", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.8)" }, 17.7);
+      tl.fromTo("#s3-dock", { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: 0.55, ease: "power3.out" }, 18.0);
+      tl.to("#s3-recdot", { scale: 0.55, duration: 0.5, ease: "sine.inOut", repeat: 7, yoyo: true }, 18.2);
+      tl.to("#s3-bubble", { x: 560, y: -230, rotation: 3, duration: 1.5, ease: "power2.inOut" }, 19.0);
+      tl.to("#s3-bubble", { x: 430, y: -40, rotation: 0, duration: 1.1, ease: "power2.inOut" }, 20.7);
+      tl.fromTo("#s3-cap", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 20.4);
+      tl.to("#s3-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 23.0);
+
+      /* ================= Scene 4 : library (23 – 30.5) ================= */
+      tl.fromTo("#s4-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 23.0);
+      tl.fromTo("#s4-inner", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 23.35);
+      tl.fromTo("#s4-card1", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 23.7);
+      tl.fromTo(".s4c", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.55, stagger: 0.09, ease: "power3.out" }, 23.85);
+      tl.fromTo("#s4-cursor", { x: 1560, y: 1030 }, { x: 470, y: 430, duration: 1.0, ease: "power2.inOut" }, 25.6);
+      tl.to("#s4-cursor", { scale: 0.85, duration: 0.12, ease: "power1.in" }, 26.7);
+      tl.to("#s4-cursor", { scale: 1, duration: 0.16, ease: "power1.out" }, 26.82);
+      tl.to("#s4-card1", { scale: 1.04, y: -8, duration: 0.45, ease: "power2.out" }, 26.8);
+      tl.to("#s4-grid", { scale: 1.06, y: 14, duration: 2.6, ease: "sine.inOut" }, 27.4);
+      tl.to("#s4-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 30.0);
+
+      /* ================= Scene 5 : share + views (30 – 38.5) ================= */
+      tl.fromTo("#s5-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 30.0);
+      tl.fromTo("#s5-inner", { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: 0.65, ease: "power3.out" }, 30.35);
+      tl.fromTo("#s5-cursor", { x: 1700, y: 1030 }, { x: 1385, y: 505, duration: 0.9, ease: "power2.inOut" }, 31.5);
+      tl.to("#s5-cursor", { scale: 0.85, duration: 0.12, ease: "power1.in" }, 32.5);
+      tl.to("#s5-cursor", { scale: 1, duration: 0.16, ease: "power1.out" }, 32.62);
+      tl.fromTo("#s5-shareripple", { opacity: 0.6, scale: 0.3, x: 1350, y: 470 }, { opacity: 0, scale: 1.8, x: 1350, y: 470, duration: 0.55, ease: "power1.out" }, 32.5);
+      tl.to("#s5-share", { scale: 0.97, duration: 0.12, ease: "power1.in" }, 32.5);
+      tl.to("#s5-share", { scale: 1, duration: 0.18, ease: "power1.out" }, 32.62);
+      tl.fromTo("#s5-toast", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.45, ease: "back.out(1.6)" }, 32.85);
+      tl.fromTo("#s5-linkchip", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 33.1);
+      tl.fromTo("#s5-views", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 34.0);
+      tl.to("#s5-views", { backgroundColor: "rgba(125, 223, 154, 0.6)", duration: 0.35, ease: "sine.inOut", repeat: 1, yoyo: true }, 34.6);
+      tl.to("#s5-toast", { opacity: 0, y: -18, duration: 0.4, ease: "power1.in" }, 35.4);
+      tl.to("#s5-player", { scale: 1.02, duration: 2.4, ease: "sine.inOut" }, 35.4);
+      tl.to("#s5-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 38.0);
+
+      /* ================= Scene 6 : CTA (38 – 46) ================= */
+      tl.fromTo("#s6-wrap", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 38.0);
+      tl.fromTo("#s6-mark", { opacity: 0, scale: 0.7, y: 26 }, { opacity: 1, scale: 1, y: 0, duration: 0.65, ease: "back.out(1.6)" }, 38.4);
+      tl.fromTo("#s6-title", { opacity: 0, y: 46 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 38.7);
+      tl.fromTo("#s6-sub", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 39.15);
+      tl.fromTo("#s6-gh", { opacity: 0, y: 30, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "back.out(1.5)" }, 39.5);
+      tl.fromTo("#s6-web", { opacity: 0, y: 30, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "back.out(1.5)" }, 39.68);
+      tl.fromTo("#s6-urls", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 40.2);
+      tl.fromTo("#s6-foot", { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power1.out" }, 40.8);
+      tl.to("#s6-gh", { scale: 1.06, duration: 0.55, ease: "sine.inOut", repeat: 3, yoyo: true }, 41.6);
+      tl.to("#s6-inner", { scale: 1.03, duration: 4.2, ease: "sine.inOut" }, 41.6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

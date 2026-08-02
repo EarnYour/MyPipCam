@@ -420,6 +420,147 @@ a:hover {
   color: var(--brand);
 }
 
+/* Promo video */
+.section--video .section__inner {
+  max-width: 58rem;
+}
+
+.promo-video {
+  border-radius: calc(var(--radius) + 6px);
+  overflow: hidden;
+  background: var(--ink);
+  box-shadow:
+    0 30px 70px rgba(17, 19, 18, 0.22),
+    0 0 0 1px rgba(17, 19, 18, 0.06);
+}
+
+.promo-video video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* Screenshot gallery */
+.shot-grid {
+  display: grid;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 820px) {
+  .shot-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.shot {
+  margin: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 18px 44px rgba(17, 19, 18, 0.1),
+    0 0 0 1px rgba(17, 19, 18, 0.05);
+}
+
+.shot img {
+  width: 100%;
+  height: auto;
+  background: var(--cream-deep);
+}
+
+.shot--tall img {
+  object-fit: contain;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(255, 94, 41, 0.08), transparent 60%),
+    var(--cream-deep);
+}
+
+.shot figcaption {
+  padding: 1rem 1.25rem 1.15rem;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+  border-top: 1px solid rgba(17, 19, 18, 0.06);
+}
+
+.shot figcaption strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.shot figcaption code {
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  background: rgba(17, 19, 18, 0.06);
+}
+
+/* Install steps */
+.install-steps {
+  list-style: none;
+  margin: 0 0 1.75rem;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+  counter-reset: none;
+}
+
+@media (min-width: 860px) {
+  .install-steps {
+    grid-template-columns: 1.25fr 1fr 1fr;
+  }
+}
+
+.install-steps li {
+  padding: 1.25rem 1.35rem 1.35rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0 0 1px rgba(17, 19, 18, 0.07);
+}
+
+.install-steps strong {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  letter-spacing: -0.02em;
+}
+
+.install-steps p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+.install-steps pre {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #e8f5ec;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.install-steps pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: none;
+  padding: 0;
+}
+
+.install-steps code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  background: rgba(17, 19, 18, 0.06);
+}
+
 /* Legal pages */
 .legal-hero {
   padding: clamp(2.5rem, 6vw, 3.75rem) 0 1.25rem;
