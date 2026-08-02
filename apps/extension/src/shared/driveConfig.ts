@@ -1,23 +1,25 @@
 /**
  * Google OAuth client ID for chrome.identity.
  *
- * Client IDs are public in extensions; there is no client secret for the
- * Chrome-extension OAuth flow — never paste one here.
+ * Set via `VITE_GOOGLE_OAUTH_CLIENT_ID` in `apps/extension/.env.local` (gitignored).
+ * See `.env.example`. Never commit a client_secret — Chrome-extension OAuth has none.
  *
  * Stable extension ID (when dist manifest includes `key`):
  *   akpchobfndfddajiihkkdpnihihdicjc
  * Use that as the Google Cloud OAuth client Item ID — not the product website.
  *
- * If chrome://extensions shows a different ID (e.g. okpchcbnnbdssajmkophnfnklgjcsncl),
- * you loaded unpacked without the manifest `key`. Either:
- *   - Reload from a build whose dist/manifest.json includes `key`, OR
- *   - Set the OAuth client Item ID to the ID currently shown on chrome://extensions.
- *
- * Consent screen (not the client Application ID): home/privacy/terms at
- * https://mypipcam.earnyour.com (authorized domain: earnyour.com).
+ * Consent screen URLs: https://mypipcam.earnyour.com (authorized domain: earnyour.com).
  */
+const fromEnv =
+  typeof import.meta !== 'undefined' &&
+  typeof import.meta.env?.VITE_GOOGLE_OAUTH_CLIENT_ID === 'string'
+    ? import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID.trim()
+    : ''
+
 export const GOOGLE_OAUTH_CLIENT_ID =
-  'YOUR_CLIENT_ID.apps.googleusercontent.com'
+  fromEnv && !fromEnv.startsWith('YOUR_CLIENT_ID')
+    ? fromEnv
+    : 'YOUR_CLIENT_ID.apps.googleusercontent.com'
 
 /**
  * Extension ID when `manifest.key` is present (packed / dist build).

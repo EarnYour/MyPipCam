@@ -2,18 +2,27 @@ import { randomBytes } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 
 /**
- * Server-side Supabase client (anon key + RLS).
- * Env: SUPABASE_URL, SUPABASE_ANON_KEY
+ * Server-side Supabase client.
+ * Prefer SUPABASE_SERVICE_ROLE_KEY (bypasses RLS; never ship to the browser).
+ * Falls back to SUPABASE_ANON_KEY only if service role is unset (dev).
+ *
+ * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (required in production)
  */
 export function getSupabase() {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
   if (!url || !key) {
     const err = new Error(
-      'Missing SUPABASE_URL or SUPABASE_ANON_KEY. Set them in Vercel project env.',
+      'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Set them in Vercel project env (never commit service_role).',
     )
     err.statusCode = 503
     throw err
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.VERCEL) {
+    console.warn(
+      '[mypipcam] SUPABASE_SERVICE_ROLE_KEY unset on Vercel — using anon key; configure service_role for locked-down RLS.',
+    )
   }
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },

@@ -138,18 +138,17 @@ Then **Reload** the extension on `chrome://extensions`.
 | Supabase tables | `mypipcam_shares`, `mypipcam_views` (see `apps/web/.env.example`) |
 | Extension Library | Creates share via `POST /api/shares`, copies watch URL, refreshes stats |
 
-**Vercel env vars** (project `mypipcam`, Production + Preview):
+**Vercel env vars** (project `mypipcam`, Production + Preview) — server-only, never commit:
 
 ```bash
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-SUPABASE_ANON_KEY=<anon key from Supabase dashboard>
+SUPABASE_SERVICE_ROLE_KEY=<service_role from Supabase → Settings → API>
 ```
 
-Deploy from `apps/web`:
+Deploy from the monorepo root (Vercel root directory is `apps/web`):
 
 ```bash
-cd apps/web
-npm install
+cd /path/to/MyPipCam
 vercel --prod
 ```
 
@@ -160,9 +159,14 @@ vercel --prod
 3. On computer B: open Library → Connect Google (if needed) → recordings uploaded from A appear (play downloads from Drive).
 4. Local disk library and Mac app stay independent; Drive does not replace them.
 
-### Blocker
+### Google OAuth client ID (extension)
 
-**You must paste a real OAuth client ID** into `driveConfig.ts` before Connect Google works. The placeholder `YOUR_CLIENT_ID.apps.googleusercontent.com` will not authenticate.
+Connect Google needs a **Chrome-extension** OAuth client ID (no client secret).
+
+1. Copy [`apps/extension/.env.example`](apps/extension/.env.example) → `apps/extension/.env.local` (gitignored).
+2. Set `VITE_GOOGLE_OAUTH_CLIENT_ID=….apps.googleusercontent.com`.
+3. Google Cloud → Item ID must match the extension ID (`akpchobfndfddajiihkkdpnihihdicjc` when built with the manifest `key`).
+4. `npm run build` and reload the unpacked extension.
 
 ---
 
@@ -249,7 +253,7 @@ That builds a signed **Release** `.app`, copies it to `/Applications/MyPipCam.ap
 ### Setup (Xcode debug)
 
 1. Open `apps/macos/MyPipCam.xcodeproj` in Xcode
-2. Under **Signing & Capabilities**, pick your **Team** (Apple Development). The project is set to team `977CN6XFAH` when that identity is available — keep a Team selected so Camera permission survives rebuilds.
+2. Under **Signing & Capabilities**, pick **your** Apple Development Team (replace the sample team ID in the Xcode project if you are forking). Keep a Team selected so Camera permission survives rebuilds.
 3. Press **Run** (⌘R)
 4. Allow camera access when prompted (once). Camera choice and appearance settings are remembered across launches.
 5. Open the mic menu (toolbar mic icon or right-click → **Microphone**) and allow microphone access if prompted — selection is remembered for next launch. The bubble itself does not capture audio; pick the same mic in OBS (or use the Chrome extension recorder) for the final mix.
