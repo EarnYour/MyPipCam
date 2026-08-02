@@ -118,6 +118,10 @@ final class BubbleSettings: ObservableObject {
     @AppStorage("bubbleSize") var bubbleSize: Double = 220 {
         didSet { objectWillChange.send() }
     }
+    /// When true, the floating bubble is 16:9 and sized to ~80% of the screen.
+    @AppStorage("useWidescreen") var useWidescreen: Bool = false {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("bubbleShape") var bubbleShapeRaw: String = BubbleShape.circle.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -174,9 +178,54 @@ final class BubbleSettings: ObservableObject {
         set { bubbleShapeRaw = newValue.rawValue }
     }
 
-    /// Corner radius for the square bubble mask (points).
+    /// Fraction of the screen’s visible frame used by Widescreen 16:9.
+    static let widescreenScreenFraction: CGFloat = 0.80
+    static let widescreenAspect: CGFloat = 16.0 / 9.0
+
+    /// Corner radius for the square / rounded-rect bubble mask (points).
     func squareCornerRadius(for size: CGFloat) -> CGFloat {
         size * BubbleShape.squareCornerFraction
+    }
+
+    /// Corner radius based on the shorter edge (keeps proportions on 16:9).
+    func cornerRadius(for contentSize: CGSize) -> CGFloat {
+        min(contentSize.width, contentSize.height) * BubbleShape.squareCornerFraction
+    }
+
+    /// Content size for the camera bubble (excludes shadow padding).
+    func contentSize(on screen: NSScreen? = NSScreen.main) -> CGSize {
+        if useWidescreen {
+            return Self.widescreenContentSize(on: screen)
+        }
+        let side = CGFloat(bubbleSize)
+        return CGSize(width: side, height: side)
+    }
+
+    /// Largest 16:9 rect that fits in ~80% of the screen’s visible frame.
+    static func widescreenContentSize(on screen: NSScreen? = NSScreen.main) -> CGSize {
+        let visible = screen?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let maxWidth = visible.width * widescreenScreenFraction
+        let maxHeight = visible.height * widescreenScreenFraction
+        let aspect = widescreenAspect
+        if maxWidth / maxHeight > aspect {
+            let height = maxHeight
+            return CGSize(width: height * aspect, height: height)
+        }
+        let width = maxWidth
+        return CGSize(width: width, height: width / aspect)
+    }
+
+    /// Square / circle presets (Small…XL). Clears widescreen mode.
+    func applySquareSize(_ size: Double) {
+        useWidescreen = false
+        bubbleSize = size
+    }
+
+    /// 16:9 at ~80% of the screen. Uses a rounded rectangle shape.
+    func applyWidescreen() {
+        bubbleShape = .square
+        useWidescreen = true
     }
 
     var resolvedBorderColor: Color {

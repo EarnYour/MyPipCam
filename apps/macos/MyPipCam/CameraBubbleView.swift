@@ -15,35 +15,38 @@ struct CameraBubbleView: View {
     /// Extra space around the bubble so the soft circular shadow isn't clipped.
     static let shadowPadding: CGFloat = 48
 
-    private var bubbleSize: CGFloat {
-        CGFloat(settings.bubbleSize)
+    private var contentSize: CGSize {
+        settings.contentSize()
     }
 
+    private var bubbleWidth: CGFloat { contentSize.width }
+    private var bubbleHeight: CGFloat { contentSize.height }
+
     private var squareCornerRadius: CGFloat {
-        settings.squareCornerRadius(for: bubbleSize)
+        settings.cornerRadius(for: contentSize)
     }
 
     var body: some View {
         ZStack {
             bubble
-                .frame(width: bubbleSize, height: bubbleSize)
+                .frame(width: bubbleWidth, height: bubbleHeight)
 
             if showControls {
                 controlsBar
-                    .offset(y: bubbleSize * 0.34)
+                    .offset(y: bubbleHeight * 0.34)
                     .transition(.opacity)
             } else if isHovered {
                 dotsButton
                     // Near the bottom edge of the circle — subtle, hover-only.
-                    .offset(y: bubbleSize * 0.42)
+                    .offset(y: bubbleHeight * 0.42)
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.18), value: showControls)
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .frame(
-            width: bubbleSize + Self.shadowPadding,
-            height: bubbleSize + Self.shadowPadding
+            width: bubbleWidth + Self.shadowPadding,
+            height: bubbleHeight + Self.shadowPadding
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -110,7 +113,7 @@ struct CameraBubbleView: View {
                     placeholder
                 }
             }
-            .frame(width: bubbleSize, height: bubbleSize)
+            .frame(width: bubbleWidth, height: bubbleHeight)
             .modifier(BubbleClipModifier(shape: settings.bubbleShape, cornerRadius: squareCornerRadius))
 
             if settings.effectiveBorderWidth > 0 {
@@ -141,7 +144,7 @@ struct CameraBubbleView: View {
                     .fill(Color.black.opacity(opacity))
             }
         }
-        .frame(width: bubbleSize * scale, height: bubbleSize * scale)
+        .frame(width: bubbleWidth * scale, height: bubbleHeight * scale)
         .blur(radius: blur)
         .offset(y: y)
     }
@@ -357,10 +360,20 @@ struct CameraBubbleView: View {
         }
 
         Menu("Size") {
-            Button("Small") { settings.bubbleSize = 160 }
-            Button("Medium") { settings.bubbleSize = 220 }
-            Button("Large") { settings.bubbleSize = 300 }
-            Button("XL") { settings.bubbleSize = 380 }
+            sizeMenuButton("Small", squareSize: 160)
+            sizeMenuButton("Medium", squareSize: 220)
+            sizeMenuButton("Large", squareSize: 300)
+            sizeMenuButton("XL", squareSize: 380)
+            Divider()
+            Button {
+                settings.applyWidescreen()
+            } label: {
+                if settings.useWidescreen {
+                    Label("Widescreen 16:9", systemImage: "checkmark")
+                } else {
+                    Text("Widescreen 16:9")
+                }
+            }
         }
 
         Toggle("Mirror Camera", isOn: $settings.mirrorCamera)
@@ -405,6 +418,20 @@ struct CameraBubbleView: View {
             get: { loginItem.isEnabled },
             set: { loginItem.setEnabled($0) }
         )
+    }
+
+    @ViewBuilder
+    private func sizeMenuButton(_ title: String, squareSize: Double) -> some View {
+        let selected = !settings.useWidescreen && abs(settings.bubbleSize - squareSize) < 0.5
+        Button {
+            settings.applySquareSize(squareSize)
+        } label: {
+            if selected {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }
 
