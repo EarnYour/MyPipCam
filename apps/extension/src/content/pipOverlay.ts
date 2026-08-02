@@ -29,78 +29,128 @@ type BubbleState = {
   phase: 'countdown' | 'recording' | 'paused'
 }
 
-const ROOT_ID = 'mypipcam-tab-overlay-root'
+const HOST_ID = 'mypipcam-tab-overlay-root'
 const SIZE_MIN = 0.1
 const SIZE_MAX = 0.35
-const STYLE_ID = 'mypipcam-tab-overlay-style'
 const PIP_PAGE = 'src/pip/index.html'
 const COUNTDOWN_FROM = 3
 const SQUARE_RADIUS = '16%'
+/** Floor so the bubble never collapses to an invisible speck. */
+const BUBBLE_MIN_PX = 96
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
 }
 
-function ensureStyles() {
-  if (document.getElementById(STYLE_ID)) return
-  const style = document.createElement('style')
-  style.id = STYLE_ID
-  style.textContent = `
-    #${ROOT_ID} {
-      all: initial;
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 2147483647;
-      pointer-events: none;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+type OverlayMount = {
+  host: HTMLElement
+  /** Shadow container — page CSS cannot style descendants. */
+  layer: HTMLDivElement
+  shadow: ShadowRoot
+}
+
+let overlayMount: OverlayMount | null = null
+let hostReattachObserver: MutationObserver | null = null
+
+function overlayStyles(): string {
+  return `
+    :host {
+      all: initial !important;
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      overflow: visible !important;
+      background: transparent !important;
+      color-scheme: normal !important;
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      pointer-events: none !important;
+      z-index: 2147483647 !important;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
     }
-    #${ROOT_ID} * { box-sizing: border-box; }
+    /* Popover UA stylesheet uses fit-content + margin:auto — force full viewport. */
+    :host([popover]) {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      overflow: visible !important;
+      background: transparent !important;
+    }
+    * { box-sizing: border-box; }
+
+    .mpc-layer {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      pointer-events: none !important;
+      z-index: 2147483647 !important;
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+    }
 
     /* —— Circular camera bubble (Loom) —— */
-    #${ROOT_ID} .mpc-bubble {
-      position: fixed;
+    .mpc-bubble {
+      position: fixed !important;
       border-radius: 50%;
       overflow: visible;
-      pointer-events: auto;
+      pointer-events: auto !important;
       cursor: grab;
       touch-action: none;
-      z-index: 2147483647;
+      z-index: 2147483647 !important;
       user-select: none;
       -webkit-user-select: none;
-      border: 2px solid #fff;
-      background: #111312;
+      border: 3px solid #fff;
+      background: #111312 !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      min-width: ${BUBBLE_MIN_PX}px !important;
+      min-height: ${BUBBLE_MIN_PX}px !important;
       box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
     }
-    #${ROOT_ID} .mpc-bubble.is-square {
+    .mpc-bubble.is-square {
       border-radius: ${SQUARE_RADIUS};
     }
-    #${ROOT_ID} .mpc-bubble.is-dragging { cursor: grabbing; }
-    #${ROOT_ID} .mpc-bubble.is-hidden { display: none !important; }
+    .mpc-bubble.is-dragging { cursor: grabbing; }
+    .mpc-bubble.is-hidden { display: none !important; }
 
-    #${ROOT_ID} .mpc-bubble-clip {
+    .mpc-bubble-clip {
       position: absolute;
       inset: 0;
       border-radius: 50%;
       overflow: hidden;
       pointer-events: none;
+      background: #111;
     }
-    #${ROOT_ID} .mpc-bubble.is-square .mpc-bubble-clip {
+    .mpc-bubble.is-square .mpc-bubble-clip {
       border-radius: ${SQUARE_RADIUS};
     }
 
-    #${ROOT_ID} .mpc-cam-frame {
+    .mpc-cam-frame {
       width: 100%;
       height: 100%;
       border: 0;
-      display: block;
+      display: block !important;
       pointer-events: none !important;
       background: #111;
     }
 
     /* Transparent drag hit-target above the iframe so drag never dies */
-    #${ROOT_ID} .mpc-drag-surface {
+    .mpc-drag-surface {
       position: absolute;
       inset: 0;
       border-radius: 50%;
@@ -109,11 +159,11 @@ function ensureStyles() {
       cursor: inherit;
       background: transparent;
     }
-    #${ROOT_ID} .mpc-bubble.is-square .mpc-drag-surface {
+    .mpc-bubble.is-square .mpc-drag-surface {
       border-radius: ${SQUARE_RADIUS};
     }
 
-    #${ROOT_ID} .mpc-menu-btn {
+    .mpc-menu-btn {
       position: absolute;
       left: 50%;
       bottom: 8%;
@@ -135,9 +185,9 @@ function ensureStyles() {
       place-items: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.35);
     }
-    #${ROOT_ID} .mpc-menu-btn:hover { background: rgba(40,40,44,0.9); }
+    .mpc-menu-btn:hover { background: rgba(40,40,44,0.9); }
 
-    #${ROOT_ID} .mpc-menu {
+    .mpc-menu {
       position: absolute;
       left: 50%;
       bottom: calc(8% + 28px);
@@ -154,8 +204,8 @@ function ensureStyles() {
       box-shadow: 0 10px 28px rgba(0,0,0,0.4);
       min-width: 108px;
     }
-    #${ROOT_ID} .mpc-menu.is-open { display: flex; }
-    #${ROOT_ID} .mpc-menu button {
+    .mpc-menu.is-open { display: flex; }
+    .mpc-menu button {
       all: unset;
       cursor: pointer;
       font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
@@ -164,35 +214,36 @@ function ensureStyles() {
       border-radius: 8px;
       text-align: center;
     }
-    #${ROOT_ID} .mpc-menu button:hover { background: rgba(255,255,255,0.1); }
+    .mpc-menu button:hover { background: rgba(255,255,255,0.1); }
 
     /* —— Left vertical dock (Loom) —— */
-    #${ROOT_ID} .mpc-dock {
-      position: fixed;
-      left: 12px;
-      top: 50%;
+    .mpc-dock {
+      position: fixed !important;
+      left: 12px !important;
+      top: 50% !important;
       transform: translateY(-50%);
-      z-index: 2147483647;
-      pointer-events: auto;
-      display: flex;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
+      display: flex !important;
       flex-direction: column;
       align-items: stretch;
       width: 52px;
+      min-height: 120px;
       padding: 0;
       border-radius: 999px;
       overflow: hidden;
-      background: #111312;
+      background: #111312 !important;
       box-shadow: 0 10px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06);
       opacity: 0;
       visibility: hidden;
       transition: opacity 0.18s ease;
     }
-    #${ROOT_ID} .mpc-dock.is-visible {
-      opacity: 1;
-      visibility: visible;
+    .mpc-dock.is-visible {
+      opacity: 1 !important;
+      visibility: visible !important;
     }
 
-    #${ROOT_ID} .mpc-dock-timer {
+    .mpc-dock-timer {
       background: #ff5e29;
       color: #fff;
       font: 700 12px/1 ui-sans-serif, system-ui, sans-serif;
@@ -202,7 +253,7 @@ function ensureStyles() {
       letter-spacing: 0.02em;
     }
 
-    #${ROOT_ID} .mpc-dock-btns {
+    .mpc-dock-btns {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -210,7 +261,7 @@ function ensureStyles() {
       padding: 6px 0 10px;
     }
 
-    #${ROOT_ID} .mpc-dock button {
+    .mpc-dock button {
       all: unset;
       box-sizing: border-box;
       width: 40px;
@@ -221,27 +272,52 @@ function ensureStyles() {
       cursor: pointer;
       color: #fff;
     }
-    #${ROOT_ID} .mpc-dock button:hover { background: rgba(255,255,255,0.1); }
-    #${ROOT_ID} .mpc-dock button:disabled { opacity: 0.45; cursor: default; }
-    #${ROOT_ID} .mpc-dock button svg {
+    .mpc-dock button:hover { background: rgba(255,255,255,0.1); }
+    .mpc-dock button:disabled { opacity: 0.45; cursor: default; }
+    .mpc-dock button svg {
       width: 18px;
       height: 18px;
       display: block;
     }
-    #${ROOT_ID} .mpc-dock .mpc-stop svg { width: 16px; height: 16px; }
+    .mpc-dock .mpc-stop svg { width: 16px; height: 16px; }
+
+    /* Camera failure chip — visible even while dock is hidden during countdown */
+    .mpc-cam-status {
+      position: fixed !important;
+      left: 12px !important;
+      bottom: 24px !important;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
+      max-width: min(280px, calc(100vw - 24px));
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(28, 12, 12, 0.94) !important;
+      border: 1px solid rgba(255, 120, 100, 0.45);
+      color: #ffe8e4 !important;
+      font: 600 12px/1.35 ui-sans-serif, system-ui, sans-serif !important;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+      opacity: 0;
+      visibility: hidden;
+      display: none;
+    }
+    .mpc-cam-status.is-visible {
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+    }
 
     /* —— Countdown —— */
-    #${ROOT_ID} .mpc-countdown {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      pointer-events: auto;
-      display: grid;
+    .mpc-countdown {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
+      display: grid !important;
       place-items: center;
       background: rgba(8, 10, 14, 0.35);
     }
-    #${ROOT_ID} .mpc-countdown.is-hidden { display: none; }
-    #${ROOT_ID} .mpc-countdown-num {
+    .mpc-countdown.is-hidden { display: none !important; }
+    .mpc-countdown-num {
       width: 120px;
       height: 120px;
       border-radius: 50%;
@@ -254,7 +330,7 @@ function ensureStyles() {
       box-shadow: 0 16px 48px rgba(0,0,0,0.45);
       animation: mpc-pop 0.35s ease;
     }
-    #${ROOT_ID} .mpc-countdown-cancel {
+    .mpc-countdown-cancel {
       position: absolute;
       bottom: 12%;
       left: 50%;
@@ -269,7 +345,7 @@ function ensureStyles() {
       background: rgba(28,28,30,0.88);
       border: 1px solid rgba(255,255,255,0.14);
     }
-    #${ROOT_ID} .mpc-cam-fallback {
+    .mpc-cam-fallback {
       position: absolute;
       inset: 0;
       border-radius: 50%;
@@ -282,27 +358,27 @@ function ensureStyles() {
       background: radial-gradient(circle at 35% 30%, #2a3340, #12161c 70%);
       pointer-events: none;
     }
-    #${ROOT_ID} .mpc-bubble.is-square .mpc-cam-fallback {
+    .mpc-bubble.is-square .mpc-cam-fallback {
       border-radius: ${SQUARE_RADIUS};
     }
-    #${ROOT_ID} .mpc-error-banner {
-      position: fixed;
-      left: 50%;
-      bottom: 28px;
+    .mpc-error-banner {
+      position: fixed !important;
+      left: 50% !important;
+      bottom: 28px !important;
       transform: translateX(-50%);
-      z-index: 2147483647;
-      pointer-events: auto;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
       max-width: min(440px, calc(100vw - 32px));
       padding: 12px 16px;
       border-radius: 12px;
-      background: rgba(28, 12, 12, 0.94);
+      background: rgba(28, 12, 12, 0.94) !important;
       border: 1px solid rgba(255, 120, 100, 0.45);
-      color: #ffe8e4;
-      font: 600 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+      color: #ffe8e4 !important;
+      font: 600 13px/1.4 ui-sans-serif, system-ui, sans-serif !important;
       box-shadow: 0 12px 32px rgba(0,0,0,0.4);
       text-align: center;
     }
-    #${ROOT_ID} .mpc-error-banner button {
+    .mpc-error-banner button {
       all: unset;
       display: inline-block;
       margin-top: 8px;
@@ -318,22 +394,104 @@ function ensureStyles() {
       to { transform: scale(1); opacity: 1; }
     }
   `
-  document.documentElement.appendChild(style)
+}
+
+function applyHostInlineStyles(host: HTMLElement) {
+  // Inline !important beats almost all page styles that target the host id.
+  const props: Array<[string, string]> = [
+    ['position', 'fixed'],
+    ['inset', '0'],
+    ['width', '100vw'],
+    ['height', '100vh'],
+    ['max-width', 'none'],
+    ['max-height', 'none'],
+    ['margin', '0'],
+    ['padding', '0'],
+    ['border', 'none'],
+    ['overflow', 'visible'],
+    ['background', 'transparent'],
+    ['display', 'block'],
+    ['opacity', '1'],
+    ['visibility', 'visible'],
+    ['pointer-events', 'none'],
+    ['z-index', '2147483647'],
+  ]
+  for (const [k, v] of props) host.style.setProperty(k, v, 'important')
+}
+
+function promoteToTopLayer(host: HTMLElement) {
+  try {
+    if (!('showPopover' in host) || typeof host.showPopover !== 'function') return
+    host.setAttribute('popover', 'manual')
+    applyHostInlineStyles(host)
+    host.showPopover()
+  } catch {
+    /* Popover unavailable or already open — fixed + max z-index still applies. */
+  }
+}
+
+function watchHostAttached(host: HTMLElement) {
+  hostReattachObserver?.disconnect()
+  hostReattachObserver = new MutationObserver(() => {
+    if (host.isConnected) return
+    const parent = document.body ?? document.documentElement
+    if (!parent) return
+    parent.appendChild(host)
+    promoteToTopLayer(host)
+  })
+  hostReattachObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  })
+}
+
+function ensureMount(): OverlayMount {
+  if (overlayMount?.host.isConnected) {
+    promoteToTopLayer(overlayMount.host)
+    return overlayMount
+  }
+
+  document.getElementById(HOST_ID)?.remove()
+
+  const host = document.createElement('div')
+  host.id = HOST_ID
+  host.setAttribute('data-mypipcam', 'overlay')
+  applyHostInlineStyles(host)
+
+  const shadow = host.attachShadow({ mode: 'closed' })
+  const style = document.createElement('style')
+  style.textContent = overlayStyles()
+  const layer = document.createElement('div')
+  layer.className = 'mpc-layer'
+  shadow.append(style, layer)
+
+  const parent = document.body ?? document.documentElement
+  parent.appendChild(host)
+  promoteToTopLayer(host)
+  watchHostAttached(host)
+
+  overlayMount = { host, layer, shadow }
+  return overlayMount
 }
 
 function ensureRoot(): HTMLDivElement {
-  ensureStyles()
-  let root = document.getElementById(ROOT_ID) as HTMLDivElement | null
-  if (root) return root
-  root = document.createElement('div')
-  root.id = ROOT_ID
-  document.documentElement.appendChild(root)
-  return root
+  return ensureMount().layer
 }
 
 function removeRoot() {
-  document.getElementById(ROOT_ID)?.remove()
-  document.getElementById(STYLE_ID)?.remove()
+  hostReattachObserver?.disconnect()
+  hostReattachObserver = null
+  try {
+    const host = overlayMount?.host
+    if (host && 'hidePopover' in host && typeof host.hidePopover === 'function') {
+      host.hidePopover()
+    }
+  } catch {
+    /* ignore */
+  }
+  overlayMount?.host.remove()
+  document.getElementById(HOST_ID)?.remove()
+  overlayMount = null
 }
 
 function formatDuration(ms: number): string {
@@ -390,6 +548,7 @@ class TabOverlay {
   private countdownNum: HTMLDivElement
   private camClip: HTMLDivElement | null = null
   private camFallback: HTMLDivElement | null = null
+  private camStatusEl: HTMLDivElement | null = null
   private errorBanner: HTMLDivElement | null = null
   private state: BubbleState
   private pipChannelToken: string
@@ -409,6 +568,10 @@ class TabOverlay {
     this.state = {
       ...initial,
       borderColor: sanitizeCssColor(initial.borderColor),
+      // Clamp size so Tab+Cam never mounts a zero/near-zero bubble.
+      size: clamp(initial.size || 0.18, SIZE_MIN, SIZE_MAX),
+      x: clamp(initial.x ?? 0.82, 0.05, 0.95),
+      y: clamp(initial.y ?? 0.78, 0.08, 0.95),
     }
     this.pipChannelToken = createPipChannelToken()
     this.root = ensureRoot()
@@ -418,6 +581,7 @@ class TabOverlay {
     this.bubble = document.createElement('div')
     this.bubble.className = 'mpc-bubble'
     if (this.state.recordMode === 'screen') this.bubble.classList.add('is-hidden')
+    else this.bubble.classList.remove('is-hidden')
     this.bubble.title = 'Drag to move'
 
     if (this.state.mode === 'guide') {
@@ -596,7 +760,11 @@ class TabOverlay {
     })
     this.countdownEl.append(this.countdownNum, cancelBtn)
 
-    this.root.append(this.bubble, this.dock, this.countdownEl)
+    this.camStatusEl = document.createElement('div')
+    this.camStatusEl.className = 'mpc-cam-status'
+    this.camStatusEl.setAttribute('role', 'status')
+
+    this.root.append(this.bubble, this.dock, this.countdownEl, this.camStatusEl)
 
     // Drag from bubble / drag surface (never from menu)
     const dragTarget = this.dragSurface ?? this.bubble
@@ -638,19 +806,21 @@ class TabOverlay {
   private async mountPipFrame() {
     try {
       let registered = false
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
         const res = (await chrome.runtime.sendMessage({
           type: 'REGISTER_PIP_CHANNEL',
           token: this.pipChannelToken,
-        })) as { ok?: boolean } | undefined
+        })) as { ok?: boolean; reason?: string } | undefined
         if (res?.ok) {
           registered = true
           break
         }
-        await new Promise((r) => setTimeout(r, 40 * (attempt + 1)))
+        await new Promise((r) => setTimeout(r, 50 * (attempt + 1)))
       }
       if (!registered) {
-        this.showCamBlockedFallback('Camera overlay unavailable')
+        this.showCamBlockedFallback(
+          'Camera overlay unavailable — channel register failed. Reload the extension and try again.',
+        )
         return
       }
     } catch {
@@ -668,8 +838,9 @@ class TabOverlay {
 
   private onDocPointerDown = (e: PointerEvent) => {
     if (!this.menuOpen || !this.menu || !this.menuBtn) return
-    const t = e.target as Node
-    if (this.menu.contains(t) || this.menuBtn.contains(t)) return
+    // Closed shadow retargets target to the host — use composedPath.
+    const path = e.composedPath()
+    if (path.includes(this.menu) || path.includes(this.menuBtn)) return
     this.closeMenu()
   }
 
@@ -677,8 +848,9 @@ class TabOverlay {
     if (event.source !== this.frame?.contentWindow) return
     const data = event.data
     if (!data || typeof data !== 'object') return
-    if (data.token !== this.pipChannelToken) return
     if (data.type !== 'MPC_PIP_CAMERA') return
+    // Prefer token match; still accept failure notices if token was never minted.
+    if (data.token != null && data.token !== this.pipChannelToken) return
     if (data.ok) {
       this.camReady = true
       if (this.camWatchId != null) {
@@ -687,6 +859,7 @@ class TabOverlay {
       }
       this.camFallback?.remove()
       this.camFallback = null
+      this.camStatusEl?.classList.remove('is-visible')
       if (this.frame) this.frame.style.display = 'block'
       return
     }
@@ -735,6 +908,11 @@ class TabOverlay {
       this.camClip.appendChild(this.camFallback)
     }
     if (this.camFallback) this.camFallback.textContent = message
+    // Always surface a page-visible error (dock is hidden during countdown).
+    if (this.camStatusEl) {
+      this.camStatusEl.textContent = message
+      this.camStatusEl.classList.add('is-visible')
+    }
   }
 
   update(partial: Partial<BubbleState>) {
@@ -912,14 +1090,29 @@ class TabOverlay {
   private apply() {
     const vw = window.innerWidth
     const vh = window.innerHeight
-    const diameter = Math.min(vw, vh) * this.state.size
-    // position: fixed — left/top are viewport coords
+    const diameter = Math.max(BUBBLE_MIN_PX, Math.min(vw, vh) * this.state.size)
+    // position: fixed — left/top are viewport coords (top layer when popover is active)
     const left = this.state.x * vw - diameter / 2
     const top = this.state.y * vh - diameter / 2
-    this.bubble.style.width = `${diameter}px`
-    this.bubble.style.height = `${diameter}px`
-    this.bubble.style.left = `${clamp(left, 4, vw - diameter - 4)}px`
-    this.bubble.style.top = `${clamp(top, 4, vh - diameter - 4)}px`
+    this.bubble.style.setProperty('width', `${diameter}px`, 'important')
+    this.bubble.style.setProperty('height', `${diameter}px`, 'important')
+    this.bubble.style.setProperty(
+      'left',
+      `${clamp(left, 4, Math.max(4, vw - diameter - 4))}px`,
+      'important',
+    )
+    this.bubble.style.setProperty(
+      'top',
+      `${clamp(top, 4, Math.max(4, vh - diameter - 4))}px`,
+      'important',
+    )
+    if (this.state.recordMode === 'screen') {
+      this.bubble.style.setProperty('display', 'none', 'important')
+    } else {
+      this.bubble.style.setProperty('display', 'block', 'important')
+      this.bubble.style.setProperty('opacity', '1', 'important')
+      this.bubble.style.setProperty('visibility', 'visible', 'important')
+    }
     this.bubble.style.borderColor =
       this.state.borderColor === 'transparent' ? 'rgba(255,255,255,0.55)' : this.state.borderColor
     this.bubble.style.boxShadow = this.state.shadow
@@ -1196,7 +1389,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (overlay) {
       overlay.showError(reason)
     } else {
-      ensureStyles()
       const root = ensureRoot()
       root.replaceChildren()
       const banner = document.createElement('div')

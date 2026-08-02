@@ -45,7 +45,11 @@ export function isTrustedExtensionSender(
 
 /**
  * True for tab-injected content scripts (not extension pages / WAR iframes).
- * WAR camera iframe also has sender.tab — exclude chrome-extension:// URLs.
+ * WAR camera iframe also has sender.tab — exclude pip frame URLs.
+ *
+ * CRX/vite content scripts often `import(chrome.runtime.getURL(...))`, and Chrome
+ * may then report sender.url as the extension module URL rather than the page.
+ * Accept those overlay module URLs; still reject the PiP WAR iframe.
  */
 export function isContentScriptSender(
   sender: chrome.runtime.MessageSender | undefined,
@@ -53,7 +57,10 @@ export function isContentScriptSender(
   if (!isTrustedExtensionSender(sender) || sender?.tab?.id == null) return false
   const url = sender.url ?? ''
   if (!url) return true
-  return !/^chrome-extension:/i.test(url)
+  if (!/^chrome-extension:/i.test(url)) return true
+  if (isPipFrameSender(sender)) return false
+  // Content-script bundle / loader (pipOverlay) — not a full extension page tab.
+  return /pipOverlay/i.test(url) || /\/content\//i.test(url)
 }
 
 /** PiP WAR iframe (extension-origin camera page embedded in a tab). */

@@ -29,8 +29,10 @@ const channelToken = (() => {
 })()
 
 function postToParent(payload: Record<string, unknown>) {
-  if (!channelToken) return
-  window.parent.postMessage({ ...payload, token: channelToken }, '*')
+  window.parent.postMessage(
+    channelToken ? { ...payload, token: channelToken } : payload,
+    '*',
+  )
 }
 
 function readEffectFromQuery(): BackgroundEffect {
@@ -191,10 +193,15 @@ window.addEventListener('message', (event) => {
 async function boot() {
   if (!channelToken) {
     showFallback('Camera overlay unavailable')
+    postToParent({
+      type: 'MPC_PIP_CAMERA',
+      ok: false,
+      reason: 'Camera overlay unavailable (missing channel)',
+    })
     return
   }
   let allowed = false
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
       const res = (await chrome.runtime.sendMessage({
         type: 'VALIDATE_PIP_CHANNEL',
@@ -207,10 +214,15 @@ async function boot() {
     } catch {
       /* retry — SW may still be waking / token settling */
     }
-    await new Promise((r) => setTimeout(r, 50 * (attempt + 1)))
+    await new Promise((r) => setTimeout(r, 60 * (attempt + 1)))
   }
   if (!allowed) {
     showFallback('Camera overlay unavailable')
+    postToParent({
+      type: 'MPC_PIP_CAMERA',
+      ok: false,
+      reason: 'Camera overlay unavailable (channel validation failed)',
+    })
     return
   }
   void startCamera(null)
