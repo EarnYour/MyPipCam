@@ -464,6 +464,41 @@ export function PopupApp() {
     }
   }, [])
 
+  // Dim the active page while this popup is open (Loom-style). Port disconnect
+  // clears the scrim; visibility/unload are backups if close is abrupt.
+  useEffect(() => {
+    let port: chrome.runtime.Port | null = null
+    try {
+      port = chrome.runtime.connect({ name: 'popup-dim' })
+    } catch {
+      return
+    }
+
+    const disconnectDim = () => {
+      if (!port) return
+      try {
+        port.disconnect()
+      } catch {
+        /* already disconnected */
+      }
+      port = null
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') disconnectDim()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', disconnectDim)
+    window.addEventListener('beforeunload', disconnectDim)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', disconnectDim)
+      window.removeEventListener('beforeunload', disconnectDim)
+      disconnectDim()
+    }
+  }, [])
+
   async function resolveActiveTab(): Promise<{ id: number; title: string; url: string } | null> {
     const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
     const url = active?.url ?? ''

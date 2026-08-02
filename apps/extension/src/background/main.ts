@@ -3,6 +3,7 @@
 // `*?script&loader` (hashed ESM loader under assets/) — executeScript cannot
 // run those loaders. Always inject the stable IIFE path below.
 import crxPipOverlayPath from '../content/pipOverlay.ts?script&iife'
+import { applyPopupPageDim } from '../content/popupDimApply'
 import {
   clearDriveAuthDirect,
   DriveAuthError,
@@ -1388,10 +1389,56 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * MV3 service worker is not killed while chrome.identity.getAuthToken waits
  * on the consent UI (often 30–120s).
  */
+/** Tab currently showing the popup dim scrim (cleared on port disconnect). */
+let popupDimTabId: number | null = null
+
+async function setPopupPageDim(tabId: number, visible: boolean): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: applyPopupPageDim,
+      args: [visible],
+    })
+  } catch {
+    // Restricted pages (chrome://, Web Store, etc.) cannot be scripted — ignore.
+  }
+}
+
+async function showPopupPageDimForActiveTab(): Promise<void> {
+  const session = await hydrateLoomSession()
+  if (session) return
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const url = tab?.url ?? ''
+    if (!tab?.id || !/^https?:/i.test(url)) return
+    popupDimTabId = tab.id
+    await setPopupPageDim(tab.id, true)
+  } catch {
+    /* ignore */
+  }
+}
+
+async function clearPopupPageDim(): Promise<void> {
+  const tabId = popupDimTabId
+  popupDimTabId = null
+  if (tabId == null) return
+  await setPopupPageDim(tabId, false)
+}
+
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'drive-connect') return
-  // Holding the port open is enough; ignore payload noise.
-  port.onMessage.addListener(() => {})
+  if (port.name === 'drive-connect') {
+    // Holding the port open is enough; ignore payload noise.
+    port.onMessage.addListener(() => {})
+    return
+  }
+
+  if (port.name !== 'popup-dim') return
+
+  void showPopupPageDimForActiveTab()
+  port.onDisconnect.addListener(() => {
+    void clearPopupPageDim()
+  })
 })
 
 // Periodic backlog drain — covers cases where the post-stop kick was missed.
