@@ -23,7 +23,10 @@ import {
 } from '../shared/settings'
 import { openShareGuidanceTab, writeShareSession } from '../shared/shareSession'
 import {
+  BORDER_PRESETS,
+  BORDER_WIDTH_OPTIONS,
   CAPTURE_QUALITY_OPTIONS,
+  normalizeBorderWidth,
   normalizeCaptureQuality,
   type BackgroundEffect,
   type CaptureQuality,
@@ -212,6 +215,8 @@ export function PopupApp() {
   const [micOn, setMicOn] = useState(true)
   const [backgroundEffect, setBackgroundEffect] = useState<BackgroundEffect>('none')
   const [cameraFilter, setCameraFilter] = useState<CameraFilterId>('none')
+  const [borderColor, setBorderColor] = useState('#ffffff')
+  const [borderWidth, setBorderWidth] = useState(3)
   const [captureCursor, setCaptureCursor] = useState(true)
   const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('4k')
   const [effectsOpen, setEffectsOpen] = useState(false)
@@ -420,6 +425,8 @@ export function PopupApp() {
       setCameraOn(mode !== 'screen')
       setBackgroundEffect(s.backgroundEffect === 'blur' ? 'blur' : 'none')
       setCameraFilter(normalizeCameraFilter(s.cameraFilter))
+      setBorderColor(s.borderColor || '#ffffff')
+      setBorderWidth(normalizeBorderWidth(s.borderWidth))
       setCaptureCursor(s.captureCursor !== false)
       setCaptureQuality(normalizeCaptureQuality(s.captureQuality))
       setMicDeviceId(s.micDeviceId || '')
@@ -543,6 +550,8 @@ export function PopupApp() {
       cameraDeviceId: cameraDeviceId || null,
       backgroundEffect,
       cameraFilter,
+      borderColor,
+      borderWidth,
       captureCursor,
       captureQuality,
     })
@@ -795,6 +804,30 @@ export function PopupApp() {
     setHelper(next === 'none' ? 'Filter cleared' : `Filter: ${CAMERA_FILTERS.find((f) => f.id === next)?.label}`)
   }
 
+  async function selectBorderColor(color: string) {
+    setBorderColor(color)
+    await savePipSettings({ borderColor: color })
+    try {
+      await chrome.runtime.sendMessage({ type: 'LOOM_BUBBLE_BORDER', borderColor: color })
+    } catch {
+      /* SW may be asleep — settings already persisted */
+    }
+    setHelper(color === 'transparent' ? 'Border hidden' : `Border color: ${color}`)
+  }
+
+  async function selectBorderWidth(width: number) {
+    const next = normalizeBorderWidth(width)
+    setBorderWidth(next)
+    await savePipSettings({ borderWidth: next })
+    try {
+      await chrome.runtime.sendMessage({ type: 'LOOM_BUBBLE_BORDER', borderWidth: next })
+    } catch {
+      /* SW may be asleep — settings already persisted */
+    }
+    const label = BORDER_WIDTH_OPTIONS.find((o) => o.id === next)?.label
+    setHelper(next === 0 ? 'Border off' : `Border thickness: ${label ?? `${next}px`}`)
+  }
+
   const cameraLabel =
     cameras.find((c) => c.deviceId === cameraDeviceId)?.label ||
     cameras[0]?.label ||
@@ -852,6 +885,47 @@ export function PopupApp() {
                 </button>
               )
             })}
+          </div>
+
+          <h2 className="effects-section-label">Border color</h2>
+          <div className="effects-border-swatches" role="listbox" aria-label="Border color">
+            {BORDER_PRESETS.map((color) => {
+              const selected = borderColor === color
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`effects-border-swatch ${selected ? 'is-selected' : ''}`}
+                  title={color}
+                  style={{
+                    background:
+                      color === 'transparent'
+                        ? 'repeating-conic-gradient(#888 0 25%, #ddd 0 50%) 0/8px 8px'
+                        : color,
+                  }}
+                  onClick={() => void selectBorderColor(color)}
+                />
+              )
+            })}
+          </div>
+
+          <h2 className="effects-section-label">Border thickness</h2>
+          <div className="effects-border-widths" role="radiogroup" aria-label="Border thickness">
+            {BORDER_WIDTH_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={borderWidth === opt.id}
+                className={`effects-border-width ${borderWidth === opt.id ? 'is-selected' : ''}`}
+                title={`${opt.label}${opt.id > 0 ? ` (${opt.id}px)` : ''}`}
+                onClick={() => void selectBorderWidth(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
           {helper ? <p className="loom-helper">{helper}</p> : null}
         </div>

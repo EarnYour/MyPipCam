@@ -20,6 +20,10 @@
 		A1000000000000000000000C /* MicrophoneManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* MicrophoneManager.swift */; };
 		A1000000000000000000000D /* LibraryFolderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* LibraryFolderStore.swift */; };
 		A1000000000000000000000E /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* LibraryView.swift */; };
+		A1000000000000000000000F /* ScreenCloudRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* ScreenCloudRecorder.swift */; };
+		A10000000000000000000010 /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* RecordingController.swift */; };
+		A10000000000000000000011 /* RecordToCloudCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* RecordToCloudCoordinator.swift */; };
+		A10000000000000000000012 /* RecordToCloudSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* RecordToCloudSetupView.swift */; };
 		A10000000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -37,6 +41,10 @@
 		A2000000000000000000000F /* MicrophoneManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* LibraryFolderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryFolderStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* ScreenCloudRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCloudRecorder.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* RecordToCloudCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordToCloudCoordinator.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* RecordToCloudSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordToCloudSetupView.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000A /* MyPipCam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MyPipCam.entitlements; sourceTree = "<group>"; };
@@ -78,6 +86,10 @@
 				A2000000000000000000000E /* ExtensionLibraryOpener.swift */,
 				A20000000000000000000010 /* LibraryFolderStore.swift */,
 				A20000000000000000000011 /* LibraryView.swift */,
+				A20000000000000000000012 /* ScreenCloudRecorder.swift */,
+				A20000000000000000000013 /* RecordingController.swift */,
+				A20000000000000000000014 /* RecordToCloudCoordinator.swift */,
+				A20000000000000000000015 /* RecordToCloudSetupView.swift */,
 				A20000000000000000000008 /* Assets.xcassets */,
 				A20000000000000000000009 /* Info.plist */,
 				A2000000000000000000000A /* MyPipCam.entitlements */,
@@ -175,6 +187,10 @@
 				A1000000000000000000000B /* ExtensionLibraryOpener.swift in Sources */,
 				A1000000000000000000000D /* LibraryFolderStore.swift in Sources */,
 				A1000000000000000000000E /* LibraryView.swift in Sources */,
+				A1000000000000000000000F /* ScreenCloudRecorder.swift in Sources */,
+				A10000000000000000000010 /* RecordingController.swift in Sources */,
+				A10000000000000000000011 /* RecordToCloudCoordinator.swift in Sources */,
+				A10000000000000000000012 /* RecordToCloudSetupView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

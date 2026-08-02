@@ -13,7 +13,15 @@ import {
 } from '@mediapipe/tasks-vision'
 import type { BackgroundEffect } from './types'
 
-const BLUR_PX = 14
+/** Background gaussian radius — soft enough to read as blur without a heavy frosted look. */
+const BLUR_PX = 8
+/**
+ * Feather the person mask edge (px at mask resolution). Softens the cutout so hair /
+ * shoulders blend into the blurred background instead of a hard stencil.
+ */
+const MASK_FEATHER_PX = 5
+/** Slight confidence boost before feathering — expands the subject a touch so blur doesn't eat into the face. */
+const MASK_DILATE = 0.08
 /** Process at most this many segmentations per second (draw can reuse last frame). */
 const MAX_SEGMENT_FPS = 20
 
@@ -30,6 +38,8 @@ export class PersonBackgroundBlur {
   private readonly blurCanvas = document.createElement('canvas')
   private readonly personCanvas = document.createElement('canvas')
   private readonly maskCanvas = document.createElement('canvas')
+  /** Softened alpha mask (gaussian feather) used for destination-in. */
+  private readonly softMaskCanvas = document.createElement('canvas')
   private lastTs = -1
   private lastSegmentAt = 0
   private busy = false
@@ -137,13 +147,16 @@ export class PersonBackgroundBlur {
     if (this.maskCanvas.width !== mw || this.maskCanvas.height !== mh) {
       this.maskCanvas.width = mw
       this.maskCanvas.height = mh
+      this.softMaskCanvas.width = mw
+      this.softMaskCanvas.height = mh
     }
 
     const maskCtx = this.maskCanvas.getContext('2d')
+    const softMaskCtx = this.softMaskCanvas.getContext('2d')
     const blurCtx = this.blurCanvas.getContext('2d')
     const personCtx = this.personCanvas.getContext('2d')
     const outCtx = this.output.getContext('2d')
-    if (!maskCtx || !blurCtx || !personCtx || !outCtx) {
+    if (!maskCtx || !softMaskCtx || !blurCtx || !personCtx || !outCtx) {
       mask.close()
       return
     }
@@ -152,7 +165,9 @@ export class PersonBackgroundBlur {
     const imageData = maskCtx.createImageData(mw, mh)
     const data = imageData.data
     for (let i = 0; i < floats.length; i++) {
-      const a = Math.max(0, Math.min(255, Math.round(floats[i] * 255)))
+      // Dilate slightly so subsequent feather doesn't shrink the subject inward.
+      const v = Math.min(1, floats[i] + MASK_DILATE)
+      const a = Math.max(0, Math.min(255, Math.round(v * 255)))
       const o = i * 4
       data[o] = 255
       data[o + 1] = 255
@@ -162,17 +177,24 @@ export class PersonBackgroundBlur {
     maskCtx.putImageData(imageData, 0, 0)
     mask.close()
 
+    // Feather mask edges at mask resolution (cheap vs full-frame blur).
+    softMaskCtx.clearRect(0, 0, mw, mh)
+    softMaskCtx.filter = `blur(${MASK_FEATHER_PX}px)`
+    softMaskCtx.drawImage(this.maskCanvas, 0, 0)
+    softMaskCtx.filter = 'none'
+
     // Soft blurred background
     blurCtx.save()
     blurCtx.filter = `blur(${BLUR_PX}px)`
     blurCtx.drawImage(video, 0, 0, vw, vh)
     blurCtx.restore()
 
-    // Sharp person cutout
+    // Person cutout with feathered alpha
     personCtx.clearRect(0, 0, vw, vh)
+    personCtx.filter = 'none'
     personCtx.drawImage(video, 0, 0, vw, vh)
     personCtx.globalCompositeOperation = 'destination-in'
-    personCtx.drawImage(this.maskCanvas, 0, 0, vw, vh)
+    personCtx.drawImage(this.softMaskCanvas, 0, 0, vw, vh)
     personCtx.globalCompositeOperation = 'source-over'
 
     outCtx.clearRect(0, 0, vw, vh)

@@ -79,6 +79,7 @@ xcodebuild \
   -scheme MyPipCam \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
+  -destination 'generic/platform=macOS' \
   DEVELOPMENT_TEAM="$DEV_TEAM" \
   CODE_SIGN_STYLE=Automatic \
   build

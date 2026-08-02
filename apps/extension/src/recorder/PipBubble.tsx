@@ -222,7 +222,12 @@ export function PipBubble({ canvas, cameraStream, settings, api, onPersist, onLi
         height: display.size,
         left: display.left,
         top: display.top,
-        borderColor: settings.borderColor === 'transparent' ? 'rgba(255,255,255,0.35)' : settings.borderColor,
+        borderWidth: Math.max(0, settings.borderWidth),
+        borderStyle: settings.borderWidth > 0 ? 'solid' : 'none',
+        borderColor:
+          settings.borderColor === 'transparent'
+            ? 'rgba(255,255,255,0.35)'
+            : settings.borderColor,
         boxShadow: settings.shadow ? '0 10px 28px rgba(0,0,0,0.45)' : 'none',
       }}
       onPointerDown={onMovePointerDown}

@@ -226,7 +226,7 @@ struct LibraryView: View {
                         .foregroundStyle(.secondary)
                     Text("No recordings yet")
                         .font(.callout.weight(.medium))
-                    Text("Record in Chrome with this folder selected, then refresh.")
+                    Text("Record from the bubble menu or in Chrome, then refresh.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
