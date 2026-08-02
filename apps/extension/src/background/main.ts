@@ -77,6 +77,69 @@ let armingCapture = false
 /** Fallback extension window when page overlay inject/visibility fails. */
 let hudWindowId: number | null = null
 
+type StoredLoomRecording = {
+  tabId?: number
+  startedAt?: number
+  phase?: string
+  recordMode?: RecordMode
+  micDeviceId?: string | null
+  cameraDeviceId?: string | null
+  includeMic?: boolean
+  prepared?: boolean
+  ui?: string
+}
+
+/** Persist enough session state to survive MV3 service-worker restarts. */
+async function persistLoomSession(session: LoomSession, ui?: string) {
+  const payload: StoredLoomRecording = {
+    tabId: session.tabId,
+    startedAt: session.startedAt,
+    phase: session.phase,
+    recordMode: session.recordMode,
+    micDeviceId: session.micDeviceId,
+    cameraDeviceId: session.cameraDeviceId,
+    includeMic: session.includeMic,
+    prepared: session.prepared,
+  }
+  if (ui) payload.ui = ui
+  await chrome.storage.session.set({ loomRecording: payload })
+}
+
+/**
+ * MV3 kills the SW after idle; in-memory loomSession is lost while offscreen
+ * capture + page overlay can still be live. Rehydrate from session storage.
+ */
+async function hydrateLoomSession(): Promise<LoomSession | null> {
+  if (loomSession) return loomSession
+  try {
+    const stored = await chrome.storage.session.get('loomRecording')
+    const rec = stored.loomRecording as StoredLoomRecording | undefined
+    if (!rec || typeof rec.tabId !== 'number') return null
+    loomSession = {
+      tabId: rec.tabId,
+      startedAt: typeof rec.startedAt === 'number' ? rec.startedAt : Date.now(),
+      recordMode:
+        rec.recordMode === 'screen' || rec.recordMode === 'cam'
+          ? rec.recordMode
+          : 'screen-cam',
+      phase: rec.phase === 'recording' ? 'recording' : 'countdown',
+      micDeviceId: typeof rec.micDeviceId === 'string' ? rec.micDeviceId : null,
+      cameraDeviceId:
+        typeof rec.cameraDeviceId === 'string' ? rec.cameraDeviceId : null,
+      includeMic: rec.includeMic !== false,
+      prepared: rec.prepared !== false,
+    }
+    startLog('hydrated loomSession from storage', {
+      tabId: loomSession.tabId,
+      phase: loomSession.phase,
+    })
+    return loomSession
+  } catch (err) {
+    startWarn('hydrateLoomSession failed', err)
+    return null
+  }
+}
+
 function errMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.trim()) return err.message.trim()
   if (typeof err === 'string' && err.trim()) return err.trim()
@@ -660,15 +723,7 @@ async function startLoomRecording(
       includeMic,
       prepared: true,
     }
-    await chrome.storage.session.set({
-      loomRecording: {
-        tabId: tab.id,
-        startedAt: loomSession.startedAt,
-        phase: 'countdown',
-        recordMode,
-        ui,
-      },
-    })
+    await persistLoomSession(loomSession, ui)
     await setRecordingBadge(true)
     startLog('session armed', { tabId: tab.id, ui })
     // Do NOT focusCapturedTab here — focusing steals focus from the action
@@ -692,7 +747,7 @@ async function startLoomRecording(
 /** Phase 2: countdown finished → start MediaRecorder on already-held streams. */
 async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: string }> {
   if (armingCapture) return { ok: false, reason: 'already-arming' }
-  const session = loomSession
+  const session = (await hydrateLoomSession()) ?? loomSession
   if (!session || session.phase !== 'countdown') {
     return { ok: false, reason: 'no-countdown-session' }
   }
@@ -718,14 +773,7 @@ async function armCaptureAfterCountdown(): Promise<{ ok: boolean; reason?: strin
 
     session.phase = 'recording'
     session.startedAt = Date.now()
-    await chrome.storage.session.set({
-      loomRecording: {
-        tabId: session.tabId,
-        startedAt: session.startedAt,
-        phase: 'recording',
-        recordMode: session.recordMode,
-      },
-    })
+    await persistLoomSession(session)
 
     try {
       await chrome.tabs.sendMessage(session.tabId, {
@@ -762,21 +810,34 @@ async function failCaptureKeepOverlay(_tabId: number) {
 
 async function stopLoomRecording(opts?: {
   openEditor?: boolean
+  /** Content-script sender tab — used when SW restarted and session was lost. */
+  fallbackTabId?: number
 }): Promise<{
   ok: boolean
   id?: string
   reason?: string
 }> {
-  const session = loomSession
+  const session = (await hydrateLoomSession()) ?? loomSession
+  const tabId =
+    session?.tabId ??
+    (typeof opts?.fallbackTabId === 'number' ? opts.fallbackTabId : null)
+
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
   await closeHudWindow()
 
-  const tabId = session?.tabId
+  // Always tear down page chrome first so Stop never leaves a stuck dock/PiP.
   await stopOverlay(tabId)
+  // Also try sender tab if it differs (hydrated id stale / wrong).
+  if (
+    typeof opts?.fallbackTabId === 'number' &&
+    opts.fallbackTabId !== tabId
+  ) {
+    await stopOverlay(opts.fallbackTabId)
+  }
 
-  // Countdown cancelled / never committed — nothing to save
+  // Countdown cancelled / never committed — nothing to save, but still drop streams.
   if (!session || session.phase === 'countdown') {
     try {
       await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
@@ -792,11 +853,29 @@ async function stopLoomRecording(opts?: {
       type: 'OFFSCREEN_STOP',
     })
 
-    await closeOffscreen()
-
+    // If stop/save failed (e.g. recorder already gone after SW race), still
+    // force-discard streams so Chrome's "Sharing…" banner clears.
     if (!result?.ok) {
-      return { ok: false, reason: result?.reason?.trim() || 'Could not stop recording.' }
+      try {
+        await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
+      } catch {
+        /* ignore */
+      }
+      await closeOffscreen()
+      // Treat empty/not-recording as a soft success after teardown — capture is dead.
+      if (
+        result?.reason === 'not-recording' ||
+        result?.reason === 'empty-recording'
+      ) {
+        return { ok: true }
+      }
+      return {
+        ok: false,
+        reason: result?.reason?.trim() || 'Could not stop recording.',
+      }
     }
+
+    await closeOffscreen()
 
     if (result.id && opts?.openEditor) {
       try {
@@ -813,6 +892,11 @@ async function stopLoomRecording(opts?: {
 
     return { ok: true, id: result.id }
   } catch (err) {
+    try {
+      await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
+    } catch {
+      /* ignore */
+    }
     await closeOffscreen()
     return {
       ok: false,
@@ -821,13 +905,24 @@ async function stopLoomRecording(opts?: {
   }
 }
 
-async function discardLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
-  const session = loomSession
+async function discardLoomRecording(opts?: {
+  fallbackTabId?: number
+}): Promise<{ ok: boolean; reason?: string }> {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  const tabId =
+    session?.tabId ??
+    (typeof opts?.fallbackTabId === 'number' ? opts.fallbackTabId : null)
   loomSession = null
   await chrome.storage.session.remove('loomRecording')
   await setRecordingBadge(false)
   await closeHudWindow()
-  await stopOverlay(session?.tabId)
+  await stopOverlay(tabId)
+  if (
+    typeof opts?.fallbackTabId === 'number' &&
+    opts.fallbackTabId !== tabId
+  ) {
+    await stopOverlay(opts.fallbackTabId)
+  }
 
   try {
     await sendOffscreen({ type: 'OFFSCREEN_DISCARD' })
@@ -843,7 +938,7 @@ async function discardLoomRecording(): Promise<{ ok: boolean; reason?: string }>
  * capture, and re-run the countdown → commit pipeline with the same settings.
  */
 async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
-  const session = loomSession
+  const session = (await hydrateLoomSession()) ?? loomSession
   if (!session) return { ok: false, reason: 'not-recording' }
   if (starting || armingCapture) {
     return { ok: false, reason: 'Already starting — wait a moment and try again.' }
@@ -902,14 +997,7 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
     session.phase = 'countdown'
     session.prepared = true
     session.startedAt = Date.now()
-    await chrome.storage.session.set({
-      loomRecording: {
-        tabId: session.tabId,
-        startedAt: session.startedAt,
-        phase: 'countdown',
-        recordMode: session.recordMode,
-      },
-    })
+    await persistLoomSession(session)
     await setRecordingBadge(true)
 
     try {
@@ -935,7 +1023,8 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
 }
 
 async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
-  if (!loomSession || loomSession.phase !== 'recording') {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (!session || session.phase !== 'recording') {
     return { ok: false, reason: 'not-recording' }
   }
   const res = await sendOffscreen<{ ok?: boolean; reason?: string }>({
@@ -943,7 +1032,7 @@ async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
   })
   if (res?.ok) {
     try {
-      await chrome.tabs.sendMessage(loomSession.tabId, {
+      await chrome.tabs.sendMessage(session.tabId, {
         type: 'PIP_OVERLAY_PAUSED',
         paused: true,
       })
@@ -955,7 +1044,8 @@ async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
 }
 
 async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
-  if (!loomSession || loomSession.phase !== 'recording') {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (!session || session.phase !== 'recording') {
     return { ok: false, reason: 'not-recording' }
   }
   const res = await sendOffscreen<{ ok?: boolean; reason?: string }>({
@@ -963,7 +1053,7 @@ async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> 
   })
   if (res?.ok) {
     try {
-      await chrome.tabs.sendMessage(loomSession.tabId, {
+      await chrome.tabs.sendMessage(session.tabId, {
         type: 'PIP_OVERLAY_PAUSED',
         paused: false,
       })
@@ -976,8 +1066,9 @@ async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> 
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'start-recording') return
-  if (loomSession) {
-    if (loomSession.phase === 'countdown') {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (session) {
+    if (session.phase === 'countdown') {
       await discardLoomRecording()
       return
     }
@@ -1328,9 +1419,16 @@ function dispatchExtensionMessage(
       try {
         const result = await stopLoomRecording({
           openEditor: Boolean(message.openEditor),
+          fallbackTabId: sender.tab?.id,
         })
         sendResponse(result)
       } catch (err) {
+        // Last-resort teardown so Stop never leaves capture hanging.
+        try {
+          await teardownCaptureStreams(sender.tab?.id ?? null)
+        } catch {
+          /* ignore */
+        }
         sendResponse({
           ok: false,
           reason: errMessage(err, 'Could not stop recording.'),
@@ -1356,7 +1454,9 @@ function dispatchExtensionMessage(
 
   if (message?.type === 'DISCARD_LOOM_RECORDING') {
     void (async () => {
-      sendResponse(await discardLoomRecording())
+      sendResponse(
+        await discardLoomRecording({ fallbackTabId: sender.tab?.id }),
+      )
     })()
     return true
   }
@@ -1380,14 +1480,17 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'GET_LOOM_STATUS') {
-    sendResponse({
-      recording: Boolean(loomSession),
-      phase: loomSession?.phase ?? null,
-      tabId: loomSession?.tabId ?? null,
-      startedAt: loomSession?.startedAt ?? null,
-      recordMode: loomSession?.recordMode ?? null,
-    })
-    return false
+    void (async () => {
+      const session = (await hydrateLoomSession()) ?? loomSession
+      sendResponse({
+        recording: Boolean(session),
+        phase: session?.phase ?? null,
+        tabId: session?.tabId ?? null,
+        startedAt: session?.startedAt ?? null,
+        recordMode: session?.recordMode ?? null,
+      })
+    })()
+    return true
   }
 
   if (message?.type === 'LOOM_BUBBLE_MOVED') {
@@ -1516,11 +1619,22 @@ function dispatchExtensionMessage(
   if (message?.type === 'FORCE_STOP_CAPTURE') {
     void (async () => {
       try {
-        startLog('FORCE_STOP_CAPTURE', { tabId: message.tabId, hasSession: Boolean(loomSession) })
+        const hydrated = await hydrateLoomSession()
+        startLog('FORCE_STOP_CAPTURE', {
+          tabId: message.tabId,
+          hasSession: Boolean(hydrated ?? loomSession),
+        })
         const tabId =
           typeof message.tabId === 'number'
             ? message.tabId
-            : loomSession?.tabId ?? null
+            : hydrated?.tabId ?? loomSession?.tabId ?? sender.tab?.id ?? null
+        loomSession = null
+        await chrome.storage.session.remove('loomRecording')
+        await setRecordingBadge(false)
+        await stopOverlay(tabId)
+        if (typeof sender.tab?.id === 'number' && sender.tab.id !== tabId) {
+          await stopOverlay(sender.tab.id)
+        }
         await teardownCaptureStreams(tabId)
         replySafe(sendResponse, { ok: true })
       } catch (err) {

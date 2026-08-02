@@ -473,20 +473,26 @@ async function resetRecordingKeepStreams(): Promise<{ ok: boolean; reason?: stri
 
 async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
   const active = recorder
-  if (!active) return { ok: false, reason: 'not-recording' }
+  if (!active) {
+    // Still drop any live tab/cam tracks so Chrome's sharing banner clears.
+    cleanupMedia()
+    return { ok: false, reason: 'not-recording' }
+  }
 
   const durationMs = Date.now() - startedAt
   const blob = await new Promise<Blob>((resolve, reject) => {
-    active.onstop = () => {
-      resolve(new Blob(chunks, { type: mimeType }))
-    }
+    const finish = () => resolve(new Blob(chunks, { type: mimeType }))
+    active.onstop = finish
     active.onerror = () => reject(new Error('Recorder failed'))
     try {
       if (active.state !== 'inactive') active.stop()
-      else resolve(new Blob(chunks, { type: mimeType }))
+      else finish()
     } catch (e) {
       reject(e)
     }
+  }).catch((err) => {
+    cleanupMedia()
+    throw err
   })
 
   cleanupMedia()

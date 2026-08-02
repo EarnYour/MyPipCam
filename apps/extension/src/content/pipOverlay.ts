@@ -119,6 +119,7 @@ function overlayStyles(): string {
     .mpc-bubble {
       position: fixed !important;
       border-radius: 50%;
+      /* Visible so menu can extend outside; camera is clipped separately. */
       overflow: visible;
       pointer-events: auto !important;
       cursor: grab;
@@ -132,7 +133,9 @@ function overlayStyles(): string {
       visibility: visible !important;
       min-width: ${BUBBLE_MIN_PX}px !important;
       min-height: ${BUBBLE_MIN_PX}px !important;
+      /* Soft circular shadow — avoid a hard rectangular layer flash on hover. */
       box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
+      isolation: isolate;
     }
     .mpc-bubble.is-square {
       border-radius: ${SQUARE_RADIUS};
@@ -147,9 +150,15 @@ function overlayStyles(): string {
       overflow: hidden;
       pointer-events: none;
       background: #111;
+      /* Force circular compositing so the iframe never flashes as a square. */
+      clip-path: circle(50% at 50% 50%);
+      -webkit-clip-path: circle(50% at 50% 50%);
+      transform: translateZ(0);
     }
     .mpc-bubble.is-square .mpc-bubble-clip {
       border-radius: ${SQUARE_RADIUS};
+      clip-path: inset(0 round ${SQUARE_RADIUS});
+      -webkit-clip-path: inset(0 round ${SQUARE_RADIUS});
     }
 
     .mpc-cam-frame {
@@ -175,10 +184,15 @@ function overlayStyles(): string {
       border-radius: ${SQUARE_RADIUS};
     }
 
+    /*
+     * Dots stay in layout (opacity only) so hover never toggles geometry and
+     * cannot enter a show→leave→hide→enter flicker loop. Native title tooltips
+     * are avoided (aria-label only) — those rectangular tips also flickered.
+     */
     .mpc-menu-btn {
       position: absolute;
       left: 50%;
-      bottom: 8%;
+      bottom: 6%;
       transform: translateX(-50%);
       z-index: 3;
       pointer-events: auto;
@@ -196,13 +210,20 @@ function overlayStyles(): string {
       display: grid;
       place-items: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+      opacity: 0;
+      transition: opacity 0.15s ease, background 0.12s ease;
+    }
+    .mpc-bubble:hover .mpc-menu-btn,
+    .mpc-bubble.is-menu-open .mpc-menu-btn,
+    .mpc-menu-btn:focus-visible {
+      opacity: 1;
     }
     .mpc-menu-btn:hover { background: rgba(40,40,44,0.9); }
 
     .mpc-menu {
       position: absolute;
       left: 50%;
-      bottom: calc(8% + 28px);
+      bottom: calc(6% + 28px);
       transform: translateX(-50%);
       z-index: 4;
       pointer-events: auto;
@@ -235,7 +256,7 @@ function overlayStyles(): string {
       top: 50% !important;
       transform: translateY(-50%);
       z-index: 2147483647 !important;
-      pointer-events: auto !important;
+      pointer-events: none;
       display: flex !important;
       flex-direction: column;
       align-items: stretch;
@@ -243,7 +264,7 @@ function overlayStyles(): string {
       min-height: 120px;
       padding: 0;
       border-radius: 999px;
-      overflow: hidden;
+      overflow: visible;
       background: #111312 !important;
       box-shadow: 0 10px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06);
       opacity: 0;
@@ -253,6 +274,7 @@ function overlayStyles(): string {
     .mpc-dock.is-visible {
       opacity: 1 !important;
       visibility: visible !important;
+      pointer-events: auto !important;
     }
 
     .mpc-dock-timer {
@@ -263,6 +285,7 @@ function overlayStyles(): string {
       text-align: center;
       padding: 11px 4px 10px;
       letter-spacing: 0.02em;
+      border-radius: 999px 999px 0 0;
     }
 
     .mpc-dock-btns {
@@ -290,6 +313,7 @@ function overlayStyles(): string {
       width: 18px;
       height: 18px;
       display: block;
+      pointer-events: none;
     }
     .mpc-dock .mpc-stop svg { width: 16px; height: 16px; }
     .mpc-dock .mpc-trim {
@@ -311,6 +335,7 @@ function overlayStyles(): string {
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.12s ease;
+      z-index: 2;
     }
     .mpc-dock .mpc-trim:hover .mpc-trim-label,
     .mpc-dock .mpc-trim:focus-visible .mpc-trim-label {
@@ -490,11 +515,10 @@ function ensureHostTopLayer(host: HTMLElement) {
 
 function watchHostAttached(host: HTMLElement) {
   hostReattachObserver?.disconnect()
+  // Only re-mount when the host is removed. Re-running showPopover/styles on
+  // every page mutation causes PiP compositing flicker (glitchy square).
   hostReattachObserver = new MutationObserver(() => {
-    if (host.isConnected) {
-      ensureHostTopLayer(host)
-      return
-    }
+    if (host.isConnected) return
     const parent = document.body ?? document.documentElement
     if (!parent) return
     parent.appendChild(host)
@@ -712,7 +736,9 @@ class TabOverlay {
     this.bubble.className = 'mpc-bubble'
     if (this.state.recordMode === 'screen') this.bubble.classList.add('is-hidden')
     else this.bubble.classList.remove('is-hidden')
-    this.bubble.title = 'Drag to move'
+    // aria-label only — native title tooltips are rectangular and flicker on hover.
+    this.bubble.setAttribute('aria-label', 'Camera bubble — drag to move')
+    this.bubble.removeAttribute('title')
 
     if (this.state.mode === 'guide') {
       this.bubble.style.background = 'rgba(12,16,22,0.28)'
@@ -731,7 +757,8 @@ class TabOverlay {
       this.frame.className = 'mpc-cam-frame'
       this.frame.allow = 'camera; microphone'
       this.frame.setAttribute('allow', 'camera; microphone')
-      this.frame.setAttribute('title', 'MyPipCam camera')
+      this.frame.setAttribute('aria-label', 'MyPipCam camera')
+      this.frame.removeAttribute('title')
       this.frame.tabIndex = -1
       // Critical: never let the iframe eat pointer events
       this.frame.style.pointerEvents = 'none'
@@ -751,8 +778,8 @@ class TabOverlay {
       this.menuBtn.type = 'button'
       this.menuBtn.className = 'mpc-menu-btn'
       this.menuBtn.textContent = '···'
-      this.menuBtn.title = 'Bubble options'
       this.menuBtn.setAttribute('aria-label', 'Camera bubble options')
+      this.menuBtn.removeAttribute('title')
 
       this.menu = document.createElement('div')
       this.menu.className = 'mpc-menu'
@@ -848,34 +875,34 @@ class TabOverlay {
     this.stopBtn = document.createElement('button')
     this.stopBtn.type = 'button'
     this.stopBtn.className = 'mpc-stop'
-    this.stopBtn.title = 'Stop & save'
     this.stopBtn.setAttribute('aria-label', 'Stop and save')
+    this.stopBtn.removeAttribute('title')
     this.stopBtn.innerHTML = iconStop()
 
     this.pauseBtn = document.createElement('button')
     this.pauseBtn.type = 'button'
-    this.pauseBtn.title = 'Pause'
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+    this.pauseBtn.removeAttribute('title')
     this.pauseBtn.innerHTML = iconPause()
 
     this.trimBtn = document.createElement('button')
     this.trimBtn.type = 'button'
     this.trimBtn.className = 'mpc-trim'
-    this.trimBtn.title = 'Rewind & Trim'
     this.trimBtn.setAttribute('aria-label', 'Rewind and trim — stop and open editor')
+    this.trimBtn.removeAttribute('title')
     this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
 
     this.restartBtn = document.createElement('button')
     this.restartBtn.type = 'button'
     this.restartBtn.className = 'mpc-restart'
-    this.restartBtn.title = 'Restart'
     this.restartBtn.setAttribute('aria-label', 'Restart recording')
+    this.restartBtn.removeAttribute('title')
     this.restartBtn.innerHTML = iconRestart()
 
     this.discardBtn = document.createElement('button')
     this.discardBtn.type = 'button'
-    this.discardBtn.title = 'Discard'
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
+    this.discardBtn.removeAttribute('title')
     this.discardBtn.innerHTML = iconTrash()
 
     btns.append(
@@ -914,29 +941,29 @@ class TabOverlay {
     dragTarget.addEventListener('pointerdown', (e) => this.onMoveDown(e))
     this.bubble.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
 
-    this.stopBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
+    // Use pointerdown (not click): more reliable inside popover top-layer, and
+    // requestStop/etc. already guard against double invocation.
+    const bindDockAction = (btn: HTMLButtonElement, action: () => void) => {
+      btn.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        action()
+      })
+    }
+    bindDockAction(this.stopBtn, () => {
       void this.requestStop()
     })
-    this.pauseBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
+    bindDockAction(this.pauseBtn, () => {
       void this.togglePause()
     })
-    this.trimBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
+    bindDockAction(this.trimBtn, () => {
       void this.requestTrimAndStop()
     })
-    this.restartBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
+    bindDockAction(this.restartBtn, () => {
       void this.requestRestart()
     })
-    this.discardBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
+    bindDockAction(this.discardBtn, () => {
       void this.requestDiscard(false)
     })
 
@@ -1156,8 +1183,8 @@ class TabOverlay {
     this.timerEl.textContent = '0:00'
     this.state.phase = 'countdown'
     this.pauseBtn.innerHTML = iconPause()
-    this.pauseBtn.title = 'Pause'
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+    this.pauseBtn.removeAttribute('title')
     this.setDockBusy(false)
     this.startCountdown()
   }
@@ -1167,16 +1194,16 @@ class TabOverlay {
     if (paused) {
       this.pauseStartedAt = Date.now()
       this.pauseBtn.innerHTML = iconPlay()
-      this.pauseBtn.title = 'Resume'
       this.pauseBtn.setAttribute('aria-label', 'Resume recording')
+      this.pauseBtn.removeAttribute('title')
     } else {
       if (this.pauseStartedAt) {
         this.pausedAccumMs += Date.now() - this.pauseStartedAt
         this.pauseStartedAt = 0
       }
       this.pauseBtn.innerHTML = iconPause()
-      this.pauseBtn.title = 'Pause'
       this.pauseBtn.setAttribute('aria-label', 'Pause recording')
+      this.pauseBtn.removeAttribute('title')
     }
   }
 
@@ -1331,11 +1358,13 @@ class TabOverlay {
   private toggleMenu() {
     this.menuOpen = !this.menuOpen
     this.menu?.classList.toggle('is-open', this.menuOpen)
+    this.bubble.classList.toggle('is-menu-open', this.menuOpen)
   }
 
   private closeMenu() {
     this.menuOpen = false
     this.menu?.classList.remove('is-open')
+    this.bubble.classList.remove('is-menu-open')
   }
 
   private onMoveDown(e: PointerEvent) {
@@ -1407,10 +1436,28 @@ class TabOverlay {
     this.stopping = true
     this.setDockBusy(true)
     try {
-      await chrome.runtime.sendMessage({ type: 'STOP_LOOM_RECORDING' })
+      const res = (await chrome.runtime.sendMessage({
+        type: 'STOP_LOOM_RECORDING',
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        try {
+          await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE' })
+        } catch {
+          /* ignore */
+        }
+      }
     } catch {
-      this.stopping = false
-      this.setDockBusy(false)
+      try {
+        await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE' })
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      // Always clear local chrome — never leave a stuck dock after Stop.
+      if (overlay === this) {
+        this.dispose()
+        clearOverlaySingleton()
+      }
     }
   }
 

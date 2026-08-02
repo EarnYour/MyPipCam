@@ -131,6 +131,8 @@ body {
 /* Loom-style recording detail */
 .page-detail {
   max-width: 1280px;
+  margin-inline: auto;
+  width: 100%;
 }
 
 .recording-detail {
