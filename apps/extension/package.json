@@ -7,7 +7,7 @@
     "prepare-assets": "node scripts/prepare-assets.mjs",
     "postinstall": "npm run prepare-assets",
     "dev": "npm run prepare-assets && vite",
-    "build": "npm run prepare-assets && tsc --noEmit && vite build",
+    "build": "npm run prepare-assets && tsc --noEmit && vite build && node scripts/strip-sw-vite-preload.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

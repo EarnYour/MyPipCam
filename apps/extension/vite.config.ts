@@ -6,6 +6,10 @@ import manifest from './manifest.config'
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
   build: {
+    // MV3 service workers have no `document`. Emptying modulepreload deps
+    // avoids the worst crash path; scripts/strip-sw-vite-preload.mjs then
+    // removes Vite's document-based preload helper from the SW boot chunk.
+    modulePreload: false,
     rollupOptions: {
       input: {
         recorder: 'src/recorder/index.html',

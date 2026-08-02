@@ -78,6 +78,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 console.log('[MyPipCam] SW boot', bootHealth())
 
+// Dynamic import keeps PING/health alive if main fails.
+// vite.config.ts strips Vite's __vitePreload wrapper (document/window) from this
+// chunk — without that, MV3 SW registration fails with "document is not defined".
 void import('./main')
   .then(() => {
     mainReady = true
