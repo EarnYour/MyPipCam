@@ -3,7 +3,7 @@
  *
  * When `?drive=1`, this window owns the 3→2→1 countdown (page overlay failed).
  * Otherwise the page overlay drives countdown; HUD mirrors status and provides
- * stop / pause / restart / discard so chrome is never baked into video.
+ * stop / pause / rewind-trim / restart / discard so chrome is never baked into video.
  */
 
 const params = new URLSearchParams(location.search)
@@ -20,6 +20,7 @@ const recActions = document.getElementById('recActions') as HTMLDivElement
 const stopBtn = document.getElementById('stop') as HTMLButtonElement
 const discardBtn = document.getElementById('discard') as HTMLButtonElement
 const pauseBtn = document.getElementById('pause') as HTMLButtonElement
+const trimBtn = document.getElementById('trim') as HTMLButtonElement
 const restartBtn = document.getElementById('restart') as HTMLButtonElement
 const cancelCountdownBtn = document.getElementById('cancelCountdown') as HTMLButtonElement
 const skipCountdownBtn = document.getElementById('skipCountdown') as HTMLButtonElement
@@ -55,6 +56,7 @@ function setBusy(next: boolean) {
     stopBtn,
     discardBtn,
     pauseBtn,
+    trimBtn,
     restartBtn,
     cancelCountdownBtn,
     skipCountdownBtn,
@@ -293,6 +295,48 @@ pauseBtn.addEventListener('click', () => {
       setBusy(false)
       setError(err instanceof Error ? err.message : 'Pause failed')
     })
+})
+
+trimBtn.addEventListener('click', () => {
+  if (busy || phase === 'countdown') return
+  const ok = window.confirm(
+    'Rewind 20 seconds and continue?\n\nKeeps the take up to that point, discards the rest, and resumes recording.',
+  )
+  if (!ok) return
+  setBusy(true)
+  void (async () => {
+    try {
+      const begin = (await chrome.runtime.sendMessage({
+        type: 'BEGIN_LOOM_REWIND',
+      })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
+      if (!begin?.ok || typeof begin.durationMs !== 'number') {
+        setBusy(false)
+        setError(begin?.reason?.trim() || 'Could not open rewind.')
+        return
+      }
+      const keepMs = Math.max(250, begin.durationMs - 20_000)
+      const applied = (await chrome.runtime.sendMessage({
+        type: 'APPLY_LOOM_REWIND',
+        keepMs,
+      })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
+      if (!applied?.ok) {
+        setBusy(false)
+        void chrome.runtime.sendMessage({ type: 'CANCEL_LOOM_REWIND' }).catch(() => undefined)
+        setError(applied?.reason?.trim() || 'Could not trim take.')
+        return
+      }
+      const kept =
+        typeof applied.durationMs === 'number' ? applied.durationMs : keepMs
+      recordingStartedAt = Date.now() - kept
+      pausedAccumMs = 0
+      setPauseUi(false)
+      statusEl.textContent = 'Recording'
+      setBusy(false)
+    } catch (err) {
+      setBusy(false)
+      setError(err instanceof Error ? err.message : 'Trim failed')
+    }
+  })()
 })
 
 restartBtn.addEventListener('click', () => {

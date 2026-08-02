@@ -22,7 +22,7 @@ import {
 const INSTALL_KEY = '__mypipcamPipOverlayInstalled'
 const DISPATCHER_KEY = '__mypipcamPipOverlayDispatcher'
 const HANDLER_KEY = '__mypipcamPipOverlayHandle'
-const INSTALL_VERSION = 4
+const INSTALL_VERSION = 5
 type OverlayMessageHandler = (
   message: any,
   sender: chrome.runtime.MessageSender,
@@ -413,6 +413,133 @@ function overlayStyles(): string {
     .mpc-dock .mpc-stop:hover { background: #c91828; }
     .mpc-dock .mpc-stop svg { width: 13px; height: 13px; }
     .mpc-dock .mpc-discard { color: #ffb4a8; }
+    .mpc-dock .mpc-trim { position: relative; }
+    .mpc-dock .mpc-trim-label {
+      position: absolute;
+      left: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(17, 19, 18, 0.94);
+      color: #fafaf7;
+      font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s ease;
+    }
+    .mpc-dock.is-expanded .mpc-trim:hover .mpc-trim-label,
+    .mpc-dock.is-expanded .mpc-trim:focus-visible .mpc-trim-label {
+      opacity: 1;
+    }
+
+    /* Mid-take rewind & trim panel (Loom-style punch-in) */
+    .mpc-dock-rewind {
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      width: min(280px, calc(100vw - 72px));
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(17, 19, 18, 0.97);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      color: #fafaf7;
+      font: 600 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 3;
+      pointer-events: auto;
+    }
+    .mpc-dock-rewind.is-open { display: flex; }
+    .mpc-dock-rewind-title {
+      font-weight: 750;
+      font-size: 12px;
+      letter-spacing: 0.01em;
+    }
+    .mpc-dock-rewind-time {
+      font-variant-numeric: tabular-nums;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .mpc-dock-rewind-time span {
+      color: rgba(250,250,247,0.55);
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+    .mpc-dock-rewind video {
+      width: 100%;
+      max-height: 120px;
+      border-radius: 10px;
+      background: #0b0c0b;
+      object-fit: contain;
+      display: none;
+    }
+    .mpc-dock-rewind video.is-visible { display: block; }
+    .mpc-dock-rewind input[type='range'] {
+      width: 100%;
+      accent-color: #ff5e29;
+      cursor: pointer;
+    }
+    .mpc-dock-rewind-jumps {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .mpc-dock-rewind-jumps button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 6px 9px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.08);
+      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+    }
+    .mpc-dock-rewind-jumps button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-rewind-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .mpc-dock-rewind-actions button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 7px 11px;
+      border-radius: 8px;
+      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+      background: rgba(255,255,255,0.08);
+    }
+    .mpc-dock-rewind-actions button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-rewind-actions button.mpc-rewind-apply {
+      background: #ff5e29;
+      color: #fff;
+    }
+    .mpc-dock-rewind-actions button.mpc-rewind-apply:hover {
+      background: #e85220;
+    }
+    .mpc-dock-rewind-actions button:disabled,
+    .mpc-dock-rewind-jumps button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .mpc-dock-rewind-hint {
+      color: rgba(250,250,247,0.65);
+      font-weight: 550;
+      font-size: 10.5px;
+    }
 
     /* Compact confirm / toast to the right of the dock (avoids window.confirm) */
     .mpc-dock-confirm {
@@ -832,8 +959,11 @@ function iconTrash(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>`
 }
 function iconRestart(): string {
-  // Circular arrow (rotate-ccw) — same stroke weight as discard.
+  // Circular arrow (rotate-ccw) — same stroke weight as trim/discard.
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
+}
+function iconTrim(): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a5 5 0 010 10H9"/></svg>`
 }
 function iconChevron(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`
@@ -851,6 +981,7 @@ class TabOverlay {
   private timerEl: HTMLSpanElement
   private stopBtn: HTMLButtonElement
   private pauseBtn: HTMLButtonElement
+  private trimBtn: HTMLButtonElement
   private restartBtn: HTMLButtonElement
   private discardBtn: HTMLButtonElement
   private confirmEl: HTMLDivElement
@@ -859,6 +990,14 @@ class TabOverlay {
   private confirmOkBtn: HTMLButtonElement
   private confirmCancelBtn: HTMLButtonElement
   private toastEl: HTMLDivElement
+  private rewindEl: HTMLDivElement
+  private rewindTimeEl: HTMLDivElement
+  private rewindVideo: HTMLVideoElement
+  private rewindRange: HTMLInputElement
+  private rewindHintEl: HTMLDivElement
+  private rewindApplyBtn: HTMLButtonElement
+  private rewindCancelBtn: HTMLButtonElement
+  private rewindJumpBtns: HTMLButtonElement[] = []
   private countdownEl: HTMLDivElement
   private countdownNum: HTMLDivElement
   private camClip: HTMLDivElement | null = null
@@ -877,6 +1016,11 @@ class TabOverlay {
   private toastTimerId: number | null = null
   private stopping = false
   private restarting = false
+  private rewindOpen = false
+  private rewindBusy = false
+  private rewindDurationMs = 0
+  private rewindKeepMs = 0
+  private rewindPreviewUrl: string | null = null
   private dockExpanded = false
   private dragging = false
   private menuOpen = false
@@ -1065,6 +1209,17 @@ class TabOverlay {
     const more = document.createElement('div')
     more.className = 'mpc-dock-more'
 
+    this.trimBtn = document.createElement('button')
+    this.trimBtn.type = 'button'
+    this.trimBtn.className = 'mpc-dock-btn mpc-trim'
+    this.trimBtn.dataset.mpcAction = 'trim'
+    this.trimBtn.title = 'Rewind & Trim'
+    this.trimBtn.setAttribute(
+      'aria-label',
+      'Rewind and trim — pause, pick a point, discard the tail, continue recording',
+    )
+    this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
+
     this.restartBtn = document.createElement('button')
     this.restartBtn.type = 'button'
     this.restartBtn.className = 'mpc-dock-btn'
@@ -1081,7 +1236,7 @@ class TabOverlay {
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
     this.discardBtn.innerHTML = iconTrash()
 
-    more.append(this.restartBtn, this.discardBtn)
+    more.append(this.trimBtn, this.restartBtn, this.discardBtn)
 
     this.confirmEl = document.createElement('div')
     this.confirmEl.className = 'mpc-dock-confirm'
@@ -1109,7 +1264,73 @@ class TabOverlay {
     this.toastEl.className = 'mpc-dock-toast'
     this.toastEl.setAttribute('role', 'status')
 
-    this.dock.append(this.dockHead, core, more, this.confirmEl, this.toastEl)
+    this.rewindEl = document.createElement('div')
+    this.rewindEl.className = 'mpc-dock-rewind'
+    this.rewindEl.setAttribute('role', 'dialog')
+    this.rewindEl.setAttribute('aria-modal', 'true')
+    this.rewindEl.setAttribute('aria-label', 'Rewind and trim')
+    const rewindTitle = document.createElement('div')
+    rewindTitle.className = 'mpc-dock-rewind-title'
+    rewindTitle.textContent = 'Rewind & trim'
+    this.rewindTimeEl = document.createElement('div')
+    this.rewindTimeEl.className = 'mpc-dock-rewind-time'
+    this.rewindTimeEl.textContent = '0:00'
+    this.rewindVideo = document.createElement('video')
+    this.rewindVideo.muted = true
+    this.rewindVideo.playsInline = true
+    this.rewindVideo.preload = 'metadata'
+    this.rewindRange = document.createElement('input')
+    this.rewindRange.type = 'range'
+    this.rewindRange.min = '0'
+    this.rewindRange.max = '1000'
+    this.rewindRange.value = '1000'
+    this.rewindRange.dataset.mpcAction = 'rewind-scrub'
+    this.rewindRange.addEventListener('input', () => this.onRewindScrub())
+    const jumps = document.createElement('div')
+    jumps.className = 'mpc-dock-rewind-jumps'
+    for (const sec of [5, 10, 20] as const) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.dataset.mpcAction = `rewind-jump-${sec}`
+      btn.textContent = `−${sec}s`
+      btn.title = `Jump back ${sec} seconds`
+      this.rewindJumpBtns.push(btn)
+      jumps.appendChild(btn)
+    }
+    this.rewindHintEl = document.createElement('div')
+    this.rewindHintEl.className = 'mpc-dock-rewind-hint'
+    this.rewindHintEl.textContent =
+      'Discard everything after this point, then keep recording the same take.'
+    const rewindActions = document.createElement('div')
+    rewindActions.className = 'mpc-dock-rewind-actions'
+    this.rewindCancelBtn = document.createElement('button')
+    this.rewindCancelBtn.type = 'button'
+    this.rewindCancelBtn.dataset.mpcAction = 'rewind-cancel'
+    this.rewindCancelBtn.textContent = 'Cancel'
+    this.rewindApplyBtn = document.createElement('button')
+    this.rewindApplyBtn.type = 'button'
+    this.rewindApplyBtn.className = 'mpc-rewind-apply'
+    this.rewindApplyBtn.dataset.mpcAction = 'rewind-apply'
+    this.rewindApplyBtn.textContent = 'Trim & continue'
+    rewindActions.append(this.rewindCancelBtn, this.rewindApplyBtn)
+    this.rewindEl.append(
+      rewindTitle,
+      this.rewindTimeEl,
+      this.rewindVideo,
+      this.rewindRange,
+      jumps,
+      this.rewindHintEl,
+      rewindActions,
+    )
+
+    this.dock.append(
+      this.dockHead,
+      core,
+      more,
+      this.confirmEl,
+      this.rewindEl,
+      this.toastEl,
+    )
 
     // —— Countdown with Cancel / Skip ——
     this.countdownEl = document.createElement('div')
@@ -1220,6 +1441,7 @@ class TabOverlay {
       return
     }
     if (this.menuOpen) this.closeMenu()
+    if (this.rewindOpen) return
     if (this.confirmAction) {
       this.resolveConfirm(false)
       return
@@ -1235,6 +1457,7 @@ class TabOverlay {
         this.closeMenu()
       }
     }
+    if (this.rewindOpen) return
     if (this.confirmAction) {
       if (!path.includes(this.confirmEl)) this.resolveConfirm(false)
       return
@@ -1269,18 +1492,26 @@ class TabOverlay {
 
     switch (action) {
       case 'toggle-expand':
+        if (this.rewindOpen) return
         this.setDockExpanded(!this.dockExpanded)
         break
       case 'stop':
+        if (this.rewindOpen) return
         void this.requestStop()
         break
       case 'pause':
+        if (this.rewindOpen) return
         void this.togglePause()
         break
+      case 'trim':
+        void this.openRewindTrim()
+        break
       case 'restart':
+        if (this.rewindOpen) return
         void this.requestRestart()
         break
       case 'discard':
+        if (this.rewindOpen) return
         void this.requestDiscard(false)
         break
       case 'confirm-ok':
@@ -1288,6 +1519,21 @@ class TabOverlay {
         break
       case 'confirm-cancel':
         this.resolveConfirm(false)
+        break
+      case 'rewind-apply':
+        void this.applyRewindTrim()
+        break
+      case 'rewind-cancel':
+        void this.cancelRewindTrim()
+        break
+      case 'rewind-jump-5':
+        this.nudgeRewind(-5000)
+        break
+      case 'rewind-jump-10':
+        this.nudgeRewind(-10000)
+        break
+      case 'rewind-jump-20':
+        this.nudgeRewind(-20000)
         break
       default:
         break
@@ -1501,6 +1747,7 @@ class TabOverlay {
     }
     this.clearCollapseTimer()
     this.hideConfirm()
+    this.hideRewindPanel()
     this.errorBanner?.remove()
     this.errorBanner = null
     this.restarting = false
@@ -1704,12 +1951,221 @@ class TabOverlay {
     }
   }
 
+  /**
+   * Loom-style mid-take rewind: pause → scrub → discard tail after keep point →
+   * resume capturing into the same take (prefix sealed in offscreen).
+   */
+  private async openRewindTrim() {
+    if (
+      this.stopping ||
+      this.restarting ||
+      this.confirmAction ||
+      this.rewindOpen ||
+      this.rewindBusy
+    ) {
+      return
+    }
+    if (this.state.phase === 'countdown') return
+    this.hideConfirm()
+    this.setDockExpanded(true)
+    this.clearCollapseTimer()
+    this.rewindBusy = true
+    this.setDockBusy(true)
+    this.showDockToast('Pausing for rewind…')
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'BEGIN_LOOM_REWIND',
+      })) as {
+        ok?: boolean
+        durationMs?: number
+        previewBlob?: Blob
+        reason?: string
+      } | undefined
+      if (!res?.ok || typeof res.durationMs !== 'number') {
+        this.rewindBusy = false
+        this.setDockBusy(false)
+        this.showDockToast(res?.reason?.trim() || 'Could not open rewind.')
+        return
+      }
+      this.setPausedUi(true)
+      this.showRewindPanel(res.durationMs, res.previewBlob)
+      this.rewindBusy = false
+      this.setDockBusy(false)
+      this.showDockToast('Pick where to continue — then Trim & continue.')
+    } catch (err) {
+      this.rewindBusy = false
+      this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not open rewind.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private showRewindPanel(durationMs: number, previewBlob?: Blob) {
+    this.clearRewindPreview()
+    this.rewindOpen = true
+    this.rewindDurationMs = Math.max(250, durationMs)
+    this.rewindKeepMs = this.rewindDurationMs
+    this.rewindRange.max = String(this.rewindDurationMs)
+    this.rewindRange.value = String(this.rewindKeepMs)
+    this.updateRewindTimeLabel()
+    if (previewBlob && previewBlob.size > 64) {
+      this.rewindPreviewUrl = URL.createObjectURL(previewBlob)
+      this.rewindVideo.src = this.rewindPreviewUrl
+      this.rewindVideo.classList.add('is-visible')
+      void this.rewindVideo.play().catch(() => undefined)
+      this.seekRewindPreview()
+    } else {
+      this.rewindVideo.classList.remove('is-visible')
+    }
+    this.rewindEl.classList.add('is-open')
+    this.rewindApplyBtn.focus()
+  }
+
+  private hideRewindPanel() {
+    this.rewindOpen = false
+    this.rewindBusy = false
+    this.rewindEl.classList.remove('is-open')
+    this.clearRewindPreview()
+  }
+
+  private clearRewindPreview() {
+    this.rewindVideo.pause()
+    this.rewindVideo.removeAttribute('src')
+    this.rewindVideo.load()
+    this.rewindVideo.classList.remove('is-visible')
+    if (this.rewindPreviewUrl) {
+      URL.revokeObjectURL(this.rewindPreviewUrl)
+      this.rewindPreviewUrl = null
+    }
+  }
+
+  private updateRewindTimeLabel() {
+    const keep = formatDuration(this.rewindKeepMs)
+    const total = formatDuration(this.rewindDurationMs)
+    this.rewindTimeEl.innerHTML = `${keep}<span>/ ${total}</span>`
+  }
+
+  private onRewindScrub() {
+    const v = Number(this.rewindRange.value)
+    if (!Number.isFinite(v)) return
+    this.rewindKeepMs = Math.max(250, Math.min(this.rewindDurationMs, v))
+    this.updateRewindTimeLabel()
+    this.seekRewindPreview()
+  }
+
+  private nudgeRewind(deltaMs: number) {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindKeepMs = Math.max(
+      250,
+      Math.min(this.rewindDurationMs, this.rewindKeepMs + deltaMs),
+    )
+    this.rewindRange.value = String(this.rewindKeepMs)
+    this.updateRewindTimeLabel()
+    this.seekRewindPreview()
+  }
+
+  private seekRewindPreview() {
+    if (!this.rewindVideo.classList.contains('is-visible')) return
+    const t = this.rewindKeepMs / 1000
+    try {
+      if (Number.isFinite(this.rewindVideo.duration) && this.rewindVideo.duration > 0) {
+        this.rewindVideo.currentTime = Math.min(t, Math.max(0, this.rewindVideo.duration - 0.05))
+      } else {
+        this.rewindVideo.currentTime = Math.max(0, t)
+      }
+    } catch {
+      /* ignore seek errors on incomplete webm */
+    }
+  }
+
+  private async applyRewindTrim() {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindBusy = true
+    this.setRewindControlsBusy(true)
+    this.showDockToast('Trimming take…')
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'APPLY_LOOM_REWIND',
+        keepMs: this.rewindKeepMs,
+      })) as { ok?: boolean; durationMs?: number; reason?: string } | undefined
+      if (!res?.ok) {
+        this.rewindBusy = false
+        this.setRewindControlsBusy(false)
+        this.showDockToast(res?.reason?.trim() || 'Could not trim take.')
+        return
+      }
+      const kept =
+        typeof res.durationMs === 'number' ? res.durationMs : this.rewindKeepMs
+      this.applyRewindClock(kept)
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      this.showDockToast('Trimmed — recording continues.')
+      this.scheduleDockCollapse()
+    } catch (err) {
+      this.rewindBusy = false
+      this.setRewindControlsBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not trim take.'
+      this.showDockToast(msg)
+    }
+  }
+
+  private async cancelRewindTrim() {
+    if (!this.rewindOpen || this.rewindBusy) return
+    this.rewindBusy = true
+    this.setRewindControlsBusy(true)
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'CANCEL_LOOM_REWIND',
+      })) as { ok?: boolean; reason?: string } | undefined
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      if (res?.ok) {
+        this.setPausedUi(false)
+        this.scheduleDockCollapse()
+      } else {
+        this.showDockToast(res?.reason?.trim() || 'Could not cancel rewind.')
+      }
+    } catch (err) {
+      this.hideRewindPanel()
+      this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not cancel rewind.'
+      this.showDockToast(msg)
+    }
+  }
+
+  /** After a successful mid-take trim, resume the dock clock from the kept prefix. */
+  applyRewindClock(keptDurationMs: number) {
+    const kept = Math.max(0, keptDurationMs)
+    this.recordingStartedAt = Date.now() - kept
+    this.pausedAccumMs = 0
+    this.pauseStartedAt = 0
+    this.setPausedUi(false)
+    this.tickTimer()
+  }
+
+  private setRewindControlsBusy(busy: boolean) {
+    this.rewindApplyBtn.disabled = busy
+    this.rewindCancelBtn.disabled = busy
+    this.rewindRange.disabled = busy
+    for (const btn of this.rewindJumpBtns) btn.disabled = busy
+  }
+
   private async togglePause() {
     if (
       this.state.phase === 'countdown' ||
       this.stopping ||
       this.restarting ||
-      this.confirmAction
+      this.confirmAction ||
+      this.rewindOpen
     ) {
       return
     }
@@ -1822,11 +2278,13 @@ class TabOverlay {
   }
 
   private setDockBusy(busy: boolean) {
-    this.stopBtn.disabled = busy
-    this.pauseBtn.disabled = busy
-    this.restartBtn.disabled = busy
-    this.discardBtn.disabled = busy
-    this.dockHead.disabled = busy
+    const lock = busy || this.rewindOpen
+    this.stopBtn.disabled = lock
+    this.pauseBtn.disabled = lock
+    this.trimBtn.disabled = lock
+    this.restartBtn.disabled = lock
+    this.discardBtn.disabled = lock
+    this.dockHead.disabled = lock
     this.confirmOkBtn.disabled = busy
     this.confirmCancelBtn.disabled = busy
   }
@@ -2070,6 +2528,7 @@ class TabOverlay {
     if (this.toastTimerId != null) window.clearTimeout(this.toastTimerId)
     this.clearCollapseTimer()
     this.hideConfirm()
+    this.hideRewindPanel()
     this.dock.removeEventListener('pointerdown', this.onDockPointerDown)
     this.root.removeEventListener('pointerdown', this.onOverlayPointerDown)
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
@@ -2245,6 +2704,15 @@ window[HANDLER_KEY] = (message, _sender, sendResponse) => {
   }
   if (message?.type === 'PIP_OVERLAY_PAUSED' && overlay) {
     overlay.setPausedUi(Boolean(message.paused))
+    sendResponse({ ok: true })
+    return true
+  }
+  if (message?.type === 'PIP_OVERLAY_REWIND_APPLIED' && overlay) {
+    const ms =
+      typeof message.durationMs === 'number' && Number.isFinite(message.durationMs)
+        ? message.durationMs
+        : 0
+    overlay.applyRewindClock(ms)
     sendResponse({ ok: true })
     return true
   }

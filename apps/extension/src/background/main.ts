@@ -1345,6 +1345,124 @@ async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> 
   return { ok: false, reason: res?.reason || 'resume-failed' }
 }
 
+/** Pause and open mid-take rewind & trim (Loom punch-in), not stop→editor. */
+async function beginLoomRewind(): Promise<{
+  ok: boolean
+  durationMs?: number
+  previewBlob?: Blob
+  reason?: string
+}> {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (!session || (session.phase !== 'recording' && session.phase !== 'paused')) {
+    return { ok: false, reason: 'not-recording' }
+  }
+
+  await ensureOffscreen()
+  const res = await sendOffscreen<{
+    ok?: boolean
+    durationMs?: number
+    previewBlob?: Blob
+    reason?: string
+  }>({ type: 'OFFSCREEN_REWIND_BEGIN' })
+
+  if (!res?.ok) {
+    return { ok: false, reason: res?.reason || 'Could not open rewind.' }
+  }
+
+  session.phase = 'paused'
+  loomSession = session
+  try {
+    await persistLoomSession(session)
+  } catch {
+    /* ignore */
+  }
+  try {
+    await chrome.tabs.sendMessage(session.tabId, {
+      type: 'PIP_OVERLAY_PAUSED',
+      paused: true,
+    })
+  } catch {
+    /* ignore */
+  }
+  await syncHud('paused')
+  return {
+    ok: true,
+    durationMs: res.durationMs,
+    previewBlob: res.previewBlob,
+  }
+}
+
+async function applyLoomRewind(keepMs: number): Promise<{
+  ok: boolean
+  durationMs?: number
+  reason?: string
+}> {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (!session || (session.phase !== 'recording' && session.phase !== 'paused')) {
+    return { ok: false, reason: 'not-recording' }
+  }
+
+  await ensureOffscreen()
+  const res = await sendOffscreen<{
+    ok?: boolean
+    durationMs?: number
+    reason?: string
+  }>({ type: 'OFFSCREEN_REWIND_APPLY', keepMs })
+
+  if (!res?.ok) {
+    return { ok: false, reason: res?.reason || 'Could not trim take.' }
+  }
+
+  session.phase = 'recording'
+  loomSession = session
+  try {
+    await persistLoomSession(session)
+  } catch {
+    /* ignore */
+  }
+  try {
+    await chrome.tabs.sendMessage(session.tabId, {
+      type: 'PIP_OVERLAY_REWIND_APPLIED',
+      durationMs: res.durationMs ?? keepMs,
+    })
+  } catch {
+    /* ignore */
+  }
+  await syncHud('recording')
+  return { ok: true, durationMs: res.durationMs }
+}
+
+async function cancelLoomRewind(): Promise<{ ok: boolean; reason?: string }> {
+  const session = (await hydrateLoomSession()) ?? loomSession
+  if (!session) return { ok: false, reason: 'not-recording' }
+
+  await ensureOffscreen()
+  const res = await sendOffscreen<{ ok?: boolean; reason?: string }>({
+    type: 'OFFSCREEN_REWIND_CANCEL',
+  })
+  if (!res?.ok) {
+    return { ok: false, reason: res?.reason || 'Could not cancel rewind.' }
+  }
+
+  session.phase = 'recording'
+  loomSession = session
+  try {
+    await persistLoomSession(session)
+  } catch {
+    /* ignore */
+  }
+  try {
+    await chrome.tabs.sendMessage(session.tabId, {
+      type: 'PIP_OVERLAY_PAUSED',
+      paused: false,
+    })
+  } catch {
+    /* ignore */
+  }
+  await syncHud('recording')
+  return { ok: true }
+}
+
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'start-recording') return
   const session = (await hydrateLoomSession()) ?? loomSession
@@ -1880,6 +1998,49 @@ function dispatchExtensionMessage(
         replySafe(sendResponse, {
           ok: false,
           reason: errMessage(err, 'Could not resume recording.'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'BEGIN_LOOM_REWIND') {
+    void (async () => {
+      try {
+        replySafe(sendResponse, await beginLoomRewind())
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Could not open rewind.'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'APPLY_LOOM_REWIND') {
+    void (async () => {
+      try {
+        const keepMs = Number(message.keepMs)
+        replySafe(sendResponse, await applyLoomRewind(keepMs))
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Could not trim take.'),
+        })
+      }
+    })()
+    return true
+  }
+
+  if (message?.type === 'CANCEL_LOOM_REWIND') {
+    void (async () => {
+      try {
+        replySafe(sendResponse, await cancelLoomRewind())
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Could not cancel rewind.'),
         })
       }
     })()
