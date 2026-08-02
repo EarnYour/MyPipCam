@@ -101,6 +101,74 @@ final class LibraryFolderStore: ObservableObject {
 
     // MARK: - Choose / clear
 
+    /// Creates ~/Movies/MyPipCam if needed and adopts it as the library.
+    @discardableResult
+    func ensureDefaultLibrary(settings: BubbleSettings? = nil) -> Bool {
+        if hasLibrary { return true }
+        let url = suggestedLibraryURL()
+        do {
+            try adoptFolder(at: url, settings: settings)
+            refresh()
+            return true
+        } catch {
+            presentError(error)
+            return false
+        }
+    }
+
+    /// Moves a finished temp MP4 into `recordings/<uuid>/` with Chrome-compatible meta.json.
+    @discardableResult
+    func saveNewRecording(
+        fromTempVideo tempURL: URL,
+        durationMs: Double,
+        title: String,
+        createdAt: Double? = nil,
+        settings: BubbleSettings? = nil
+    ) throws -> FolderRecording {
+        if !hasLibrary {
+            guard ensureDefaultLibrary(settings: settings) else {
+                throw LibraryFolderError.noFolderSelected
+            }
+        }
+
+        let id = UUID().uuidString
+        let created = createdAt ?? (Date().timeIntervalSince1970 * 1000)
+        let attrs = try FileManager.default.attributesOfItem(atPath: tempURL.path)
+        let sizeBytes = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+
+        try withScopedAccess { root in
+            try ensureLibraryStructure(at: root)
+            let folder = try Self.recordingFolder(root: root, id: id)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let dest = folder.appendingPathComponent("video.mp4")
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.moveItem(at: tempURL, to: dest)
+
+            let meta: [String: Any] = [
+                "id": id,
+                "title": title,
+                "createdAt": created,
+                "durationMs": durationMs,
+                "mimeType": "video/mp4",
+                "sizeBytes": sizeBytes,
+                "source": "macos-desktop"
+            ]
+            let metaURL = folder.appendingPathComponent("meta.json")
+            try writeMeta(meta, to: metaURL)
+        }
+
+        // Clean up temp if move left it behind.
+        try? FileManager.default.removeItem(at: tempURL)
+        refresh()
+
+        guard let saved = recordings.first(where: { $0.id == id }) else {
+            throw LibraryFolderError.recordingNotFound(id)
+        }
+        return saved
+    }
+
     /// Presents `NSOpenPanel` (directories only). Suggests `~/Movies/MyPipCam`.
     @discardableResult
     func chooseFolder(settings: BubbleSettings? = nil) -> Bool {

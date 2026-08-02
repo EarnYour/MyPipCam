@@ -3,9 +3,8 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Enumerates and persists the preferred microphone. The macOS bubble does not
-/// record audio itself — OBS / system capture or the Chrome extension owns the
-/// final mix — but the selection is stored for parity and future use.
+/// Enumerates and persists the preferred microphone for desktop recordings
+/// (and kept in sync for OBS / Chrome workflows).
 @MainActor
 final class MicrophoneManager: ObservableObject {
     private static let selectedDeviceDefaultsKey = "selectedMicrophoneID"

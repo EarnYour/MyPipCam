@@ -10,6 +10,7 @@ struct CameraBubbleView: View {
     @State private var showBorderPopover = false
     @State private var isHovered = false
     @StateObject private var dismissHelper = ControlsDismissHelper()
+    @ObservedObject private var recording = RecordingController.shared
     var onQuit: () -> Void
 
     /// Extra space around the bubble so the soft circular shadow isn't clipped.
@@ -172,11 +173,26 @@ struct CameraBubbleView: View {
         .background(Color(red: 0.12, green: 0.13, blue: 0.16))
     }
 
-    /// Hover-only affordance near the bottom edge — click to reveal the full toolbar.
+    /// Hover-only overflow near the bottom edge — Record + toolbar.
     private var dotsButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showControls = true
+        Menu {
+            if recording.isRecording {
+                Button("Stop Recording") {
+                    Task { await recording.stopRecording(reveal: true) }
+                }
+            } else {
+                Button("Record to Cloud…") {
+                    recording.openSetup()
+                }
+            }
+            Divider()
+            Button("Show Controls") {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showControls = true
+                }
+            }
+            Button("Open Recording Library") {
+                LibraryWindowPresenter.open(settings: settings, chooseIfNeeded: true)
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -192,15 +208,29 @@ struct CameraBubbleView: View {
                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
                 )
         }
-        .buttonStyle(.plain)
-        .help("Show controls")
-        .accessibilityLabel("Show controls")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Menu")
+        .accessibilityLabel("MyPipCam menu")
     }
 
-    /// Tight toolbar: camera · mic · appearance · mirror · close.
+    /// Tight toolbar: record · camera · mic · appearance · mirror · close.
     /// Dismiss via Escape / click outside (no redundant collapse dots).
     private var controlsBar: some View {
         HStack(spacing: 10) {
+            Button {
+                recording.toggleFromMenu()
+            } label: {
+                Image(systemName: recording.isRecording ? "stop.circle.fill" : "record.circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(
+                        recording.isRecording
+                            ? Color(red: 0.98, green: 0.35, blue: 0.35)
+                            : .white
+                    )
+            }
+            .help(recording.isRecording ? "Stop recording" : "Record to Cloud")
+
             Menu {
                 ForEach(camera.devices, id: \.uniqueID) { device in
                     Button {
@@ -288,6 +318,18 @@ struct CameraBubbleView: View {
     /// Power-user alternate; appearance lives in one place (popover), not split across menus.
     @ViewBuilder
     private var menuContent: some View {
+        if recording.isRecording {
+            Button("Stop Recording") {
+                Task { await recording.stopRecording(reveal: true) }
+            }
+        } else {
+            Button("Record to Cloud…") {
+                recording.openSetup()
+            }
+        }
+
+        Divider()
+
         Menu("Camera") {
             ForEach(camera.devices, id: \.uniqueID) { device in
                 Button(device.localizedName) {

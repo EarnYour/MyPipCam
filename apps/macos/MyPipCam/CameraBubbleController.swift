@@ -58,6 +58,12 @@ final class CameraBubbleController: NSObject {
         positionDefault(panel)
         panel.orderFrontRegardless()
 
+        RecordToCloudCoordinator.shared.bind(
+            camera: camera,
+            microphone: microphone,
+            settings: settings
+        )
+
         sizeCancellable = settings.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -154,6 +160,17 @@ final class CameraBubbleController: NSObject {
     }
 
     func quit() {
+        if RecordingController.shared.isRecording {
+            Task {
+                await RecordingController.shared.stopRecording(reveal: false)
+                self.finishQuit()
+            }
+            return
+        }
+        finishQuit()
+    }
+
+    private func finishQuit() {
         camera.stopSession()
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)

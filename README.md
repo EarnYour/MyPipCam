@@ -57,7 +57,7 @@ Details, Drive OAuth, shared library folder, and pitfalls: [AGENTS.md](AGENTS.md
 ## How the pieces fit together
 
 - **Chrome extension** is the Loom-like capture path: record **this Chrome tab** with a live draggable camera PiP on the page (tab capture), browse clips in a local library, trim/cut, and download. An Advanced path still supports screen/window capture.
-- **macOS app** is the desktop companion: a real always-on-top camera window for OBS or any screen recorder. Use it when you need the bubble over the whole desktop (not just a browser tab).
+- **macOS app** is the desktop companion: a real always-on-top camera window, plus **Record** (ScreenCaptureKit screen/window capture with PiP) that saves into the shared library folder Chrome uses.
 - **Shared library folder** (optional): both apps can point at the same local folder so Chrome writes recordings to disk and the Mac app browses/plays them. Until a folder is chosen, the extension keeps clips in IndexedDB only.
 
 You can use either alone, or both (e.g. Mac bubble for OBS + extension for quick browser recordings).
@@ -252,7 +252,7 @@ Then load the unpacked path Vite/CRXJS prints (or rebuild and reload `dist`).
 
 ## macOS app
 
-A Loom-style floating camera bubble for macOS. Point it at your OBS Virtual Camera (or any webcam), drag it around, and screen-record in OBS for that picture-in-picture feel.
+A Loom-style floating camera bubble for macOS. Point it at your webcam (or OBS Virtual Camera), drag it around, and use **Record** to capture the desktop (or a window) with the PiP included — or keep using OBS if you prefer.
 
 ### Features
 
@@ -260,13 +260,14 @@ A Loom-style floating camera bubble for macOS. Point it at your OBS Virtual Came
 - Drag anywhere to move
 - Scroll while hovering to resize
 - Camera picker (OBS Virtual Camera, FaceTime, Continuity Camera, etc.)
-- Microphone picker (built-in / USB / Bluetooth mics) — choice is remembered; the Mac app does **not** record audio itself
+- Microphone picker (built-in / USB / Bluetooth mics) — choice is remembered and used for desktop recording
 - Border color presets + soft Loom-like drop shadow
 - Mirror toggle
 - Menu bar icon to show/quit (no Dock icon)
+- **Record…** — dots menu / menu bar: pick camera, mic, Screen or Window, then ScreenCaptureKit-record; saves MP4 into the shared library folder (`recordings/<uuid>/`). Tab capture stays in the Chrome extension. Google Drive upload still runs through the extension when Connect Google + auto-upload are enabled.
 - **Open Recording Library** — opens the native library window when a shared folder is set (prompts to choose otherwise)
 - **Choose Recording Library…** / **Reveal Library in Finder** — pick or show the on-disk folder shared with Chrome
-- **Open in Chrome…** — secondary path for editor / transcription in the extension
+- **Open in Chrome…** — secondary path for editor / transcription / Drive sync in the extension
 - **Set Extension ID…** — paste ID from `chrome://extensions` if Open in Chrome hits a blank page
 - **Install Chrome Extension…** — opens `chrome://extensions` + reveals `apps/extension/dist` with load steps
 

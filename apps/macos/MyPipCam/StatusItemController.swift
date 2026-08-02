@@ -5,6 +5,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var launchAtLoginItem: NSMenuItem?
     private var revealLibraryItem: NSMenuItem?
+    private var recordItem: NSMenuItem?
     private let loginItem: LoginItemManager
     private let settings: BubbleSettings
     private let libraryStore: LibraryFolderStore
@@ -42,6 +43,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let showItem = NSMenuItem(title: "Show Bubble", action: #selector(showBubble), keyEquivalent: "s")
         showItem.target = self
         menu.addItem(showItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let recordItem = NSMenuItem(
+            title: "Record to Cloud…",
+            action: #selector(toggleRecord),
+            keyEquivalent: "r"
+        )
+        recordItem.target = self
+        menu.addItem(recordItem)
+        self.recordItem = recordItem
 
         menu.addItem(NSMenuItem.separator())
 
@@ -122,6 +134,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         refreshLoginItemState()
         refreshLibraryMenuState()
+        refreshRecordMenuState()
+    }
+
+    private func refreshRecordMenuState() {
+        if RecordingController.shared.isRecording {
+            let s = RecordingController.shared.elapsedSeconds
+            let stamp = String(format: "%d:%02d", s / 60, s % 60)
+            recordItem?.title = "Stop Recording (\(stamp))"
+        } else {
+            recordItem?.title = "Record to Cloud…"
+        }
     }
 
     private func refreshLoginItemState() {
@@ -140,6 +163,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func showBubble() {
         onShowBubble()
+    }
+
+    @objc private func toggleRecord() {
+        RecordingController.shared.toggleFromMenu()
     }
 
     @objc private func openRecordingLibrary() {
