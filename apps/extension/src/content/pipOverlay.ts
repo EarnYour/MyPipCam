@@ -93,6 +93,29 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
 }
 
+/** Wait for N animation frames so the compositor drops the previous paint. */
+function waitAnimationFrames(count: number): Promise<void> {
+  return new Promise((resolve) => {
+    const step = (left: number) => {
+      if (left <= 0) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(() => step(left - 1))
+    }
+    requestAnimationFrame(() => step(count - 1))
+  })
+}
+
+/**
+ * After removing countdown chrome, give Chrome tabCapture time to stop
+ * including the last painted "1" before MediaRecorder starts.
+ */
+async function waitCountdownClearedFromCapture(): Promise<void> {
+  await waitAnimationFrames(2)
+  await new Promise<void>((r) => window.setTimeout(r, 80))
+}
+
 type OverlayMount = {
   host: HTMLElement
   /** Shadow container — page CSS cannot style descendants. */
@@ -1016,6 +1039,8 @@ class TabOverlay {
   private toastTimerId: number | null = null
   private stopping = false
   private restarting = false
+  /** Guards skip + interval both firing LOOM_COUNTDOWN_DONE. */
+  private finishingCountdown = false
   private rewindOpen = false
   private rewindBusy = false
   private rewindDurationMs = 0
@@ -1355,7 +1380,7 @@ class TabOverlay {
     skipBtn.textContent = 'Skip'
     skipBtn.addEventListener('click', (e) => {
       e.preventDefault()
-      this.finishCountdown()
+      void this.finishCountdown()
     })
     countdownActions.append(cancelBtn, skipBtn)
     this.countdownEl.append(this.countdownNum, countdownActions)
@@ -1571,8 +1596,9 @@ class TabOverlay {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
+    this.finishingCountdown = false
     this.clearCollapseTimer()
-    this.countdownEl.classList.add('is-hidden')
+    this.hideCountdownChrome()
     this.hideDock()
     this.setDockExpanded(false)
     this.errorBanner?.remove()
@@ -1793,10 +1819,23 @@ class TabOverlay {
     this.tickTimer()
   }
 
-  private enterRecordingUi() {
-    // Hide countdown before frames are committed; show tiny collapsed dock.
+  /**
+   * Fully hide + detach countdown so tabCapture cannot still sample "3/2/1".
+   * Call this (and wait for paint) before LOOM_COUNTDOWN_DONE.
+   */
+  private hideCountdownChrome() {
     this.countdownEl.classList.add('is-hidden')
+    this.countdownEl.style.setProperty('display', 'none', 'important')
+    this.countdownEl.style.setProperty('visibility', 'hidden', 'important')
+    this.countdownEl.style.setProperty('opacity', '0', 'important')
     this.countdownEl.remove()
+  }
+
+  private enterRecordingUi() {
+    // Countdown must already be gone before MediaRecorder starts; this is
+    // idempotent for RECORDING_STARTED / retry paths. Dock may appear in
+    // tabCapture (accepted tradeoff so Stop is never missing).
+    this.hideCountdownChrome()
     this.setDockExpanded(false)
     this.revealDock()
     if (this.timerId == null) {
@@ -1878,45 +1917,61 @@ class TabOverlay {
     }
   }
 
-  private finishCountdown() {
+  private async finishCountdown() {
+    if (this.finishingCountdown) return
+    this.finishingCountdown = true
     if (this.countdownId != null) {
       window.clearInterval(this.countdownId)
       this.countdownId = null
     }
-    // Hide countdown AND show dock immediately — do not wait for
-    // PIP_OVERLAY_RECORDING_STARTED (that message can fail silently and used
-    // to leave users with zero controls after the HUD was made fallback-only).
-    this.enterRecordingUi()
-    void (async () => {
-      try {
-        const res = (await chrome.runtime.sendMessage({
-          type: 'LOOM_COUNTDOWN_DONE',
-        })) as { ok?: boolean; reason?: string } | undefined
-        if (!res?.ok) {
-          this.showError(
-            res?.reason?.trim() ||
-              'Could not start capture after countdown. Try Start again.',
-          )
-          return
-        }
-        // Belt-and-suspenders: ensure dock stays painted even if the SW's
-        // RECORDING_STARTED ping was dropped.
-        this.enterRecordingUi()
-      } catch (err) {
-        const msg =
-          err instanceof Error && err.message.trim()
-            ? err.message.trim()
-            : 'Could not start capture after countdown.'
-        this.showError(msg)
+    // Remove countdown from the painted tab BEFORE arming MediaRecorder —
+    // otherwise Chrome tabCapture still includes the last "1" frame.
+    this.hideCountdownChrome()
+    // Show dock immediately so Stop is never missing if RECORDING_STARTED drops.
+    // Dock-in-capture is an accepted tradeoff (see file header).
+    this.setDockExpanded(false)
+    this.revealDock()
+    if (this.timerId == null) {
+      this.timerId = window.setInterval(() => this.tickTimer(), 250)
+    }
+    this.tickTimer()
+
+    await waitCountdownClearedFromCapture()
+
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'LOOM_COUNTDOWN_DONE',
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.finishingCountdown = false
+        this.showError(
+          res?.reason?.trim() ||
+            'Could not start capture after countdown. Try Start again.',
+        )
+        return
       }
-    })()
+      // Belt-and-suspenders: ensure dock stays painted even if the SW's
+      // RECORDING_STARTED ping was dropped.
+      this.enterRecordingUi()
+    } catch (err) {
+      this.finishingCountdown = false
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not start capture after countdown.'
+      this.showError(msg)
+    }
   }
 
   private startCountdown() {
+    this.finishingCountdown = false
     let n = COUNTDOWN_FROM
     if (!this.countdownEl.isConnected) {
       this.root.appendChild(this.countdownEl)
     }
+    this.countdownEl.style.removeProperty('display')
+    this.countdownEl.style.removeProperty('visibility')
+    this.countdownEl.style.removeProperty('opacity')
     this.countdownEl.classList.remove('is-hidden')
     this.hideDock()
     this.setDockExpanded(false)
@@ -1931,7 +1986,7 @@ class TabOverlay {
     this.countdownId = window.setInterval(() => {
       n -= 1
       if (n <= 0) {
-        this.finishCountdown()
+        void this.finishCountdown()
         return
       }
       show()
@@ -2304,6 +2359,12 @@ class TabOverlay {
     if (this.countdownId != null) {
       window.clearInterval(this.countdownId)
       this.countdownId = null
+    }
+    // Cancel during countdown: strip overlay chrome before teardown so a
+    // racing LOOM_COUNTDOWN_DONE cannot capture the last "1".
+    if (fromCountdown) {
+      this.finishingCountdown = true
+      this.hideCountdownChrome()
     }
     this.stopping = true
     this.setDockBusy(true)

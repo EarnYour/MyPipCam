@@ -145,23 +145,32 @@ function showPaused() {
 
 function commitCountdown() {
   clearCountdownTimer()
+  // Hide countdown chrome before arming MediaRecorder (page overlay does the
+  // same with a paint wait — HUD is off-tab, but keep the handoff ordered).
   countEl.classList.add('is-hidden')
   countdownActions.classList.add('is-hidden')
+  countEl.style.display = 'none'
   statusEl.textContent = 'Starting capture…'
-  void chrome.runtime
-    .sendMessage({ type: 'LOOM_COUNTDOWN_DONE' })
-    .then((res: { ok?: boolean; reason?: string } | undefined) => {
+  void (async () => {
+    await new Promise<void>((r) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => r()))
+    })
+    await new Promise<void>((r) => window.setTimeout(r, 80))
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'LOOM_COUNTDOWN_DONE',
+      })) as { ok?: boolean; reason?: string } | undefined
       if (!res?.ok) {
         setError(res?.reason?.trim() || 'Could not start capture after countdown')
         setBusy(false)
         return
       }
       showRecording()
-    })
-    .catch((err: unknown) => {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Countdown commit failed')
       setBusy(false)
-    })
+    }
+  })()
 }
 
 function beginLocalCountdown() {
