@@ -1,0 +1,66 @@
+body {
+  width: 300px;
+  min-height: 220px;
+  margin: 0;
+  background:
+    radial-gradient(ellipse at top right, rgba(232, 93, 76, 0.22), transparent 55%),
+    linear-gradient(160deg, #121820 0%, #0b1016 100%);
+}
+
+.popup {
+  padding: 1rem 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.popup-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.popup-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, #e85d4c 19% 100%);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+.popup-brand h1 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.popup-brand p {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.popup button.primary {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.popup-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.popup label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

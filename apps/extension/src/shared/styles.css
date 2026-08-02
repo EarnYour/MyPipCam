@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  --bg: #0f1419;
+  --bg-elevated: #1a222c;
+  --bg-soft: #243040;
+  --text: #f4f7fb;
+  --text-muted: #9aa8b8;
+  --accent: #e85d4c;
+  --accent-hover: #ff6f5c;
+  --ok: #3dd68c;
+  --danger: #ff5c5c;
+  --border: rgba(255, 255, 255, 0.08);
+  --radius: 12px;
+  --font: 'Segoe UI', 'SF Pro Text', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 0.55rem 0.95rem;
+  background: var(--bg-soft);
+  color: var(--text);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background: #2e3d50;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button.danger {
+  background: rgba(255, 92, 92, 0.18);
+  color: var(--danger);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+button.ghost:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+input[type='text'],
+input[type='search'],
+select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.55rem 0.75rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+.page {
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.empty {
+  text-align: center;
+  padding: 4rem 1rem;
+  color: var(--text-muted);
+}
+
+.empty h2 {
+  color: var(--text);
+  margin: 0 0 0.5rem;
+}

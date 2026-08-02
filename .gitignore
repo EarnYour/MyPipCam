@@ -1,5 +1,6 @@
 .DS_Store
 build/
+**/build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
@@ -8,4 +9,12 @@ xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
-**/build/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
