@@ -43,6 +43,8 @@ let mixedStream: MediaStream | null = null
 let audioCtx: AudioContext | null = null
 let prepared = false
 let paused = false
+let pausedAccumMs = 0
+let pauseStartedAt = 0
 /** Canvas filter loop for cam-only when a color filter is active. */
 let filterLoopRaf = 0
 let filterVideo: HTMLVideoElement | null = null
@@ -353,6 +355,8 @@ function cleanupMedia() {
   recorder = null
   chunks = []
   paused = false
+  pausedAccumMs = 0
+  pauseStartedAt = 0
   prepared = false
   stopCameraFilterPipeline()
   stopTracks(mixedStream)
@@ -448,6 +452,8 @@ async function startRecorder() {
   mimeType = pickMimeType()
   chunks = []
   paused = false
+  pausedAccumMs = 0
+  pauseStartedAt = 0
   try {
     recorder = new MediaRecorder(
       mixedStream,
@@ -481,25 +487,68 @@ async function commitRecording(): Promise<{ ok: boolean; reason?: string }> {
 }
 
 function pauseRecording(): { ok: boolean; reason?: string } {
-  if (!recorder || recorder.state !== 'recording') {
+  if (!recorder) {
     return { ok: false, reason: 'not-recording' }
   }
-  try {
-    recorder.pause()
+  if (recorder.state === 'paused') {
     paused = true
+    if (!pauseStartedAt) pauseStartedAt = Date.now()
+    return { ok: true }
+  }
+  if (recorder.state !== 'recording') {
+    return { ok: false, reason: `not-recording (${recorder.state})` }
+  }
+  try {
+    // Flush the current timeslice before pausing so wall-clock and blob stay aligned.
+    try {
+      recorder.requestData()
+    } catch {
+      /* requestData optional */
+    }
+    recorder.pause()
+    // MediaRecorder.state typings don't model pause()/resume() transitions.
+    const state = recorder.state as MediaRecorder['state'] | string
+    if (state !== 'paused') {
+      paused = false
+      pauseStartedAt = 0
+      return { ok: false, reason: `pause-rejected (${state})` }
+    }
+    paused = true
+    pauseStartedAt = Date.now()
     return { ok: true }
   } catch (err) {
+    paused = false
+    pauseStartedAt = 0
     return { ok: false, reason: errDetail(err, 'pause-failed') }
   }
 }
 
 function resumeRecording(): { ok: boolean; reason?: string } {
-  if (!recorder || recorder.state !== 'paused') {
+  if (!recorder) {
     return { ok: false, reason: 'not-paused' }
+  }
+  if (recorder.state === 'recording') {
+    if (pauseStartedAt) {
+      pausedAccumMs += Date.now() - pauseStartedAt
+      pauseStartedAt = 0
+    }
+    paused = false
+    return { ok: true }
+  }
+  if (recorder.state !== 'paused') {
+    return { ok: false, reason: `not-paused (${recorder.state})` }
   }
   try {
     recorder.resume()
+    const state = recorder.state as MediaRecorder['state'] | string
+    if (pauseStartedAt) {
+      pausedAccumMs += Date.now() - pauseStartedAt
+      pauseStartedAt = 0
+    }
     paused = false
+    if (state !== 'recording') {
+      return { ok: false, reason: `resume-rejected (${state})` }
+    }
     return { ok: true }
   } catch (err) {
     return { ok: false, reason: errDetail(err, 'resume-failed') }
@@ -533,6 +582,8 @@ async function resetRecordingKeepStreams(): Promise<{ ok: boolean; reason?: stri
   recorder = null
   chunks = []
   paused = false
+  pausedAccumMs = 0
+  pauseStartedAt = 0
   startedAt = 0
 
   const videoAlive = Boolean(
@@ -555,7 +606,11 @@ async function stopAndSave(): Promise<{ ok: true; id: string } | { ok: false; re
     return { ok: false, reason: 'not-recording' }
   }
 
-  const durationMs = Date.now() - startedAt
+  let durationMs = Date.now() - startedAt - pausedAccumMs
+  if (paused && pauseStartedAt) {
+    durationMs -= Date.now() - pauseStartedAt
+  }
+  durationMs = Math.max(0, durationMs)
   const blob = await new Promise<Blob>((resolve, reject) => {
     const finish = () => resolve(new Blob(chunks, { type: mimeType }))
     active.onstop = finish

@@ -322,6 +322,10 @@ trimBtn.addEventListener('click', () => {
 
 restartBtn.addEventListener('click', () => {
   if (busy || phase === 'countdown') return
+  const ok = window.confirm(
+    'Restart recording?\n\nCurrent take will be discarded.',
+  )
+  if (!ok) return
   setBusy(true)
   void chrome.runtime
     .sendMessage({ type: 'RESTART_LOOM_RECORDING' })

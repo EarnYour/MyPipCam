@@ -78,7 +78,7 @@ type LoomSession = {
   tabId: number
   startedAt: number
   recordMode: RecordMode
-  phase: 'countdown' | 'recording'
+  phase: 'countdown' | 'recording' | 'paused'
   micDeviceId: string | null
   cameraDeviceId: string | null
   includeMic: boolean
@@ -141,7 +141,12 @@ async function hydrateLoomSession(): Promise<LoomSession | null> {
         rec.recordMode === 'screen' || rec.recordMode === 'cam'
           ? rec.recordMode
           : 'screen-cam',
-      phase: rec.phase === 'recording' ? 'recording' : 'countdown',
+      phase:
+        rec.phase === 'paused'
+          ? 'paused'
+          : rec.phase === 'recording'
+            ? 'recording'
+            : 'countdown',
       micDeviceId: typeof rec.micDeviceId === 'string' ? rec.micDeviceId : null,
       cameraDeviceId:
         typeof rec.cameraDeviceId === 'string' ? rec.cameraDeviceId : null,
@@ -1288,13 +1293,23 @@ async function restartLoomRecording(): Promise<{ ok: boolean; reason?: string }>
 
 async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
   const session = (await hydrateLoomSession()) ?? loomSession
-  if (!session || session.phase !== 'recording') {
+  if (!session || (session.phase !== 'recording' && session.phase !== 'paused')) {
     return { ok: false, reason: 'not-recording' }
   }
+  if (session.phase === 'paused') return { ok: true }
+
+  await ensureOffscreen()
   const res = await sendOffscreen<{ ok?: boolean; reason?: string }>({
     type: 'OFFSCREEN_PAUSE',
   })
   if (res?.ok) {
+    session.phase = 'paused'
+    loomSession = session
+    try {
+      await persistLoomSession(session)
+    } catch {
+      /* ignore */
+    }
     try {
       await chrome.tabs.sendMessage(session.tabId, {
         type: 'PIP_OVERLAY_PAUSED',
@@ -1304,19 +1319,29 @@ async function pauseLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
       /* ignore */
     }
     await syncHud('paused')
+    return { ok: true }
   }
-  return res?.ok ? { ok: true } : { ok: false, reason: res?.reason || 'pause-failed' }
+  return { ok: false, reason: res?.reason || 'pause-failed' }
 }
 
 async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> {
   const session = (await hydrateLoomSession()) ?? loomSession
-  if (!session || session.phase !== 'recording') {
+  if (!session || (session.phase !== 'recording' && session.phase !== 'paused')) {
     return { ok: false, reason: 'not-recording' }
   }
+
+  await ensureOffscreen()
   const res = await sendOffscreen<{ ok?: boolean; reason?: string }>({
     type: 'OFFSCREEN_RESUME',
   })
   if (res?.ok) {
+    session.phase = 'recording'
+    loomSession = session
+    try {
+      await persistLoomSession(session)
+    } catch {
+      /* ignore */
+    }
     try {
       await chrome.tabs.sendMessage(session.tabId, {
         type: 'PIP_OVERLAY_PAUSED',
@@ -1326,8 +1351,9 @@ async function resumeLoomRecording(): Promise<{ ok: boolean; reason?: string }> 
       /* ignore */
     }
     await syncHud('recording')
+    return { ok: true }
   }
-  return res?.ok ? { ok: true } : { ok: false, reason: res?.reason || 'resume-failed' }
+  return { ok: false, reason: res?.reason || 'resume-failed' }
 }
 
 chrome.commands.onCommand.addListener(async (command) => {
@@ -1776,7 +1802,13 @@ function dispatchExtensionMessage(
         reuse: true,
       })
       if (hud.ok) {
-        await syncHud(session.phase === 'countdown' ? 'countdown' : 'recording')
+        await syncHud(
+          session.phase === 'countdown'
+            ? 'countdown'
+            : session.phase === 'paused'
+              ? 'paused'
+              : 'recording',
+        )
       }
       sendResponse(hud)
     })()
@@ -1840,14 +1872,28 @@ function dispatchExtensionMessage(
 
   if (message?.type === 'PAUSE_LOOM_RECORDING') {
     void (async () => {
-      sendResponse(await pauseLoomRecording())
+      try {
+        replySafe(sendResponse, await pauseLoomRecording())
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Could not pause recording.'),
+        })
+      }
     })()
     return true
   }
 
   if (message?.type === 'RESUME_LOOM_RECORDING') {
     void (async () => {
-      sendResponse(await resumeLoomRecording())
+      try {
+        replySafe(sendResponse, await resumeLoomRecording())
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          reason: errMessage(err, 'Could not resume recording.'),
+        })
+      }
     })()
     return true
   }

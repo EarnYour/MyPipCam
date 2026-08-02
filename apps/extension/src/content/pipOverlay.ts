@@ -22,7 +22,7 @@ import {
 const INSTALL_KEY = '__mypipcamPipOverlayInstalled'
 const DISPATCHER_KEY = '__mypipcamPipOverlayDispatcher'
 const HANDLER_KEY = '__mypipcamPipOverlayHandle'
-const INSTALL_VERSION = 2
+const INSTALL_VERSION = 3
 type OverlayMessageHandler = (
   message: any,
   sender: chrome.runtime.MessageSender,
@@ -435,6 +435,78 @@ function overlayStyles(): string {
       opacity: 1;
     }
 
+    /* Compact confirm / toast to the right of the dock (avoids window.confirm) */
+    .mpc-dock-confirm {
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      width: 220px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(17, 19, 18, 0.96);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+      color: #fafaf7;
+      font: 600 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 2;
+      pointer-events: auto;
+    }
+    .mpc-dock-confirm.is-open { display: flex; }
+    .mpc-dock-confirm-title {
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.01em;
+    }
+    .mpc-dock-confirm-body {
+      color: rgba(250,250,247,0.78);
+      font-weight: 550;
+    }
+    .mpc-dock-confirm-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .mpc-dock-confirm-actions button {
+      all: unset;
+      box-sizing: border-box;
+      cursor: pointer;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font: 650 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      color: #fafaf7;
+      background: rgba(255,255,255,0.08);
+    }
+    .mpc-dock-confirm-actions button:hover {
+      background: rgba(255,255,255,0.14);
+    }
+    .mpc-dock-confirm-actions button.mpc-confirm-ok {
+      background: #ff5e29;
+      color: #fff;
+    }
+    .mpc-dock-confirm-actions button.mpc-confirm-ok:hover {
+      background: #e85220;
+    }
+    .mpc-dock-toast {
+      position: absolute;
+      left: calc(100% + 10px);
+      bottom: 8px;
+      max-width: 200px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(80, 20, 16, 0.95);
+      border: 1px solid rgba(255, 120, 100, 0.45);
+      color: #ffe8e4;
+      font: 600 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+      display: none;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .mpc-dock-toast.is-visible { display: block; }
+
     /* Camera failure chip — visible even while dock is hidden during countdown */
     .mpc-cam-status {
       position: fixed !important;
@@ -781,7 +853,8 @@ function iconTrash(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/></svg>`
 }
 function iconRestart(): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9"/><path d="M3 5v7h7"/></svg>`
+  // Circular arrow (rotate-ccw) — same stroke weight as trim/discard.
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 }
 function iconTrim(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a5 5 0 010 10H9"/></svg>`
@@ -805,6 +878,12 @@ class TabOverlay {
   private trimBtn: HTMLButtonElement
   private restartBtn: HTMLButtonElement
   private discardBtn: HTMLButtonElement
+  private confirmEl: HTMLDivElement
+  private confirmTitle: HTMLDivElement
+  private confirmBody: HTMLDivElement
+  private confirmOkBtn: HTMLButtonElement
+  private confirmCancelBtn: HTMLButtonElement
+  private toastEl: HTMLDivElement
   private countdownEl: HTMLDivElement
   private countdownNum: HTMLDivElement
   private camClip: HTMLDivElement | null = null
@@ -820,12 +899,15 @@ class TabOverlay {
   private countdownId: number | null = null
   private camWatchId: number | null = null
   private collapseTimerId: number | null = null
+  private toastTimerId: number | null = null
   private stopping = false
   private restarting = false
   private dockExpanded = false
   private dragging = false
   private menuOpen = false
   private camReady = false
+  private confirmAction: null | 'restart' | 'trim' = null
+  private confirmResolver: ((ok: boolean) => void) | null = null
 
   constructor(initial: BubbleState) {
     this.state = {
@@ -992,17 +1074,18 @@ class TabOverlay {
     this.stopBtn.title = 'Stop & save'
     this.stopBtn.setAttribute('aria-label', 'Stop and save')
     this.stopBtn.innerHTML = iconStop()
-    core.appendChild(this.stopBtn)
 
-    const more = document.createElement('div')
-    more.className = 'mpc-dock-more'
-
+    // Pause lives in core so Resume stays reachable when the dock collapses.
     this.pauseBtn = document.createElement('button')
     this.pauseBtn.type = 'button'
     this.pauseBtn.className = 'mpc-dock-btn'
     this.pauseBtn.title = 'Pause'
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
     this.pauseBtn.innerHTML = iconPause()
+    core.append(this.stopBtn, this.pauseBtn)
+
+    const more = document.createElement('div')
+    more.className = 'mpc-dock-more'
 
     this.trimBtn = document.createElement('button')
     this.trimBtn.type = 'button'
@@ -1025,8 +1108,33 @@ class TabOverlay {
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
     this.discardBtn.innerHTML = iconTrash()
 
-    more.append(this.pauseBtn, this.trimBtn, this.restartBtn, this.discardBtn)
-    this.dock.append(this.dockHead, core, more)
+    more.append(this.trimBtn, this.restartBtn, this.discardBtn)
+
+    this.confirmEl = document.createElement('div')
+    this.confirmEl.className = 'mpc-dock-confirm'
+    this.confirmEl.setAttribute('role', 'alertdialog')
+    this.confirmEl.setAttribute('aria-modal', 'true')
+    this.confirmTitle = document.createElement('div')
+    this.confirmTitle.className = 'mpc-dock-confirm-title'
+    this.confirmBody = document.createElement('div')
+    this.confirmBody.className = 'mpc-dock-confirm-body'
+    const confirmActions = document.createElement('div')
+    confirmActions.className = 'mpc-dock-confirm-actions'
+    this.confirmCancelBtn = document.createElement('button')
+    this.confirmCancelBtn.type = 'button'
+    this.confirmCancelBtn.textContent = 'Cancel'
+    this.confirmOkBtn = document.createElement('button')
+    this.confirmOkBtn.type = 'button'
+    this.confirmOkBtn.className = 'mpc-confirm-ok'
+    this.confirmOkBtn.textContent = 'Confirm'
+    confirmActions.append(this.confirmCancelBtn, this.confirmOkBtn)
+    this.confirmEl.append(this.confirmTitle, this.confirmBody, confirmActions)
+
+    this.toastEl = document.createElement('div')
+    this.toastEl.className = 'mpc-dock-toast'
+    this.toastEl.setAttribute('role', 'status')
+
+    this.dock.append(this.dockHead, core, more, this.confirmEl, this.toastEl)
 
     // —— Countdown with Cancel / Skip ——
     this.countdownEl = document.createElement('div')
@@ -1097,6 +1205,16 @@ class TabOverlay {
       e.stopPropagation()
       void this.requestDiscard(false)
     })
+    this.confirmCancelBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.resolveConfirm(false)
+    })
+    this.confirmOkBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.resolveConfirm(true)
+    })
 
     document.addEventListener('pointerdown', this.onDocPointerDown, true)
 
@@ -1151,7 +1269,11 @@ class TabOverlay {
         this.closeMenu()
       }
     }
-    if (this.dockExpanded && !path.includes(this.dock)) {
+    if (this.confirmAction && !path.includes(this.confirmEl) && !path.includes(this.dock)) {
+      this.resolveConfirm(false)
+      return
+    }
+    if (this.dockExpanded && !this.confirmAction && !path.includes(this.dock)) {
       this.setDockExpanded(false)
     }
   }
@@ -1362,6 +1484,7 @@ class TabOverlay {
       this.timerId = null
     }
     this.clearCollapseTimer()
+    this.hideConfirm()
     this.errorBanner?.remove()
     this.errorBanner = null
     this.restarting = false
@@ -1385,18 +1508,21 @@ class TabOverlay {
   }
 
   setPausedUi(paused: boolean) {
-    this.state.phase = paused ? 'paused' : 'recording'
     this.dock.classList.toggle('is-paused', paused)
     if (paused) {
-      this.pauseStartedAt = Date.now()
+      if (this.state.phase !== 'paused') {
+        this.pauseStartedAt = Date.now()
+      }
+      this.state.phase = 'paused'
       this.pauseBtn.innerHTML = iconPlay()
       this.pauseBtn.title = 'Resume'
       this.pauseBtn.setAttribute('aria-label', 'Resume recording')
     } else {
-      if (this.pauseStartedAt) {
+      if (this.state.phase === 'paused' && this.pauseStartedAt) {
         this.pausedAccumMs += Date.now() - this.pauseStartedAt
         this.pauseStartedAt = 0
       }
+      this.state.phase = 'recording'
       this.pauseBtn.innerHTML = iconPause()
       this.pauseBtn.title = 'Pause'
       this.pauseBtn.setAttribute('aria-label', 'Pause recording')
@@ -1550,7 +1676,8 @@ class TabOverlay {
   }
 
   private async requestStop() {
-    if (this.stopping || this.restarting) return
+    if (this.stopping || this.restarting || this.confirmAction) return
+    this.hideConfirm()
     this.stopping = true
     this.setDockBusy(true)
     try {
@@ -1562,10 +1689,13 @@ class TabOverlay {
   }
 
   private async requestTrimAndStop() {
-    if (this.stopping || this.restarting) return
+    if (this.stopping || this.restarting || this.confirmAction) return
     if (this.state.phase === 'countdown') return
-    const ok = window.confirm(
-      'Stop and trim in editor?\n\nRecording will save, then open so you can trim the end.',
+    this.setDockExpanded(true)
+    const ok = await this.askDockConfirm(
+      'trim',
+      'Stop & trim?',
+      'Save this take and open the editor to trim the end.',
     )
     if (!ok) return
     this.stopping = true
@@ -1578,33 +1708,66 @@ class TabOverlay {
       if (!res?.ok) {
         this.stopping = false
         this.setDockBusy(false)
-        this.showError(res?.reason?.trim() || 'Could not stop recording to trim.')
+        this.showDockToast(res?.reason?.trim() || 'Could not stop recording to trim.')
       }
-    } catch {
+      // On success the overlay is torn down by the background.
+    } catch (err) {
+      // Context may invalidate after a successful stop — only surface real failures.
+      if (!chrome.runtime?.id) return
       this.stopping = false
       this.setDockBusy(false)
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Could not stop recording to trim.'
+      this.showDockToast(msg)
     }
   }
 
   private async togglePause() {
-    if (this.state.phase === 'countdown' || this.stopping || this.restarting) return
+    if (
+      this.state.phase === 'countdown' ||
+      this.stopping ||
+      this.restarting ||
+      this.confirmAction
+    ) {
+      return
+    }
     const pausing = this.state.phase !== 'paused'
     try {
       const res = (await chrome.runtime.sendMessage({
         type: pausing ? 'PAUSE_LOOM_RECORDING' : 'RESUME_LOOM_RECORDING',
-      })) as { ok?: boolean } | undefined
-      if (res?.ok) {
-        this.setPausedUi(pausing)
-        this.scheduleDockCollapse()
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.showDockToast(
+          res?.reason?.trim() || (pausing ? 'Could not pause recording.' : 'Could not resume.'),
+        )
+        return
       }
-    } catch {
-      /* ignore */
+      this.setPausedUi(pausing)
+      // Keep Pause/Resume in the always-visible core; no need to force-collapse.
+      if (!pausing) this.scheduleDockCollapse()
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : pausing
+            ? 'Could not pause recording.'
+            : 'Could not resume.'
+      this.showDockToast(msg)
     }
   }
 
   private async requestRestart() {
-    if (this.stopping || this.restarting) return
+    if (this.stopping || this.restarting || this.confirmAction) return
     if (this.state.phase === 'countdown') return
+    this.setDockExpanded(true)
+    const ok = await this.askDockConfirm(
+      'restart',
+      'Restart recording?',
+      'Current take will be discarded.',
+    )
+    if (!ok) return
     this.restarting = true
     this.setDockBusy(true)
     try {
@@ -1614,7 +1777,7 @@ class TabOverlay {
       if (!res?.ok) {
         this.restarting = false
         this.setDockBusy(false)
-        this.showError(
+        this.showDockToast(
           res?.reason?.trim() || 'Could not restart recording. Try Start again.',
         )
       }
@@ -1626,8 +1789,53 @@ class TabOverlay {
         err instanceof Error && err.message.trim()
           ? err.message.trim()
           : 'Could not restart recording.'
-      this.showError(msg)
+      this.showDockToast(msg)
     }
+  }
+
+  private askDockConfirm(
+    action: 'restart' | 'trim',
+    title: string,
+    body: string,
+  ): Promise<boolean> {
+    this.hideConfirm()
+    this.clearCollapseTimer()
+    this.confirmAction = action
+    this.confirmTitle.textContent = title
+    this.confirmBody.textContent = body
+    this.confirmOkBtn.textContent = action === 'restart' ? 'Restart' : 'Trim'
+    this.confirmEl.classList.add('is-open')
+    this.confirmEl.setAttribute('aria-label', title)
+    this.confirmOkBtn.focus()
+    return new Promise((resolve) => {
+      this.confirmResolver = resolve
+    })
+  }
+
+  private resolveConfirm(ok: boolean) {
+    const resolver = this.confirmResolver
+    this.hideConfirm()
+    resolver?.(ok)
+  }
+
+  private hideConfirm() {
+    this.confirmAction = null
+    this.confirmResolver = null
+    this.confirmEl.classList.remove('is-open')
+  }
+
+  private showDockToast(message: string) {
+    if (this.toastTimerId != null) {
+      window.clearTimeout(this.toastTimerId)
+      this.toastTimerId = null
+    }
+    this.toastEl.textContent = message
+    this.toastEl.classList.add('is-visible')
+    this.toastTimerId = window.setTimeout(() => {
+      this.toastTimerId = null
+      this.toastEl.classList.remove('is-visible')
+      this.toastEl.textContent = ''
+    }, 4200)
   }
 
   private setDockBusy(busy: boolean) {
@@ -1637,6 +1845,8 @@ class TabOverlay {
     this.restartBtn.disabled = busy
     this.discardBtn.disabled = busy
     this.dockHead.disabled = busy
+    this.confirmOkBtn.disabled = busy
+    this.confirmCancelBtn.disabled = busy
   }
 
   private async requestDiscard(fromCountdown: boolean) {
@@ -1861,7 +2071,9 @@ class TabOverlay {
     if (this.timerId != null) window.clearInterval(this.timerId)
     if (this.countdownId != null) window.clearInterval(this.countdownId)
     if (this.camWatchId != null) window.clearTimeout(this.camWatchId)
+    if (this.toastTimerId != null) window.clearTimeout(this.toastTimerId)
     this.clearCollapseTimer()
+    this.hideConfirm()
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
     window.removeEventListener('message', this.onPipMessage)
     void chrome.runtime.sendMessage({
