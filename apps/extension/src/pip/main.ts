@@ -12,6 +12,11 @@ import {
   isBlurEffect,
   type PersonBackgroundBlur,
 } from '../shared/backgroundBlur'
+import {
+  cameraFilterCss,
+  normalizeCameraFilter,
+  type CameraFilterId,
+} from '../shared/cameraFilters'
 import { isPipChannelToken } from '../shared/security'
 import type { BackgroundEffect } from '../shared/types'
 
@@ -19,6 +24,7 @@ const video = document.getElementById('cam') as HTMLVideoElement
 const canvas = document.getElementById('out') as HTMLCanvasElement
 let stream: MediaStream | null = null
 let effect: BackgroundEffect = 'none'
+let cameraFilter: CameraFilterId = 'none'
 let blurEngine: PersonBackgroundBlur | null = null
 let raf = 0
 let running = false
@@ -40,9 +46,21 @@ function readEffectFromQuery(): BackgroundEffect {
   return params.get('effect') === 'blur' ? 'blur' : 'none'
 }
 
+function readFilterFromQuery(): CameraFilterId {
+  const params = new URLSearchParams(location.search)
+  return normalizeCameraFilter(params.get('filter'))
+}
+
 function setMirror(on: boolean) {
   video.classList.toggle('mirror', on)
   canvas.classList.toggle('mirror', on)
+}
+
+function applyCameraFilter(next: CameraFilterId) {
+  cameraFilter = normalizeCameraFilter(next)
+  const css = cameraFilterCss(cameraFilter)
+  video.style.filter = css
+  canvas.style.filter = css
 }
 
 function showFallback(message: string) {
@@ -110,13 +128,20 @@ async function applyEffect(next: BackgroundEffect) {
 // Guards concurrent startCamera calls (boot + early MPC_PIP_MIRROR): a stale
 // call must not overwrite `stream` and orphan a live camera track.
 let cameraGeneration = 0
+let cameraBootstrapped = false
 
 async function startCamera(deviceId: string | null) {
   const generation = ++cameraGeneration
   const params = new URLSearchParams(location.search)
-  setMirror(params.get('mirror') !== '0')
   const id = deviceId ?? params.get('deviceId')
-  effect = readEffectFromQuery()
+  // Seed mirror/effect/filter from the URL once. Later MPC_PIP_* messages own
+  // live state — do not reset them when switching cameras mid-recording.
+  if (!cameraBootstrapped) {
+    setMirror(params.get('mirror') !== '0')
+    effect = readEffectFromQuery()
+    applyCameraFilter(readFilterFromQuery())
+    cameraBootstrapped = true
+  }
 
   const adopt = async (next: MediaStream): Promise<boolean> => {
     if (generation !== cameraGeneration) {
@@ -198,6 +223,9 @@ window.addEventListener('message', (event) => {
   if (data.type === 'MPC_PIP_EFFECT') {
     const next: BackgroundEffect = data.effect === 'blur' ? 'blur' : 'none'
     void applyEffect(next)
+  }
+  if (data.type === 'MPC_PIP_FILTER') {
+    applyCameraFilter(normalizeCameraFilter(data.filter))
   }
   if (data.type === 'MPC_PIP_STOP') {
     stopCamera()

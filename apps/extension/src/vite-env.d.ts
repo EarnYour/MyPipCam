@@ -6,6 +6,11 @@ declare module '*?script' {
   export default path
 }
 
+declare module '*?script&iife' {
+  const path: string
+  export default path
+}
+
 declare module '*?script&module' {
   const path: string
   export default path

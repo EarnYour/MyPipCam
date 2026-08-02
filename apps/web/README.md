@@ -2,6 +2,8 @@
 
 Static marketing site plus serverless share APIs and Loom-style watch pages.
 
+**Tip jar:** [donate.stripe.com/…](https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09) (pay-what-you-want; CTA near Install on the funnel + `?thanks=1` after payment).
+
 ## Share links
 
 | URL | Purpose |
@@ -9,8 +11,11 @@ Static marketing site plus serverless share APIs and Loom-style watch pages.
 | `https://mypipcam.earnyour.com/w/{shareId}` | Public watch page (counts as a view on load) |
 | `POST /api/shares` | Extension creates/registers a share after Drive anyone-with-link |
 | `GET /api/shares?ids=…` | Batch view stats for Library |
-| `GET /api/shares/:id` | Share metadata for the watch page |
-| `POST /api/shares/:id/view` | Record a view (coarse UA hash only) |
+| `GET /api/shares/:id` | Share metadata for the watch page (`410` when expired) |
+| `PATCH /api/shares/:id` | Update Drive processing readiness and/or renew expiry |
+| `POST /api/shares/:id/view` | Record a view (coarse UA hash only; rejected when expired) |
+
+Share links expire by default **30 days** after create/renew (`expires_at` on `mypipcam_shares`). Optional TTL on create/renew: `7` / `30` / `90` days via `expiresInDays`. Expired watch pages show “This link has expired” (no video embed) and do not count views.
 
 Drive native analytics are unavailable to third-party apps — the custom watch page is required for view counts.
 
@@ -24,6 +29,8 @@ Copy `.env.example` and set in Vercel (Production **and** Preview):
 Optional local fallback only: `SUPABASE_ANON_KEY` (not enough for share create/view under locked RLS).
 
 Tables (Supabase): `mypipcam_shares`, `mypipcam_views` + RPC `mypipcam_record_view` (service_role).
+
+`mypipcam_shares` also stores binary Drive playback readiness (`processing_status`: `unknown` | `processing` | `ready`, plus optional `drive_ready_at`). Drive’s API does not expose a processing percent — the extension polls `files.get` for `videoMediaMetadata` / thumbnail proxies and PATCHes the share when ready.
 
 ## Deploy
 

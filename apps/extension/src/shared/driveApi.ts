@@ -13,6 +13,64 @@ export type DriveFileMeta = {
   size?: string
   createdTime?: string
   appProperties?: Record<string, string>
+  hasThumbnail?: boolean
+  thumbnailLink?: string
+  videoMediaMetadata?: {
+    width?: number
+    height?: number
+    durationMillis?: string
+  }
+}
+
+/**
+ * Drive does NOT expose a processing percent. Playback readiness is inferred
+ * from async metadata (videoMediaMetadata / thumbnail) after upload.
+ */
+export type DriveVideoPlaybackStatus = {
+  fileId: string
+  ready: boolean
+  hasThumbnail: boolean
+  hasThumbnailLink: boolean
+  durationMillis: number | null
+  width: number | null
+  height: number | null
+}
+
+const VIDEO_READY_FIELDS =
+  'id,mimeType,hasThumbnail,thumbnailLink,videoMediaMetadata(durationMillis,width,height)'
+
+export function isDriveVideoPlaybackReady(
+  meta: Pick<
+    DriveFileMeta,
+    'hasThumbnail' | 'thumbnailLink' | 'videoMediaMetadata'
+  >,
+): boolean {
+  const duration = Number(meta.videoMediaMetadata?.durationMillis)
+  if (Number.isFinite(duration) && duration > 0) return true
+  if (meta.hasThumbnail === true) return true
+  if (typeof meta.thumbnailLink === 'string' && meta.thumbnailLink.length > 0) {
+    return true
+  }
+  return false
+}
+
+export function toDriveVideoPlaybackStatus(
+  fileId: string,
+  meta: DriveFileMeta,
+): DriveVideoPlaybackStatus {
+  const durationRaw = Number(meta.videoMediaMetadata?.durationMillis)
+  const durationMillis =
+    Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : null
+  return {
+    fileId,
+    ready: isDriveVideoPlaybackReady(meta),
+    hasThumbnail: meta.hasThumbnail === true,
+    hasThumbnailLink:
+      typeof meta.thumbnailLink === 'string' && meta.thumbnailLink.length > 0,
+    durationMillis,
+    width: meta.videoMediaMetadata?.width ?? null,
+    height: meta.videoMediaMetadata?.height ?? null,
+  }
 }
 
 export type DriveRecordingProps = {
@@ -128,6 +186,24 @@ export async function getFile(fileId: string, interactive = false): Promise<Driv
   })
   const res = await authFetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?${params}`, {}, interactive)
   return parseJson<DriveFileMeta>(res)
+}
+
+/**
+ * Pollable readiness probe for video playback / embed.
+ * Uses drive.file — only works for files this app created or opened.
+ */
+export async function getVideoPlaybackStatus(
+  fileId: string,
+  interactive = false,
+): Promise<DriveVideoPlaybackStatus> {
+  const params = new URLSearchParams({ fields: VIDEO_READY_FIELDS })
+  const res = await authFetch(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?${params}`,
+    {},
+    interactive,
+  )
+  const meta = await parseJson<DriveFileMeta>(res)
+  return toDriveVideoPlaybackStatus(fileId, meta)
 }
 
 /** List video files in the library folder that carry MyPipCam appProperties. */

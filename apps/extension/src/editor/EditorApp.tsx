@@ -9,13 +9,17 @@ import {
   updateRecordingTranscript,
 } from '../shared/db'
 import { InlineRename } from '../shared/InlineRename'
-import { openLibraryTab } from '../shared/navigation'
+import { openLibraryTab, type EditorFocus } from '../shared/navigation'
 import {
   formatDuration,
   type RecordingRecord,
   type TranscriptData,
 } from '../shared/types'
 import { estimateOutputDuration, exportEditedVideo, type EditPlan } from './ffmpegExport'
+import {
+  detectFillerRanges,
+  transcriptHasWordTimings,
+} from './fillerDetect'
 import { detectSilenceRanges, type TimeRange } from './silenceDetect'
 import {
   chaptersFromTranscript,
@@ -30,9 +34,15 @@ function secLabel(s: number) {
   return formatDuration(s * 1000)
 }
 
+function parseEditorFocus(raw: string | null): EditorFocus | null {
+  if (raw === 'trim' || raw === 'silence' || raw === 'filler') return raw
+  return null
+}
+
 export function EditorApp() {
   const [record, setRecord] = useState<RecordingRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [duration, setDuration] = useState(0)
   const [current, setCurrent] = useState(0)
@@ -46,6 +56,10 @@ export function EditorApp() {
   const [silenceBusy, setSilenceBusy] = useState(false)
   const [silenceThreshold, setSilenceThreshold] = useState(0.02)
   const [minSilenceSec, setMinSilenceSec] = useState(0.45)
+  const [fillerRanges, setFillerRanges] = useState<TimeRange[]>([])
+  const [applyFillers, setApplyFillers] = useState(false)
+  const [fillerBusy, setFillerBusy] = useState(false)
+  const [includeExtendedFillers, setIncludeExtendedFillers] = useState(true)
   const [speed, setSpeed] = useState(1)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -56,9 +70,12 @@ export function EditorApp() {
   const [noiseReduce, setNoiseReduce] = useState(false)
   const [showChapters, setShowChapters] = useState(false)
   const [focusHint, setFocusHint] = useState<string | null>(null)
+  const [editorFocus, setEditorFocus] = useState<EditorFocus | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const trimSectionRef = useRef<HTMLElement>(null)
   const silenceSectionRef = useRef<HTMLElement>(null)
+  const fillerSectionRef = useRef<HTMLElement>(null)
+  const autoRanRef = useRef(false)
 
   useEffect(() => {
     void loadApiSettings().then((s) => setHasKey(hasOpenAiKey(s)))
@@ -72,7 +89,7 @@ export function EditorApp() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const id = params.get('id')
-    const focus = params.get('focus')
+    const focus = parseEditorFocus(params.get('focus'))
     const safe =
       id &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
@@ -82,10 +99,15 @@ export function EditorApp() {
       setError('Missing or invalid recording id')
       return
     }
+    setEditorFocus(focus)
     if (focus === 'silence') {
-      setFocusHint('Detect and remove silences below, then export.')
+      setFocusHint('Detecting silences… then review the yellow ranges and export.')
     } else if (focus === 'trim') {
       setFocusHint('Drag Out to trim the end, or set In/Out at the playhead — then export.')
+    } else if (focus === 'filler') {
+      setFocusHint(
+        'Filler removal needs a transcript with word timings. Detect fillers below, then export.',
+      )
     }
     void (async () => {
       let rec
@@ -110,10 +132,13 @@ export function EditorApp() {
       setOutSec(dur)
       setCutStart(dur * 0.35)
       setCutEnd(dur * 0.55)
-      // Scroll trim/silence tools into view after paint.
       requestAnimationFrame(() => {
         const el =
-          focus === 'silence' ? silenceSectionRef.current : trimSectionRef.current
+          focus === 'silence'
+            ? silenceSectionRef.current
+            : focus === 'filler'
+              ? fillerSectionRef.current
+              : trimSectionRef.current
         el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       })
     })()
@@ -130,23 +155,37 @@ export function EditorApp() {
     if (v) v.playbackRate = speed
   }, [speed])
 
-  const plan: EditPlan = useMemo(
-    () => ({
+  const plan: EditPlan = useMemo(() => {
+    const removes: TimeRange[] = []
+    if (applySilences) removes.push(...silenceRanges)
+    if (applyFillers) removes.push(...fillerRanges)
+    return {
       inSec,
       outSec,
       cutStartSec: cutEnabled ? cutStart : null,
       cutEndSec: cutEnabled ? cutEnd : null,
-      removeRanges: applySilences ? silenceRanges : [],
+      removeRanges: removes,
       noiseReduce,
-    }),
-    [inSec, outSec, cutEnabled, cutStart, cutEnd, applySilences, silenceRanges, noiseReduce],
-  )
+    }
+  }, [
+    inSec,
+    outSec,
+    cutEnabled,
+    cutStart,
+    cutEnd,
+    applySilences,
+    silenceRanges,
+    applyFillers,
+    fillerRanges,
+    noiseReduce,
+  ])
 
   const outDuration = estimateOutputDuration(plan)
   const chapters = useMemo(
     () => (transcript && showChapters ? chaptersFromTranscript(transcript) : []),
     [transcript, showChapters],
   )
+  const hasWordTimings = transcriptHasWordTimings(transcript?.words)
 
   function clampCut() {
     const start = Math.max(inSec, Math.min(cutStart, outSec))
@@ -160,12 +199,198 @@ export function EditorApp() {
     if (v) v.currentTime = Math.max(0, Math.min(t, duration || t))
   }
 
+  async function onDetectSilences() {
+    if (!record) return
+    setSilenceBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const ranges = await detectSilenceRanges(record.blob, {
+        threshold: silenceThreshold,
+        minSilenceSec,
+      })
+      setSilenceRanges(ranges)
+      setApplySilences(ranges.length > 0)
+      if (ranges.length === 0) {
+        setError(
+          'No silences found with current threshold. Try a higher threshold or shorter min duration.',
+        )
+      } else {
+        setSuccess(`Found ${ranges.length} silence range${ranges.length === 1 ? '' : 's'}. Applied on export.`)
+        setFocusHint('Silences highlighted in yellow. Export when ready (Download / Save as new / Overwrite).')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Silence detection failed')
+    } finally {
+      setSilenceBusy(false)
+    }
+  }
+
+  async function ensureTranscriptWithWords(): Promise<TranscriptData> {
+    if (!record) throw new Error('Recording not loaded')
+    if (transcriptHasWordTimings(transcript?.words) && transcript) return transcript
+
+    const settings = await loadApiSettings()
+    if (!hasOpenAiKey(settings)) {
+      setHasKey(false)
+      throw new Error(
+        'Filler removal needs a transcript. Add your OpenAI API key in Settings, then try again.',
+      )
+    }
+    setHasKey(true)
+    setTranscribeBusy(true)
+    try {
+      const result = await transcribeWithOpenAI(
+        record.blob,
+        settings.openaiApiKey,
+        recordingFilename(record),
+      )
+      if (!transcriptHasWordTimings(result.words)) {
+        throw new Error(
+          'Transcription succeeded but returned no word timings. Try again, or check your OpenAI account access to whisper-1.',
+        )
+      }
+      setTranscript(result)
+      await updateRecordingTranscript(record.id, result)
+      setRecord({ ...record, transcript: result })
+      return result
+    } finally {
+      setTranscribeBusy(false)
+    }
+  }
+
+  async function onDetectFillers() {
+    if (!record) return
+    setFillerBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const data = await ensureTranscriptWithWords()
+      const ranges = detectFillerRanges(data.words, {
+        includeExtended: includeExtendedFillers,
+      })
+      setFillerRanges(ranges)
+      setApplyFillers(ranges.length > 0)
+      if (ranges.length === 0) {
+        setError(
+          includeExtendedFillers
+            ? 'No filler words found in the transcript.'
+            : 'No core fillers (um/uh/…) found. Try enabling “like / you know / etc.”',
+        )
+      } else {
+        setSuccess(
+          `Found ${ranges.length} filler cut${ranges.length === 1 ? '' : 's'}. Applied on export.`,
+        )
+        setFocusHint('Fillers highlighted in purple. Export when ready.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Filler detection failed')
+    } finally {
+      setFillerBusy(false)
+    }
+  }
+
+  // Auto-run silence / filler detection when opened from Library focus links.
+  useEffect(() => {
+    if (!record || autoRanRef.current) return
+    if (editorFocus !== 'silence' && editorFocus !== 'filler') return
+    autoRanRef.current = true
+    if (editorFocus === 'silence') {
+      void (async () => {
+        setSilenceBusy(true)
+        setError(null)
+        try {
+          const ranges = await detectSilenceRanges(record.blob, {
+            threshold: silenceThreshold,
+            minSilenceSec,
+          })
+          setSilenceRanges(ranges)
+          setApplySilences(ranges.length > 0)
+          if (ranges.length === 0) {
+            setError(
+              'No silences found with current threshold. Try a higher threshold or shorter min duration.',
+            )
+          } else {
+            setSuccess(
+              `Found ${ranges.length} silence range${ranges.length === 1 ? '' : 's'}. Applied on export.`,
+            )
+            setFocusHint(
+              'Silences highlighted in yellow. Export when ready (Download / Save as new / Overwrite).',
+            )
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Silence detection failed')
+        } finally {
+          setSilenceBusy(false)
+        }
+      })()
+      return
+    }
+
+    void (async () => {
+      setFillerBusy(true)
+      setError(null)
+      try {
+        let data = transcript
+        if (!transcriptHasWordTimings(data?.words)) {
+          const settings = await loadApiSettings()
+          if (!hasOpenAiKey(settings)) {
+            setHasKey(false)
+            setError(
+              'Filler removal needs a transcript. Add your OpenAI API key in Settings, then click Detect fillers.',
+            )
+            setFocusHint(
+              'Add an OpenAI API key in Settings, then detect fillers to cut um/uh/like.',
+            )
+            return
+          }
+          setHasKey(true)
+          setTranscribeBusy(true)
+          data = await transcribeWithOpenAI(
+            record.blob,
+            settings.openaiApiKey,
+            recordingFilename(record),
+          )
+          if (!transcriptHasWordTimings(data.words)) {
+            throw new Error(
+              'Transcription succeeded but returned no word timings. Try Detect fillers again.',
+            )
+          }
+          setTranscript(data)
+          await updateRecordingTranscript(record.id, data)
+          setRecord({ ...record, transcript: data })
+        }
+        const ranges = detectFillerRanges(data!.words, {
+          includeExtended: includeExtendedFillers,
+        })
+        setFillerRanges(ranges)
+        setApplyFillers(ranges.length > 0)
+        if (ranges.length === 0) {
+          setError('No filler words found in the transcript.')
+        } else {
+          setSuccess(
+            `Found ${ranges.length} filler cut${ranges.length === 1 ? '' : 's'}. Applied on export.`,
+          )
+          setFocusHint('Fillers highlighted in purple. Export when ready.')
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Filler detection failed')
+      } finally {
+        setFillerBusy(false)
+        setTranscribeBusy(false)
+      }
+    })()
+    // Intentionally once after recording load for deep-link focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record, editorFocus])
+
   async function runExport(mode: 'download' | 'overwrite' | 'save-as') {
     if (!record) return
     setBusy(true)
     setProgress(0)
     setLog('Loading ffmpeg…')
     setError(null)
+    setSuccess(null)
     try {
       const blob = await exportEditedVideo(
         record.blob,
@@ -173,14 +398,20 @@ export function EditorApp() {
         (p) => setProgress(p),
         (msg) => setLog(msg),
       )
-      const durationMs = outDuration * 1000
+      const durationMs = Math.max(50, outDuration * 1000)
       if (mode === 'download') {
         downloadBlob(blob, recordingFilename({ ...record, mimeType: 'video/webm' }))
+        setSuccess('Downloaded edited video.')
+        setLog('Done')
       } else if (mode === 'overwrite') {
         await updateRecordingBlob(record.id, blob, durationMs, undefined, true)
+        // Timings no longer match the original transcript after cuts.
+        await updateRecordingTranscript(record.id, undefined)
+        setSuccess('Saved over original. Opening library…')
         await openLibraryTab(record.id)
       } else {
         const saved = await updateRecordingBlob(record.id, blob, durationMs, undefined, false)
+        setSuccess('Saved as new recording. Opening library…')
         await openLibraryTab(saved.id)
       }
     } catch (err) {
@@ -190,31 +421,11 @@ export function EditorApp() {
     }
   }
 
-  async function onDetectSilences() {
-    if (!record) return
-    setSilenceBusy(true)
-    setError(null)
-    try {
-      const ranges = await detectSilenceRanges(record.blob, {
-        threshold: silenceThreshold,
-        minSilenceSec,
-      })
-      setSilenceRanges(ranges)
-      setApplySilences(ranges.length > 0)
-      if (ranges.length === 0) {
-        setError('No silences found with current threshold. Try a higher threshold or shorter min duration.')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Silence detection failed')
-    } finally {
-      setSilenceBusy(false)
-    }
-  }
-
   async function onTranscribe() {
     if (!record) return
     setTranscribeBusy(true)
     setError(null)
+    setSuccess(null)
     try {
       const settings = await loadApiSettings()
       if (!hasOpenAiKey(settings)) {
@@ -230,6 +441,11 @@ export function EditorApp() {
       setTranscript(result)
       await updateRecordingTranscript(record.id, result)
       setRecord({ ...record, transcript: result })
+      setSuccess(
+        result.words?.length
+          ? `Transcript ready (${result.words.length} words). Filler removal is available.`
+          : 'Transcript ready.',
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transcription failed')
     } finally {
@@ -251,6 +467,7 @@ export function EditorApp() {
     if (!transcript) return
     try {
       await navigator.clipboard.writeText(transcript.text)
+      setSuccess('Transcript copied.')
     } catch {
       setError('Could not copy to clipboard.')
     }
@@ -291,7 +508,7 @@ export function EditorApp() {
             }}
           />
           <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-            Trim, cut selection, remove silences, transcribe — export runs locally via ffmpeg.wasm.
+            Trim, cut silences, remove fillers, transcribe — export runs locally via ffmpeg.wasm.
           </p>
         </div>
         <div className="row">
@@ -352,6 +569,9 @@ export function EditorApp() {
                   </option>
                 ))}
               </select>
+              <span className="muted" style={{ fontSize: '0.75rem' }}>
+                preview only
+              </span>
             </label>
           </div>
 
@@ -384,6 +604,17 @@ export function EditorApp() {
                     }}
                   />
                 ))}
+              {applyFillers &&
+                fillerRanges.map((r, i) => (
+                  <div
+                    key={`fil-${i}`}
+                    className="filler"
+                    style={{
+                      left: `${duration ? (r.start / duration) * 100 : 0}%`,
+                      width: `${duration ? ((r.end - r.start) / duration) * 100 : 0}%`,
+                    }}
+                  />
+                ))}
               <div
                 className="playhead"
                 style={{ left: `${duration ? (current / duration) * 100 : 0}%` }}
@@ -393,6 +624,7 @@ export function EditorApp() {
               <span className="leg keep-leg">Keep</span>
               <span className="leg cut-leg">Cut selection</span>
               <span className="leg sil-leg">Silence</span>
+              <span className="leg fil-leg">Filler</span>
             </div>
           </div>
         </div>
@@ -555,7 +787,11 @@ export function EditorApp() {
               />
             </div>
             <div className="btn-row">
-              <button type="button" disabled={silenceBusy || busy} onClick={() => void onDetectSilences()}>
+              <button
+                type="button"
+                disabled={silenceBusy || busy}
+                onClick={() => void onDetectSilences()}
+              >
                 {silenceBusy ? 'Detecting…' : 'Detect silences'}
               </button>
               <label className="row check-row" style={{ margin: 0 }}>
@@ -570,10 +806,70 @@ export function EditorApp() {
             </div>
           </section>
 
+          <section className="tool-section" ref={fillerSectionRef}>
+            <h2>Remove filler words</h2>
+            <p className="muted tool-help">
+              Uses Whisper word timings (um, uh, like, you know…). Needs an OpenAI key.
+              {!hasWordTimings && transcript
+                ? ' Current transcript has no word timings — detect will re-transcribe.'
+                : !transcript
+                  ? ' No transcript yet — detect will transcribe first.'
+                  : ''}
+            </p>
+            <label className="row check-row">
+              <input
+                type="checkbox"
+                checked={includeExtendedFillers}
+                onChange={(e) => setIncludeExtendedFillers(e.target.checked)}
+              />
+              Include like / you know / basically / etc.
+            </label>
+            {!hasKey && (
+              <p className="key-hint" style={{ margin: 0 }}>
+                Add API key in Settings to enable filler removal.
+              </p>
+            )}
+            <div className="btn-row">
+              <button
+                type="button"
+                disabled={fillerBusy || transcribeBusy || busy || !hasKey}
+                title={!hasKey ? 'Add API key in Settings' : undefined}
+                onClick={() => void onDetectFillers()}
+              >
+                {fillerBusy || (transcribeBusy && editorFocus === 'filler')
+                  ? hasWordTimings
+                    ? 'Detecting…'
+                    : 'Transcribing…'
+                  : 'Detect fillers'}
+              </button>
+              {!hasKey && (
+                <button type="button" onClick={() => void openLibraryTab(record.id, true)}>
+                  Add API key
+                </button>
+              )}
+              <label className="row check-row" style={{ margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={applyFillers}
+                  disabled={fillerRanges.length === 0}
+                  onChange={(e) => setApplyFillers(e.target.checked)}
+                />
+                Apply on export ({fillerRanges.length})
+              </label>
+            </div>
+          </section>
+
           <section className="tool-section">
             <h2>Export</h2>
             <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
               Output ≈ {secLabel(outDuration)}
+              {applySilences || applyFillers || cutEnabled
+                ? ` · removing ${
+                    (applySilences ? silenceRanges.length : 0) +
+                    (applyFillers ? fillerRanges.length : 0) +
+                    (cutEnabled ? 1 : 0)
+                  } cut(s)`
+                : ''}
             </p>
             <label className="row check-row">
               <input
@@ -607,9 +903,22 @@ export function EditorApp() {
                 {log.slice(-120)}
               </p>
             )}
+            <p className="muted" style={{ margin: 0, fontSize: '0.75rem' }}>
+              Overwrite clears the old transcript (timings no longer match). Re-transcribe after
+              major cuts.
+            </p>
           </section>
 
-          {error && <p style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>}
+          {error && (
+            <p className="editor-status error" role="alert">
+              {error}
+            </p>
+          )}
+          {success && !error && (
+            <p className="editor-status success" role="status">
+              {success}
+            </p>
+          )}
         </aside>
 
         <aside className="transcript-panel">
@@ -630,7 +939,7 @@ export function EditorApp() {
               title={!hasKey ? 'Add API key in Settings' : undefined}
               onClick={() => void onTranscribe()}
             >
-              {transcribeBusy ? 'Transcribing…' : 'Transcribe'}
+              {transcribeBusy ? 'Transcribing…' : transcript ? 'Re-transcribe' : 'Transcribe'}
             </button>
             {!hasKey && (
               <button type="button" onClick={() => void openLibraryTab(record.id, true)}>
@@ -659,6 +968,15 @@ export function EditorApp() {
                   {showChapters ? 'Hide chapters' : 'Auto chapters'}
                 </button>
               </div>
+              {hasWordTimings ? (
+                <p className="muted" style={{ margin: 0, fontSize: '0.75rem' }}>
+                  Word timings available ({transcript.words!.length}) — filler cuts ready.
+                </p>
+              ) : (
+                <p className="muted" style={{ margin: 0, fontSize: '0.75rem' }}>
+                  No word timings on this transcript. Re-transcribe to enable filler removal.
+                </p>
+              )}
 
               {showChapters && (
                 <div className="chapters-list">
@@ -702,8 +1020,8 @@ export function EditorApp() {
             </>
           ) : (
             <p className="muted" style={{ fontSize: '0.85rem' }}>
-              Run Transcribe to generate captions. Uses your OpenAI key (Whisper). The recording
-              itself stays local; only audio is sent to OpenAI for transcription.
+              Run Transcribe to generate captions and word timings for filler removal. Uses your
+              OpenAI key (Whisper). The recording stays local; only audio is sent to OpenAI.
             </p>
           )}
         </aside>

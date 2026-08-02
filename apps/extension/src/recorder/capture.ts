@@ -5,6 +5,7 @@ import {
   isBlurEffect,
   type PersonBackgroundBlur,
 } from '../shared/backgroundBlur'
+import { cameraFilterCss } from '../shared/cameraFilters'
 
 export type CaptureBundle = {
   displayStream: MediaStream
@@ -77,6 +78,7 @@ function drawBubbleCover(
   borderColor: string,
   shadow: boolean,
   shape: BubbleShape = 'circle',
+  filterCss = 'none',
 ) {
   if (!sourceW) return
 
@@ -112,7 +114,11 @@ function drawBubbleCover(
     ctx.scale(-1, 1)
     ctx.translate(-cx, -cy)
   }
+  if (filterCss && filterCss !== 'none') {
+    ctx.filter = filterCss
+  }
   ctx.drawImage(source, dx, dy, dw, dh)
+  ctx.filter = 'none'
   ctx.restore()
 
   if (borderColor !== 'transparent') {
@@ -305,6 +311,7 @@ export async function startCapture(settings: PipSettings): Promise<{
         liveSettings.borderColor,
         liveSettings.shadow,
         liveSettings.bubbleShape === 'square' ? 'square' : 'circle',
+        cameraFilterCss(liveSettings.cameraFilter),
       )
     }
     raf = requestAnimationFrame(draw)

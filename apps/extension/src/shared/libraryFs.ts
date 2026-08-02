@@ -33,9 +33,12 @@ type DiskMeta = {
   driveFileId?: string
   driveWebViewLink?: string
   driveShared?: boolean
+  driveProcessingStatus?: 'processing' | 'ready' | 'unknown'
+  driveReadyAt?: number
   shareId?: string
   shareViewCount?: number
   shareLastViewedAt?: string | null
+  shareExpiresAt?: string | null
 }
 
 interface HandleDB extends DBSchema {
@@ -76,9 +79,12 @@ function toDiskMeta(rec: RecordingMeta | RecordingRecord): DiskMeta {
   if (rec.driveFileId) meta.driveFileId = rec.driveFileId
   if (rec.driveWebViewLink) meta.driveWebViewLink = rec.driveWebViewLink
   if (rec.driveShared != null) meta.driveShared = rec.driveShared
+  if (rec.driveProcessingStatus) meta.driveProcessingStatus = rec.driveProcessingStatus
+  if (rec.driveReadyAt != null) meta.driveReadyAt = rec.driveReadyAt
   if (rec.shareId) meta.shareId = rec.shareId
   if (rec.shareViewCount != null) meta.shareViewCount = rec.shareViewCount
   if (rec.shareLastViewedAt !== undefined) meta.shareLastViewedAt = rec.shareLastViewedAt
+  if (rec.shareExpiresAt !== undefined) meta.shareExpiresAt = rec.shareExpiresAt
   return meta
 }
 
@@ -169,6 +175,38 @@ export async function clearLibraryFolder(): Promise<void> {
 
 export async function hasLibraryFolder(): Promise<boolean> {
   return (await getLibraryHandle()) !== null
+}
+
+export type LibraryFolderPermission = PermissionState | 'none'
+
+export type LibraryFolderAccess = {
+  hasHandle: boolean
+  folderName: string | null
+  /** `granted` when list/read works without a new user gesture. */
+  permission: LibraryFolderPermission
+}
+
+/** Name from storage/handle + live File System Access permission (no prompt). */
+export async function getLibraryFolderAccess(): Promise<LibraryFolderAccess> {
+  const folderName = await getLibraryFolderName()
+  const handle = await getLibraryHandle()
+  if (!handle) {
+    return { hasHandle: false, folderName, permission: 'none' }
+  }
+  try {
+    const permission = await handle.queryPermission({ mode: 'readwrite' })
+    return {
+      hasHandle: true,
+      folderName: folderName || handle.name,
+      permission,
+    }
+  } catch {
+    return {
+      hasHandle: true,
+      folderName: folderName || handle.name,
+      permission: 'prompt',
+    }
+  }
 }
 
 export async function ensureLibraryPermission(
@@ -294,9 +332,12 @@ async function readRecordingFromDir(
     driveFileId: meta.driveFileId,
     driveWebViewLink: meta.driveWebViewLink,
     driveShared: meta.driveShared,
+    driveProcessingStatus: meta.driveProcessingStatus,
+    driveReadyAt: meta.driveReadyAt,
     shareId: meta.shareId,
     shareViewCount: meta.shareViewCount,
     shareLastViewedAt: meta.shareLastViewedAt,
+    shareExpiresAt: meta.shareExpiresAt,
   }
 }
 
@@ -305,9 +346,12 @@ export type DriveShareMetaPatch = Pick<
   | 'driveFileId'
   | 'driveWebViewLink'
   | 'driveShared'
+  | 'driveProcessingStatus'
+  | 'driveReadyAt'
   | 'shareId'
   | 'shareViewCount'
   | 'shareLastViewedAt'
+  | 'shareExpiresAt'
 >
 
 /** Patch Drive / share fields in meta.json without rewriting the video blob. */
@@ -330,13 +374,36 @@ export async function updateDriveMetaInFolder(
   if (patch.driveFileId !== undefined) next.driveFileId = patch.driveFileId
   if (patch.driveWebViewLink !== undefined) next.driveWebViewLink = patch.driveWebViewLink
   if (patch.driveShared !== undefined) next.driveShared = patch.driveShared
+  if (patch.driveProcessingStatus !== undefined) {
+    next.driveProcessingStatus = patch.driveProcessingStatus
+  }
+  if (patch.driveReadyAt !== undefined) next.driveReadyAt = patch.driveReadyAt
   if (patch.shareId !== undefined) next.shareId = patch.shareId
   if (patch.shareViewCount !== undefined) next.shareViewCount = patch.shareViewCount
   if (patch.shareLastViewedAt !== undefined) next.shareLastViewedAt = patch.shareLastViewedAt
+  if (patch.shareExpiresAt !== undefined) next.shareExpiresAt = patch.shareExpiresAt
 
   await writeTextFile(dir, 'meta.json', JSON.stringify(next, null, 2) + '\n')
 }
 
+async function directoryHasVideo(dir: FileSystemDirectoryHandle): Promise<boolean> {
+  try {
+    await dir.getFileHandle('video.webm')
+    return true
+  } catch {
+    try {
+      await dir.getFileHandle('video.mp4')
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+/**
+ * List library metas from disk. Loads thumbnails only — not full video blobs
+ * (avoids OOM / long hangs that made the grid look empty).
+ */
 export async function listFolderRecordings(
   root?: FileSystemDirectoryHandle,
 ): Promise<RecordingMeta[]> {
@@ -350,10 +417,32 @@ export async function listFolderRecordings(
   for await (const [name, handle] of recordings.entries()) {
     if (handle.kind !== 'directory') continue
     if (!isSafeRecordingId(name)) continue
-    const rec = await readRecordingFromDir(handle as FileSystemDirectoryHandle, name)
-    if (!rec) continue
-    const { blob: _blob, ...meta } = rec
-    items.push(meta)
+    const dir = handle as FileSystemDirectoryHandle
+    const meta = await readJsonFile<DiskMeta>(dir, 'meta.json')
+    if (!meta?.id || !isSafeRecordingId(meta.id)) continue
+    if (!(await directoryHasVideo(dir))) continue
+
+    const thumbnail = await readBlobFile(dir, 'thumb.jpg')
+    const transcript = await readJsonFile<TranscriptData>(dir, 'transcript.json')
+    items.push({
+      id: meta.id,
+      title: typeof meta.title === 'string' ? meta.title.slice(0, 200) : 'Recording',
+      createdAt: meta.createdAt || 0,
+      durationMs: meta.durationMs || 0,
+      mimeType: meta.mimeType || 'video/webm',
+      sizeBytes: meta.sizeBytes || 0,
+      thumbnail,
+      transcript,
+      driveFileId: meta.driveFileId,
+      driveWebViewLink: meta.driveWebViewLink,
+      driveShared: meta.driveShared,
+      driveProcessingStatus: meta.driveProcessingStatus,
+      driveReadyAt: meta.driveReadyAt,
+      shareId: meta.shareId,
+      shareViewCount: meta.shareViewCount,
+      shareLastViewedAt: meta.shareLastViewedAt,
+      shareExpiresAt: meta.shareExpiresAt,
+    })
   }
 
   return items.sort((a, b) => b.createdAt - a.createdAt)

@@ -8,6 +8,12 @@ import {
 } from '../shared/micGrant'
 import { openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
+  CAMERA_FILTERS,
+  cameraFilterCss,
+  normalizeCameraFilter,
+  type CameraFilterId,
+} from '../shared/cameraFilters'
+import {
   listAudioInputs,
   listVideoInputs,
   loadPipSettings,
@@ -15,7 +21,8 @@ import {
   toMicOptions,
   unlockMediaDeviceLabels,
 } from '../shared/settings'
-import type { BackgroundEffect, BubbleShape, RecordMode } from '../shared/types'
+import { openShareGuidanceTab, writeShareSession } from '../shared/shareSession'
+import type { BackgroundEffect, RecordMode } from '../shared/types'
 
 type LoomStatus = {
   recording: boolean
@@ -24,8 +31,7 @@ type LoomStatus = {
 }
 
 type DeviceOption = { deviceId: string; label: string }
-
-type PreflightStep = 'setup' | 'camera' | 'mic' | 'screen'
+type CaptureScope = 'tab' | 'cam'
 /** Mic must be granted via the visible grant window — popup/offscreen cannot show Allow. */
 type MicAccess = 'unknown' | 'granted' | 'denied' | 'skipped'
 
@@ -45,85 +51,155 @@ function formatStartError(reason: string | undefined | null, fallback: string): 
   const detail = typeof reason === 'string' ? reason.trim() : ''
   if (!detail) return fallback
   if (/permission dismissed|notallowed|permission denied/i.test(detail)) {
-    return 'Permission dismissed — click Allow microphone to open the permission window, or choose Continue without mic. You can also check chrome://settings/content/microphone.'
+    return 'Microphone blocked — turn Mic On to open the grant window, or turn Mic off to continue without it.'
   }
   if (/^could not start recording/i.test(detail)) return detail
   return `${fallback}: ${detail}`
 }
 
-function micAccessLabel(access: MicAccess): string {
-  switch (access) {
-    case 'granted':
-      return 'Allowed'
-    case 'denied':
-      return 'Blocked'
-    case 'skipped':
-      return 'Recording without mic'
-    default:
-      return 'Not asked yet'
-  }
+function truncateLabel(label: string, max = 22): string {
+  const t = label.trim()
+  if (t.length <= max) return t
+  return `${t.slice(0, max - 1)}…`
 }
 
-function totalSteps(mode: RecordMode): number {
-  let n = 1 // mic
-  if (needsCamera(mode)) n += 1
-  if (needsScreen(mode)) n += 1
-  return n
+function deriveRecordMode(scope: CaptureScope, cameraOn: boolean): RecordMode {
+  if (scope === 'cam') return 'cam'
+  return cameraOn ? 'screen-cam' : 'screen'
 }
 
-function stepIndex(step: PreflightStep, mode: RecordMode): number {
-  let i = 1
-  if (step === 'camera') return i
-  if (needsCamera(mode)) i += 1
-  if (step === 'mic') return i
-  i += 1
-  if (step === 'screen') return i
-  return i
+function IconHome() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <path
+        d="M4.5 10.5 12 4l7.5 6.5V20a1.5 1.5 0 0 1-1.5 1.5h-4.5v-6h-3v6H6A1.5 1.5 0 0 1 4.5 20v-9.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
-function needsCamera(mode: RecordMode): boolean {
-  return mode === 'screen-cam' || mode === 'cam'
+function IconRecord() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <rect x="3.5" y="7" width="13" height="10" rx="2.2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16.5 10.5 20.5 8v8l-4-2.5v-3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
-function needsScreen(mode: RecordMode): boolean {
-  return mode === 'screen-cam' || mode === 'screen'
+function IconClose() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  )
 }
 
-const MODES: { id: RecordMode; label: string; hint: string }[] = [
-  { id: 'screen-cam', label: 'Tab + Cam', hint: 'This tab with circular camera PiP' },
-  { id: 'screen', label: 'Tab only', hint: 'This tab without camera bubble' },
-  { id: 'cam', label: 'Cam only', hint: 'Camera feed only (saved locally)' },
-]
+function IconTab() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+      <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 9h17" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  )
+}
 
-const SHAPES: { id: BubbleShape; label: string }[] = [
-  { id: 'circle', label: 'Circle' },
-  { id: 'square', label: 'Square' },
-]
+function IconCam({ className }: { className?: string } = {}) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <rect x="3.5" y="7" width="12.5" height="10" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M16 10.5 20.5 8v8L16 13.5v-3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
-const EFFECTS: { id: BackgroundEffect; label: string }[] = [
-  { id: 'none', label: 'None' },
-  { id: 'blur', label: 'Blur' },
-]
+function IconMic({ className }: { className?: string } = {}) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+      <rect x="9" y="3.5" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3.5M9 20.5h6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function IconEffects() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+      <path
+        d="M12 3.5 13.8 9.2 19.5 11 13.8 12.8 12 18.5 10.2 12.8 4.5 11 10.2 9.2 12 3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function IconBlur() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  )
+}
+
+function IconMore() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+      <circle cx="6.5" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="17.5" cy="12" r="1.4" fill="currentColor" />
+    </svg>
+  )
+}
+
+function IconChevron() {
+  return (
+    <svg className="loom-scope-chevron" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M8 10l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function IconBack() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+      <path
+        d="M15 6 9 12l6 6"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
 
 export function PopupApp() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [openOnFinish, setOpenOnFinish] = useState(true)
-  const [recordMode, setRecordMode] = useState<RecordMode>('screen-cam')
-  const [bubbleShape, setBubbleShape] = useState<BubbleShape>('circle')
+  const [helper, setHelper] = useState<string | null>(null)
+  const [scope, setScope] = useState<CaptureScope>('tab')
+  const [cameraOn, setCameraOn] = useState(true)
+  const [micOn, setMicOn] = useState(true)
   const [backgroundEffect, setBackgroundEffect] = useState<BackgroundEffect>('none')
-  const [micDeviceId, setMicDeviceId] = useState<string>('')
-  const [cameraDeviceId, setCameraDeviceId] = useState<string>('')
+  const [cameraFilter, setCameraFilter] = useState<CameraFilterId>('none')
+  const [effectsOpen, setEffectsOpen] = useState(false)
+  const [micDeviceId, setMicDeviceId] = useState('')
+  const [cameraDeviceId, setCameraDeviceId] = useState('')
   const [mics, setMics] = useState<DeviceOption[]>([])
   const [cameras, setCameras] = useState<DeviceOption[]>([])
   const [status, setStatus] = useState<LoomStatus>({ recording: false, tabId: null })
-  const [micHint, setMicHint] = useState<string | null>(null)
-  const [cameraHint, setCameraHint] = useState<string | null>(null)
-  const [step, setStep] = useState<PreflightStep>('setup')
   const [micAccess, setMicAccess] = useState<MicAccess>('unknown')
-  const [targetTab, setTargetTab] = useState<{ id: number; title: string; url: string } | null>(
-    null,
-  )
   const micGrantPollRef = useRef<number | null>(null)
   const micGrantWindowIdRef = useRef<number | null>(null)
   const [micGrantWaiting, setMicGrantWaiting] = useState(false)
@@ -141,10 +217,9 @@ export function PopupApp() {
       stopMicGrantPoll()
       setMicGrantWaiting(false)
       setMicAccess('granted')
-      if (result.devices && result.devices.length > 0) {
-        setMics(result.devices)
-      }
-      setMicHint('Microphone allowed. Pick a device if needed, then continue.')
+      setMicOn(true)
+      if (result.devices && result.devices.length > 0) setMics(result.devices)
+      setHelper('Microphone allowed')
       await refreshMicsFromPopup()
       return true
     }
@@ -152,10 +227,11 @@ export function PopupApp() {
       stopMicGrantPoll()
       setMicGrantWaiting(false)
       setMicAccess('denied')
-      setMicHint(
+      setMicOn(false)
+      setHelper(
         result.reason && !/dismissed|denied|notallowed/i.test(result.reason)
           ? result.reason
-          : 'Microphone blocked. In the grant window click Allow again, or reset: chrome://settings/content/microphone → remove MyPipCam if blocked. macOS: System Settings → Privacy & Security → Microphone → Google Chrome ON. Or Continue without mic.',
+          : 'Mic blocked — check Chrome mic settings, or leave Mic off',
       )
       return true
     }
@@ -167,37 +243,36 @@ export function PopupApp() {
       const perm = await navigator.permissions.query({
         name: 'microphone' as PermissionName,
       })
-      if (perm.state === 'granted') setMicAccess((prev) => (prev === 'skipped' ? prev : 'granted'))
-      else if (perm.state === 'denied') setMicAccess((prev) => (prev === 'skipped' ? prev : 'denied'))
-      else if (micAccess !== 'skipped' && micAccess !== 'granted') setMicAccess('unknown')
+      if (perm.state === 'granted') {
+        setMicAccess((prev) => (prev === 'skipped' ? prev : 'granted'))
+        setMicOn(true)
+      } else if (perm.state === 'denied') {
+        setMicAccess((prev) => (prev === 'skipped' ? prev : 'denied'))
+      }
       perm.onchange = () => {
-        if (perm.state === 'granted') setMicAccess('granted')
-        else if (perm.state === 'denied') setMicAccess('denied')
-        else setMicAccess('unknown')
+        if (perm.state === 'granted') {
+          setMicAccess('granted')
+          setMicOn(true)
+        } else if (perm.state === 'denied') {
+          setMicAccess('denied')
+        } else {
+          setMicAccess('unknown')
+        }
       }
     } catch {
       /* permissions.query(microphone) unsupported in some Chromium builds */
     }
   }
 
-  /**
-   * Open a dedicated extension window (type:normal — not type:popup).
-   * Popup getUserMedia and tiny popup windows often get "Permission dismissed"
-   * with no Chrome Allow UI; a normal window can show the address-bar prompt.
-   */
   async function allowMicrophone() {
     setError(null)
     setMicGrantWaiting(true)
-    setMicHint(
-      'Grant window opened — click Allow microphone there, then Allow in Chrome’s prompt at the top of that window.',
-    )
+    setHelper('Grant window opened — Allow microphone there')
     stopMicGrantPoll()
 
     try {
       await writeMicGrantResult('pending')
-
       const url = chrome.runtime.getURL(MIC_GRANT_PAGE)
-      // type:'normal' (not 'popup') so Chrome can show the mic Allow bubble.
       const win = await chrome.windows.create({
         url,
         type: 'normal',
@@ -223,9 +298,8 @@ export function PopupApp() {
               if (!(await applyMicGrantResult(latest))) {
                 setMicGrantWaiting(false)
                 setMicAccess((prev) => (prev === 'granted' || prev === 'skipped' ? prev : 'denied'))
-                setMicHint(
-                  'Grant window closed before Allow. Click Allow microphone again, or Continue without mic.',
-                )
+                setMicOn(false)
+                setHelper('Grant window closed — turn Mic On to try again')
               }
               return
             }
@@ -234,18 +308,15 @@ export function PopupApp() {
           if (Date.now() - startedAt > 120_000) {
             stopMicGrantPoll()
             setMicGrantWaiting(false)
-            setMicHint(
-              'Still waiting — Allow in the grant window (Chrome prompt at top), or Continue without mic.',
-            )
+            setHelper('Still waiting for mic allow — or turn Mic off')
           }
         })()
       }, 350)
     } catch (err) {
       setMicGrantWaiting(false)
       setMicAccess('denied')
-      const detail = errMessage(err, 'Could not open microphone permission window')
-      console.error('[MyPipCam][start] open mic grant window failed:', detail, err)
-      setMicHint(detail)
+      setMicOn(false)
+      setHelper(errMessage(err, 'Could not open microphone permission window'))
     }
   }
 
@@ -254,20 +325,16 @@ export function PopupApp() {
       const devices = await listAudioInputs({ unlock: false })
       const options = toMicOptions(devices)
       setMics(options)
-      if (options.length === 0) {
-        setMicHint((h) => h || 'No microphones found after grant. Check system input devices.')
-      } else if (micDeviceId && !options.some((d) => d.deviceId === micDeviceId)) {
+      if (micDeviceId && !options.some((d) => d.deviceId === micDeviceId)) {
         setMicDeviceId('')
         await savePipSettings({ micDeviceId: null })
       }
-    } catch (err) {
-      setMicHint(errMessage(err, 'Could not list microphones'))
+    } catch {
+      /* ignore */
     }
   }
 
   async function refreshMics() {
-    setMicHint(null)
-    // Prefer popup-side enumeration after a visible grant (avoids offscreen probe).
     if (micAccess === 'granted') {
       await refreshMicsFromPopup()
       return
@@ -275,35 +342,18 @@ export function PopupApp() {
     try {
       const res = (await chrome.runtime.sendMessage({
         type: 'LIST_MIC_DEVICES',
-      })) as {
-        ok?: boolean
-        devices?: DeviceOption[]
-        reason?: string
-      }
+      })) as { ok?: boolean; devices?: DeviceOption[] }
       if (!res?.ok) {
         setMics([])
-        setMicHint(
-          res?.reason ||
-            'Click Allow microphone first (Allow in the permission window).',
-        )
         return
       }
-      const devices = res.devices ?? []
-      setMics(devices)
-      if (devices.length === 0) {
-        setMicHint('No microphones found. Click Allow microphone above.')
-      } else if (micDeviceId && !devices.some((d) => d.deviceId === micDeviceId)) {
-        setMicDeviceId('')
-        await savePipSettings({ micDeviceId: null })
-      }
-    } catch (err) {
+      setMics(res.devices ?? [])
+    } catch {
       setMics([])
-      setMicHint(errMessage(err, 'Could not list microphones'))
     }
   }
 
   async function refreshCameras() {
-    setCameraHint(null)
     try {
       const devices = await listVideoInputs({ unlock: true })
       const options = devices.map((d, i) => ({
@@ -311,31 +361,31 @@ export function PopupApp() {
         label: d.label?.trim() || `Camera ${i + 1}`,
       }))
       setCameras(options)
-      if (options.length === 0) {
-        setCameraHint('No cameras found. Allow camera access, then click Refresh cameras.')
-      } else if (cameraDeviceId && !options.some((d) => d.deviceId === cameraDeviceId)) {
+      if (cameraDeviceId && !options.some((d) => d.deviceId === cameraDeviceId)) {
         setCameraDeviceId('')
         await savePipSettings({ cameraDeviceId: null })
       }
-    } catch (err) {
+    } catch {
       setCameras([])
-      setCameraHint(errMessage(err, 'Could not list cameras'))
     }
   }
 
-  async function allowCamera() {
-    setCameraHint(null)
+  async function allowCamera(): Promise<boolean> {
     setBusy(true)
     try {
       const ok = await unlockMediaDeviceLabels('video')
       if (!ok) {
-        setCameraHint('Camera permission denied. Allow camera for this extension and try again.')
-        return
+        setHelper('Camera permission denied')
+        setCameraOn(false)
+        return false
       }
       await refreshCameras()
-      setCameraHint(null)
+      setCameraOn(true)
+      return true
     } catch (err) {
-      setCameraHint(errMessage(err, 'Could not request camera access'))
+      setHelper(errMessage(err, 'Could not request camera access'))
+      setCameraOn(false)
+      return false
     } finally {
       setBusy(false)
     }
@@ -344,22 +394,19 @@ export function PopupApp() {
   useEffect(() => {
     void (async () => {
       const s = await loadPipSettings()
-      setOpenOnFinish(s.openLibraryOnFinish)
-      setRecordMode(s.recordMode || 'screen-cam')
-      setBubbleShape(s.bubbleShape === 'square' ? 'square' : 'circle')
+      const mode = s.recordMode || 'screen-cam'
+      setScope(mode === 'cam' ? 'cam' : 'tab')
+      setCameraOn(mode !== 'screen')
       setBackgroundEffect(s.backgroundEffect === 'blur' ? 'blur' : 'none')
+      setCameraFilter(normalizeCameraFilter(s.cameraFilter))
       setMicDeviceId(s.micDeviceId || '')
       setCameraDeviceId(s.cameraDeviceId || '')
       await probeMicPermissionState()
-      // Popup often closes when the grant window opens — pick up the result on reopen.
       const grant = await readMicGrantResult()
-      if (await applyMicGrantResult(grant)) {
-        /* status/hint set */
-      }
+      await applyMicGrantResult(grant)
       await refreshMics()
+      await refreshCameras()
 
-      // Surface start failures that happened after the popup was destroyed
-      // (e.g. focus race) so the next open is not a silent dead end.
       try {
         const last = (await chrome.runtime.sendMessage({
           type: 'GET_LAST_START_ERROR',
@@ -418,204 +465,49 @@ export function PopupApp() {
   }, [])
 
   async function resolveActiveTab(): Promise<{ id: number; title: string; url: string } | null> {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    const url = tab?.url ?? ''
-    if (!tab?.id || (url && !/^https?:/i.test(url))) {
-      setError(
-        "Can't record this page. Open a normal website tab (https://…) and try again.",
-      )
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
+    const url = active?.url ?? ''
+    if (!active?.id || (url && !/^https?:/i.test(url))) {
+      setError("Can't record this page. Open a normal website tab (https://…) and try again.")
       return null
     }
     return {
-      id: tab.id,
-      title: (tab.title || 'This tab').slice(0, 80),
+      id: active.id,
+      title: (active.title || 'This tab').slice(0, 80),
       url,
     }
   }
 
-  async function persistSetup() {
+  async function persistSetup(mode: RecordMode) {
     await savePipSettings({
-      recordMode,
+      recordMode: mode,
       micDeviceId: micDeviceId || null,
       cameraDeviceId: cameraDeviceId || null,
-      bubbleShape,
       backgroundEffect,
+      cameraFilter,
     })
   }
 
-  function goToMicStep() {
-    void (async () => {
-      await probeMicPermissionState()
-      const grant = await readMicGrantResult()
-      await applyMicGrantResult(grant)
-    })()
-    setStep('mic')
-  }
-
-  function advanceAfterMic() {
-    if (needsScreen(recordMode)) {
-      setStep('screen')
-      return
-    }
-    void (async () => {
-      const tab = targetTab ?? (await resolveActiveTab())
-      if (!tab) return
-      await commitStart(tab.id, null)
-    })()
-  }
-
-  /** Begin Loom-like preflight: camera → mic (visible Allow) → share tab → countdown. */
-  async function beginPreflight() {
-    setBusy(true)
-    setError(null)
-    try {
-      const tab = await resolveActiveTab()
-      if (!tab) return
-      setTargetTab(tab)
-      await persistSetup()
-      await probeMicPermissionState()
-
-      if (needsCamera(recordMode)) {
-        await refreshCameras()
-        setStep('camera')
-        return
-      }
-      goToMicStep()
-    } catch (err) {
-      setError(formatStartError(errMessage(err, 'Unexpected error'), 'Could not start recording'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function nextFromCamera() {
-    setBusy(true)
-    setError(null)
-    try {
-      await persistSetup()
-      if (!targetTab) {
-        const tab = await resolveActiveTab()
-        if (!tab) return
-        setTargetTab(tab)
-      }
-      goToMicStep()
-    } catch (err) {
-      setError(formatStartError(errMessage(err, 'Unexpected error'), 'Could not continue'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function continueWithMic() {
-    setError(null)
-    if (micAccess !== 'granted' && micAccess !== 'skipped') {
-      setError('Click Allow microphone (use the permission window), or Continue without mic.')
-      return
-    }
-    stopMicGrantPoll()
-    setMicGrantWaiting(false)
-    await persistSetup()
-    advanceAfterMic()
-  }
-
-  async function continueWithoutMic() {
-    setError(null)
-    stopMicGrantPoll()
-    setMicGrantWaiting(false)
-    setMicAccess('skipped')
-    setMicHint('Continuing without microphone. Tab audio may still be captured.')
-    await persistSetup()
-    advanceAfterMic()
-  }
-
-  /**
-   * Screen step: mint tabCapture streamId on this click (user gesture), then start.
-   * Streams are prepared immediately; MediaRecorder waits for the on-page 3→2→1.
-   */
-  async function shareTabAndStart() {
-    setBusy(true)
-    setError(null)
-    try {
-      if (micAccess !== 'granted' && micAccess !== 'skipped') {
-        setError('Allow microphone first, or choose Continue without mic.')
-        setStep('mic')
-        return
-      }
-
-      const tab = targetTab ?? (await resolveActiveTab())
-      if (!tab) return
-
-      await persistSetup()
-
-      let streamId: string | null = null
-      try {
-        const getMediaStreamId = chrome.tabCapture.getMediaStreamId as (options: {
-          targetTabId: number
-        }) => Promise<string>
-        streamId = await getMediaStreamId({ targetTabId: tab.id })
-        if (!streamId) {
-          setError(
-            formatStartError(
-              'No tab stream id from tabCapture',
-              'Could not start recording',
-            ),
-          )
-          return
-        }
-      } catch (err) {
-        const detail = errMessage(
-          err,
-          'Tab capture denied. Use an https tab and click Share tab again.',
-        )
-        console.error('[MyPipCam popup] tabCapture failed:', detail, err)
-        setError(formatStartError(detail, 'Could not start recording'))
-        return
-      }
-
-      await commitStart(tab.id, streamId)
-    } catch (err) {
-      const detail = errMessage(err, 'Unexpected error')
-      console.error('[MyPipCam popup] screen step threw:', detail, err)
-      setError(formatStartError(detail, 'Could not start recording'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function commitStart(tabId: number, streamId: string | null) {
-    const includeMic = micAccess === 'granted'
-    console.log('[MyPipCam][start] popup commitStart', {
-      tabId,
-      hasStreamId: Boolean(streamId),
-      includeMic,
-      micAccess,
-    })
+  async function commitStart(tabId: number, streamId: string | null, mode: RecordMode, includeMic: boolean) {
     const res = (await chrome.runtime.sendMessage({
       type: 'START_LOOM_RECORDING',
       tabId,
       streamId,
-      recordMode,
+      recordMode: mode,
       micDeviceId: includeMic ? micDeviceId || null : null,
       cameraDeviceId: cameraDeviceId || null,
       includeMic,
-    })) as { ok?: boolean; reason?: string; tabId?: number; ui?: string } | undefined
+    })) as { ok?: boolean; reason?: string; tabId?: number } | undefined
 
     if (res == null) {
-      // Popup may have been destroyed mid-flight; check whether start actually armed.
       try {
-        const status = (await chrome.runtime.sendMessage({
+        const live = (await chrome.runtime.sendMessage({
           type: 'GET_LOOM_STATUS',
         })) as LoomStatus | undefined
-        if (status?.recording) {
-          console.log('[MyPipCam][start] popup got null response but session is live — not force-stopping')
-          try {
-            await chrome.runtime.sendMessage({
-              type: 'FOCUS_CAPTURED_TAB',
-              tabId: status.tabId ?? tabId,
-            })
-          } catch {
-            /* ignore */
-          }
+        if (live?.recording) {
+          await chrome.runtime
+            .sendMessage({ type: 'FOCUS_CAPTURED_TAB', tabId: live.tabId ?? tabId })
+            .catch(() => {})
           window.close()
           return
         }
@@ -625,36 +517,22 @@ export function PopupApp() {
       try {
         await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE', tabId })
       } catch {
-        /* SW dead */
+        /* ignore */
       }
       setError(
-        'Could not start recording: no response from background. Remove ALL MyPipCam copies on chrome://extensions, then Load unpacked → apps/extension/dist only. Confirm ID is akpchobfndfddajiihkkdpnihihdicjc, then click the service worker link and retry. If Chrome still says “Sharing…”, click Stop sharing in the toolbar.',
+        'Could not start recording: no response from background. Reload the extension on chrome://extensions and try again.',
       )
       return
     }
     if (!res.ok) {
-      const reason = res.reason?.trim() || 'Background returned ok:false with no reason'
-      console.error('[MyPipCam][start] popup start failed:', reason)
-      // Background already tears down on failure; only force-stop if Sharing lingers.
-      try {
-        const status = (await chrome.runtime.sendMessage({
-          type: 'GET_LOOM_STATUS',
-        })) as LoomStatus | undefined
-        if (status?.recording) {
-          await chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE', tabId })
-        }
-      } catch {
-        /* ignore */
-      }
       setError(
         formatStartError(
-          `${reason} If Chrome still shows “Sharing…”, click Stop sharing in the toolbar.`,
+          `${res.reason?.trim() || 'Background returned ok:false'} If Chrome still shows “Sharing…”, click Stop sharing.`,
           'Could not start recording',
         ),
       )
       return
     }
-    console.log('[MyPipCam][start] popup start ok', res)
     try {
       await chrome.runtime.sendMessage({
         type: 'FOCUS_CAPTURED_TAB',
@@ -666,6 +544,85 @@ export function PopupApp() {
     window.close()
   }
 
+  async function startRecording() {
+    setBusy(true)
+    setError(null)
+    setHelper(null)
+    try {
+      const active = await resolveActiveTab()
+      if (!active) return
+
+      if (scope === 'cam' && !cameraOn) {
+        setError('Turn Camera On for camera-only recording.')
+        return
+      }
+
+      const mode = deriveRecordMode(scope, cameraOn)
+      const wantsCam = mode === 'screen-cam' || mode === 'cam'
+      const wantsMic = micOn
+
+      if (wantsCam) {
+        const ok = await allowCamera()
+        if (!ok) {
+          setError('Turn Camera On and allow access, or switch scope / turn camera off.')
+          return
+        }
+      }
+
+      let includeMic = false
+      if (wantsMic) {
+        await probeMicPermissionState()
+        const grant = await readMicGrantResult()
+        await applyMicGrantResult(grant)
+        let micGranted = grant?.status === 'granted'
+        if (!micGranted) {
+          try {
+            const perm = await navigator.permissions.query({
+              name: 'microphone' as PermissionName,
+            })
+            micGranted = perm.state === 'granted'
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!micGranted) {
+          await allowMicrophone()
+          setError(
+            'Allow microphone in the grant window, then click Start Recording again — or turn Mic off.',
+          )
+          return
+        }
+        setMicAccess('granted')
+        includeMic = true
+      } else {
+        setMicAccess('skipped')
+      }
+
+      await persistSetup(mode)
+
+      if (mode === 'cam') {
+        await commitStart(active.id, null, mode, includeMic)
+        return
+      }
+
+      await writeShareSession({
+        returnTabId: active.id,
+        returnTabTitle: active.title,
+        recordMode: mode,
+        micDeviceId: includeMic ? micDeviceId || null : null,
+        cameraDeviceId: cameraDeviceId || null,
+        includeMic,
+        at: Date.now(),
+      })
+      await openShareGuidanceTab()
+      window.close()
+    } catch (err) {
+      setError(formatStartError(errMessage(err, 'Unexpected error'), 'Could not start recording'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function stop() {
     setBusy(true)
     setError(null)
@@ -674,18 +631,11 @@ export function PopupApp() {
         type: 'STOP_LOOM_RECORDING',
       })) as { ok?: boolean; reason?: string } | undefined
       if (res == null) {
-        setError(
-          'Could not stop recording: no response from background. Try Reload on chrome://extensions.',
-        )
+        setError('Could not stop recording. Try Reload on chrome://extensions.')
         return
       }
       if (!res.ok) {
-        setError(
-          formatStartError(
-            res.reason?.trim() || 'Background returned ok:false with no reason',
-            'Could not stop recording',
-          ),
-        )
+        setError(formatStartError(res.reason, 'Could not stop recording'))
         return
       }
       window.close()
@@ -696,24 +646,39 @@ export function PopupApp() {
     }
   }
 
-  async function toggleOpenOnFinish(next: boolean) {
-    setOpenOnFinish(next)
-    await savePipSettings({ openLibraryOnFinish: next })
+  async function onToggleCamera(next: boolean) {
+    setError(null)
+    if (!next) {
+      setCameraOn(false)
+      if (scope === 'tab') await savePipSettings({ recordMode: 'screen' })
+      return
+    }
+    const ok = await allowCamera()
+    if (ok && scope === 'tab') await savePipSettings({ recordMode: 'screen-cam' })
   }
 
-  async function onModeChange(mode: RecordMode) {
-    setRecordMode(mode)
+  async function onToggleMic(next: boolean) {
+    setError(null)
+    if (!next) {
+      setMicOn(false)
+      setMicAccess('skipped')
+      stopMicGrantPoll()
+      setMicGrantWaiting(false)
+      setHelper('Recording without microphone')
+      return
+    }
+    setMicOn(true)
+    if (micAccess === 'granted') {
+      setHelper(null)
+      return
+    }
+    await allowMicrophone()
+  }
+
+  async function onScopeChange(next: CaptureScope) {
+    setScope(next)
+    const mode = deriveRecordMode(next, cameraOn)
     await savePipSettings({ recordMode: mode })
-  }
-
-  async function onShapeChange(shape: BubbleShape) {
-    setBubbleShape(shape)
-    await savePipSettings({ bubbleShape: shape })
-  }
-
-  async function onEffectChange(effect: BackgroundEffect) {
-    setBackgroundEffect(effect)
-    await savePipSettings({ backgroundEffect: effect })
   }
 
   async function onMicChange(id: string) {
@@ -726,254 +691,278 @@ export function PopupApp() {
     await savePipSettings({ cameraDeviceId: id || null })
   }
 
-  function backToSetup() {
-    setStep('setup')
-    setError(null)
+  async function toggleBlur() {
+    const next: BackgroundEffect = backgroundEffect === 'blur' ? 'none' : 'blur'
+    setBackgroundEffect(next)
+    await savePipSettings({ backgroundEffect: next })
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'LOOM_BUBBLE_EFFECT',
+        backgroundEffect: next,
+      })
+    } catch {
+      /* SW may be asleep — settings already persisted */
+    }
+    setHelper(next === 'blur' ? 'Background blur on' : 'Background blur off')
+  }
+
+  async function selectCameraFilter(id: CameraFilterId) {
+    const next = normalizeCameraFilter(id)
+    setCameraFilter(next)
+    await savePipSettings({ cameraFilter: next })
+    try {
+      await chrome.runtime.sendMessage({ type: 'LOOM_BUBBLE_FILTER', cameraFilter: next })
+    } catch {
+      /* SW may be asleep — settings already persisted */
+    }
+    setHelper(next === 'none' ? 'Filter cleared' : `Filter: ${CAMERA_FILTERS.find((f) => f.id === next)?.label}`)
+  }
+
+  const cameraLabel =
+    cameras.find((c) => c.deviceId === cameraDeviceId)?.label ||
+    cameras[0]?.label ||
+    (cameraOn ? 'System default camera' : 'Camera off')
+  const micLabel =
+    mics.find((m) => m.deviceId === micDeviceId)?.label ||
+    mics[0]?.label ||
+    (micAccess === 'granted' ? 'System default mic' : micGrantWaiting ? 'Waiting for allow…' : 'Microphone')
+
+  if (effectsOpen) {
+    return (
+      <div className="popup">
+        <header className="effects-header">
+          <button
+            type="button"
+            className="effects-back"
+            title="Back"
+            aria-label="Back to record"
+            onClick={() => setEffectsOpen(false)}
+          >
+            <IconBack />
+          </button>
+          <h1 className="effects-title">Effects</h1>
+          <span className="effects-header-spacer" aria-hidden />
+        </header>
+
+        <div className="loom-body effects-body">
+          <h2 className="effects-section-label">Filters</h2>
+          <div className="effects-filter-grid" role="listbox" aria-label="Camera filters">
+            {CAMERA_FILTERS.map((f) => {
+              const selected = cameraFilter === f.id
+              // Shared base so CSS filter (not the swatch paint) shows the look.
+              const previewBase =
+                'linear-gradient(145deg,#d8cfc4 0%,#8aa4b8 42%,#4a5a48 100%)'
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`effects-filter ${selected ? 'is-selected' : ''}`}
+                  title={f.label}
+                  onClick={() => void selectCameraFilter(f.id)}
+                >
+                  <span
+                    className="effects-filter-swatch"
+                    style={{
+                      background: f.id === 'none' ? f.swatch : previewBase,
+                      filter: cameraFilterCss(f.id),
+                    }}
+                  >
+                    {f.id === 'none' ? <span className="effects-filter-none">None</span> : null}
+                  </span>
+                  <span className="effects-filter-label">{f.label}</span>
+                </button>
+              )
+            })}
+          </div>
+          {helper ? <p className="loom-helper">{helper}</p> : null}
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="popup">
-      <div className="popup-brand">
-        <img className="popup-logo" src="/icons/icon48.png" width={28} height={28} alt="" aria-hidden />
-        <div>
-          <h1 className="brand">MyPipCam</h1>
-          <p>Local Loom-style tab recorder</p>
-        </div>
-      </div>
-
-      {status.recording ? (
-        <button className="primary stop" disabled={busy} onClick={() => void stop()}>
-          {busy ? 'Stopping…' : status.phase === 'countdown' ? 'Cancel countdown' : 'Stop recording'}
-        </button>
-      ) : step === 'camera' ? (
-        <>
-          <p className="popup-step-label">
-            Step {stepIndex('camera', recordMode)} of {totalSteps(recordMode)} — Camera
-          </p>
-          <label className="popup-field">
-            <span>Camera</span>
-            <select
-              value={cameraDeviceId}
-              onFocus={() => void refreshCameras()}
-              onChange={(e) => void onCameraChange(e.target.value)}
-            >
-              <option value="">System default</option>
-              {cameras.map((c) => (
-                <option key={c.deviceId} value={c.deviceId}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="popup-mic-row">
-            <button type="button" className="ghost popup-mic-refresh" onClick={() => void allowCamera()}>
-              Allow camera
-            </button>
-            <button type="button" className="ghost popup-mic-refresh" onClick={() => void refreshCameras()}>
-              Refresh cameras
-            </button>
-          </div>
-          {cameraHint ? <p className="popup-hint popup-hint-muted">{cameraHint}</p> : null}
-
-          <div className="popup-actions">
-            <button type="button" className="ghost" disabled={busy} onClick={backToSetup}>
-              Back
-            </button>
-            <button className="primary" disabled={busy} onClick={() => void nextFromCamera()}>
-              {busy ? 'Working…' : 'Next: microphone'}
-            </button>
-          </div>
-        </>
-      ) : step === 'mic' ? (
-        <>
-          <p className="popup-step-label">
-            Step {stepIndex('mic', recordMode)} of {totalSteps(recordMode)} — Microphone
-          </p>
-          <p className="popup-hint">
-            Opens a grant window — click <strong>Allow microphone</strong> there, then{' '}
-            <strong>Allow</strong> in Chrome’s prompt (this popup cannot show it).
-          </p>
-          <p className={`popup-mic-status is-${micAccess}`} role="status">
-            Status: <strong>{micAccessLabel(micAccess)}</strong>
-          </p>
+      <header className="loom-nav">
+        <div className="loom-nav-tabs" aria-label="MyPipCam">
           <button
             type="button"
-            className="primary"
-            disabled={micGrantWaiting}
-            onClick={() => void allowMicrophone()}
+            className="loom-nav-btn"
+            title="Library"
+            aria-label="Home — open library"
+            onClick={() => void openLibraryTab().then(() => window.close())}
           >
-            {micGrantWaiting ? 'Waiting for grant window…' : 'Allow microphone'}
+            <IconHome />
           </button>
-          <label className="popup-field">
-            <span>Microphone device</span>
-            <select
-              value={micDeviceId}
-              disabled={micAccess !== 'granted'}
-              onFocus={() => void refreshMics()}
-              onChange={(e) => void onMicChange(e.target.value)}
-            >
-              <option value="">System default</option>
-              {mics.map((m) => (
-                <option key={m.deviceId} value={m.deviceId}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {micHint ? <p className="popup-hint popup-hint-muted">{micHint}</p> : null}
-          <div className="popup-actions">
+          <button
+            type="button"
+            className="loom-nav-btn is-active"
+            title="Record"
+            aria-label="Record"
+            aria-current="page"
+          >
+            <IconRecord />
+          </button>
+        </div>
+        <button
+          type="button"
+          className="loom-nav-btn"
+          title="Close"
+          aria-label="Close"
+          onClick={() => window.close()}
+        >
+          <IconClose />
+        </button>
+      </header>
+
+      <div className="loom-body">
+        {status.recording ? (
+          <>
             <button
               type="button"
-              className="ghost"
-              onClick={() => {
-                setError(null)
-                setStep(needsCamera(recordMode) ? 'camera' : 'setup')
-              }}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => void continueWithoutMic()}
-            >
-              Continue without mic
-            </button>
-            <button
-              className="primary"
-              disabled={micAccess !== 'granted' && micAccess !== 'skipped'}
-              onClick={() => void continueWithMic()}
-            >
-              {needsScreen(recordMode) ? 'Next: choose tab' : 'Start countdown'}
-            </button>
-          </div>
-        </>
-      ) : step === 'screen' ? (
-        <>
-          <p className="popup-step-label">
-            Step {stepIndex('screen', recordMode)} of {totalSteps(recordMode)} — Tab
-          </p>
-          <p className="popup-hint">
-            Chrome will share the active tab for recording. Confirm this is the page you want:
-          </p>
-          <p className="popup-tab-card" title={targetTab?.url}>
-            <strong>{targetTab?.title || 'Active tab'}</strong>
-          </p>
-          <p className="popup-hint popup-hint-muted">
-            Mic: {micAccessLabel(micAccess)}. After you share, a 3→2→1 countdown runs on the page.
-          </p>
-          <div className="popup-actions">
-            <button
-              type="button"
-              className="ghost"
+              className="loom-start is-stop"
               disabled={busy}
-              onClick={() => {
-                setError(null)
-                setStep('mic')
-              }}
+              onClick={() => void stop()}
             >
-              Back
+              {busy
+                ? 'Stopping…'
+                : status.phase === 'countdown'
+                  ? 'Cancel countdown'
+                  : 'Stop recording'}
             </button>
-            <button className="primary" disabled={busy} onClick={() => void shareTabAndStart()}>
-              {busy ? 'Starting…' : 'Share tab & start'}
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="popup-modes" role="radiogroup" aria-label="Capture mode">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={recordMode === m.id}
-                className={`popup-mode ${recordMode === m.id ? 'is-active' : ''}`}
-                title={m.hint}
-                onClick={() => void onModeChange(m.id)}
+            <p className="loom-helper">Recording in progress on your tab</p>
+          </>
+        ) : (
+          <>
+            <div className="loom-scope">
+              {scope === 'cam' ? <IconCam /> : <IconTab />}
+              <span className="loom-scope-label">
+                {scope === 'cam' ? 'Camera only' : 'Current tab'}
+              </span>
+              <IconChevron />
+              <select
+                className="loom-scope-select"
+                aria-label="Capture scope"
+                value={scope}
+                onChange={(e) => void onScopeChange(e.target.value as CaptureScope)}
               >
-                {m.label}
-              </button>
-            ))}
-          </div>
+                <option value="tab">Current tab</option>
+                <option value="cam">Camera only</option>
+              </select>
+            </div>
 
-          <div className="popup-shapes" role="radiogroup" aria-label="Camera bubble shape">
-            {SHAPES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                role="radio"
-                aria-checked={bubbleShape === s.id}
-                className={`popup-shape ${bubbleShape === s.id ? 'is-active' : ''}`}
-                onClick={() => void onShapeChange(s.id)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+            <div className="loom-devices">
+              <div className={`loom-device ${cameraOn ? '' : 'is-off'}`}>
+                <IconCam className="loom-device-icon" />
+                <div className="loom-device-meta">
+                  <span className="loom-device-name">{truncateLabel(cameraLabel)}</span>
+                </div>
+                <select
+                  className="loom-device-select"
+                  aria-label="Camera device"
+                  disabled={!cameraOn}
+                  value={cameraDeviceId}
+                  onFocus={() => void refreshCameras()}
+                  onChange={(e) => void onCameraChange(e.target.value)}
+                >
+                  <option value="">System default</option>
+                  {cameras.map((c) => (
+                    <option key={c.deviceId} value={c.deviceId}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={`loom-toggle ${cameraOn ? 'is-on' : ''}`}
+                  role="switch"
+                  aria-checked={cameraOn}
+                  aria-label="Camera"
+                  disabled={busy}
+                  onClick={() => void onToggleCamera(!cameraOn)}
+                />
+              </div>
 
-          <div className="popup-shapes" role="radiogroup" aria-label="Background effect">
-            {EFFECTS.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                role="radio"
-                aria-checked={backgroundEffect === e.id}
-                className={`popup-shape ${backgroundEffect === e.id ? 'is-active' : ''}`}
-                title={
-                  e.id === 'blur'
-                    ? 'Blur background behind you (person stays sharp)'
-                    : 'No background effect'
-                }
-                onClick={() => void onEffectChange(e.id)}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+              <div className={`loom-device ${micOn ? '' : 'is-off'}`}>
+                <IconMic className="loom-device-icon" />
+                <div className="loom-device-meta">
+                  <span className="loom-device-name">{truncateLabel(micLabel)}</span>
+                </div>
+                <select
+                  className="loom-device-select"
+                  aria-label="Microphone device"
+                  disabled={!micOn || micAccess !== 'granted'}
+                  value={micDeviceId}
+                  onFocus={() => void refreshMics()}
+                  onChange={(e) => void onMicChange(e.target.value)}
+                >
+                  <option value="">System default</option>
+                  {mics.map((m) => (
+                    <option key={m.deviceId} value={m.deviceId}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={`loom-toggle ${micOn ? 'is-on' : ''}`}
+                  role="switch"
+                  aria-checked={micOn}
+                  aria-label="Microphone"
+                  disabled={busy || micGrantWaiting}
+                  onClick={() => void onToggleMic(!micOn)}
+                />
+              </div>
+            </div>
 
-          <button className="primary" disabled={busy} onClick={() => void beginPreflight()}>
-            {busy ? 'Starting…' : 'Start recording'}
-          </button>
-          <p className="popup-hint">
-            Loom-style: camera → allow mic → share tab → 3→2→1 countdown → record.
-          </p>
-        </>
-      )}
-
-      {error && <p className="popup-error">{error}</p>}
-
-      {step === 'setup' && !status.recording ? (
-        <>
-          <div className="popup-actions">
-            <button type="button" onClick={() => void openLibraryTab()}>
-              Library
-            </button>
             <button
               type="button"
-              className="ghost"
-              title="Screen / window capture with a separate live stage (advanced)"
-              onClick={() => void openRecorderTab().then(() => window.close())}
+              className="loom-start"
+              disabled={busy || micGrantWaiting}
+              onClick={() => void startRecording()}
             >
-              Advanced
+              {busy ? 'Starting…' : micGrantWaiting ? 'Waiting for mic…' : 'Start Recording'}
             </button>
-          </div>
+            {helper ? <p className="loom-helper">{helper}</p> : null}
+          </>
+        )}
 
-          <label>
-            <input
-              type="checkbox"
-              checked={openOnFinish}
-              onChange={(e) => void toggleOpenOnFinish(e.target.checked)}
-            />
-            Open library when done
-          </label>
+        {error ? <p className="loom-error">{error}</p> : null}
 
-          <p className="popup-hint popup-hint-muted">
-            Local only — no cloud share links, comments, or Loom AI in v1. Shortcut: ⌘⇧U /
-            Ctrl+Shift+U
-          </p>
-        </>
-      ) : null}
+        <div className="loom-footer">
+          <button
+            type="button"
+            className={`loom-footer-btn ${cameraFilter !== 'none' ? 'is-active' : ''}`}
+            title="Camera filters"
+            onClick={() => {
+              setHelper(null)
+              setEffectsOpen(true)
+            }}
+          >
+            <IconEffects />
+            Effects
+          </button>
+          <button
+            type="button"
+            className={`loom-footer-btn ${backgroundEffect === 'blur' ? 'is-active' : ''}`}
+            title="Background blur"
+            onClick={() => void toggleBlur()}
+          >
+            <IconBlur />
+            Blur
+          </button>
+          <button
+            type="button"
+            className="loom-footer-btn"
+            title="Advanced recorder"
+            onClick={() => void openRecorderTab().then(() => window.close())}
+          >
+            <IconMore />
+            More
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

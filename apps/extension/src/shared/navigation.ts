@@ -30,7 +30,7 @@ export async function openLibraryTab(
   return chrome.tabs.create({ url, active: true })
 }
 
-export type EditorFocus = 'trim' | 'silence'
+export type EditorFocus = 'trim' | 'silence' | 'filler'
 
 export async function openEditorTab(
   id: string,

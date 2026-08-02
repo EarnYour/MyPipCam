@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { cameraFilterCss } from '../shared/cameraFilters'
 import type { PipSettings } from '../shared/types'
 
 export type BubbleApi = {
@@ -237,6 +238,7 @@ export function PipBubble({ canvas, cameraStream, settings, api, onPersist, onLi
         className={`pip-bubble-video ${settings.mirror ? 'mirror' : ''} ${
           settings.backgroundEffect === 'blur' ? 'is-blur-proxy' : ''
         }`}
+        style={{ filter: cameraFilterCss(settings.cameraFilter) }}
         muted
         playsInline
         autoPlay

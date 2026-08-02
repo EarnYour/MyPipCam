@@ -72,7 +72,7 @@ export async function detectSilenceRanges(
     }
   }
 
-  return raw.filter((r) => r.end - r.start >= minSilenceSec * 0.5)
+  return raw.filter((r) => r.end > r.start && r.end - r.start >= minSilenceSec * 0.5)
 }
 
 async function decodeAudio(blob: Blob): Promise<AudioBuffer> {

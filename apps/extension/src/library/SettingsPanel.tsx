@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   hasOpenAiKey,
   loadApiSettings,
@@ -6,17 +6,19 @@ import {
 } from '../shared/apiSettings'
 import {
   clearLibraryFolder,
-  getLibraryFolderName,
+  getLibraryFolderAccess,
   pickLibraryFolder,
 } from '../shared/libraryFs'
-import { migrateIdbToFolder } from '../shared/db'
+import { flushDriveUploads, migrateIdbToFolder } from '../shared/db'
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
   getDriveConnectionStatus,
+  isDriveLinked,
   setDriveAutoUpload,
   type DriveConnectionStatus,
 } from '../shared/driveSync'
+import { loadDriveSettings } from '../shared/driveSettings'
 import { DRIVE_LIBRARY_FOLDER_NAME, isOAuthClientConfigured, STABLE_EXTENSION_ID } from '../shared/driveConfig'
 import type { ApiSettings } from '../shared/types'
 
@@ -25,7 +27,17 @@ type Props = {
   onClose: () => void
   onSaved?: (settings: ApiSettings) => void
   onLibraryFolderChanged?: (folderName: string | null) => void
-  onDriveChanged?: () => void
+  onDriveChanged?: (status?: DriveConnectionStatus) => void
+}
+
+function StatusChip({
+  tone,
+  children,
+}: {
+  tone: 'success' | 'neutral' | 'warn'
+  children: ReactNode
+}) {
+  return <span className={`settings-chip settings-chip-${tone}`}>{children}</span>
 }
 
 export function SettingsPanel({
@@ -37,6 +49,7 @@ export function SettingsPanel({
 }: Props) {
   const [openai, setOpenai] = useState('')
   const [folderName, setFolderName] = useState<string | null>(null)
+  const [folderPermissionOk, setFolderPermissionOk] = useState(true)
   const [saving, setSaving] = useState(false)
   const [folderBusy, setFolderBusy] = useState(false)
   const [driveBusy, setDriveBusy] = useState(false)
@@ -46,6 +59,8 @@ export function SettingsPanel({
   const [driveErr, setDriveErr] = useState(false)
   const [drive, setDrive] = useState<DriveConnectionStatus | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedMsg, setAdvancedMsg] = useState<string | null>(null)
   const [swHealth, setSwHealth] = useState<{
     id: string
     expectedId: string
@@ -117,18 +132,22 @@ export function SettingsPanel({
 
   const refreshFolder = useCallback(async () => {
     try {
-      const name = await getLibraryFolderName()
-      setFolderName(name)
-      return name
+      const access = await getLibraryFolderAccess()
+      setFolderName(access.folderName)
+      setFolderPermissionOk(!access.hasHandle || access.permission === 'granted')
+      return access.folderName
     } catch {
       setFolderName(null)
+      setFolderPermissionOk(true)
       return null
     }
   }, [])
 
   const refreshDrive = useCallback(async () => {
     try {
+      const settings = await loadDriveSettings()
       // Never block Settings forever on identity / SW messaging.
+      // Keep persisted folderId on timeout so UI stays aligned with Library header.
       const status = await Promise.race([
         getDriveConnectionStatus(),
         new Promise<DriveConnectionStatus>((resolve) => {
@@ -136,37 +155,43 @@ export function SettingsPanel({
             () =>
               resolve({
                 configured: isOAuthClientConfigured(),
+                linked: Boolean(settings.folderId),
                 signedIn: false,
-                folderId: null,
-                folderName: null,
-                autoUpload: true,
+                folderId: settings.folderId,
+                folderName: settings.folderName,
+                autoUpload: settings.autoUpload,
               }),
-            1500,
+            2500,
           )
         }),
       ])
       setDrive(status)
       return status
     } catch {
-      setDrive({
+      const settings = await loadDriveSettings().catch(() => null)
+      const fallback: DriveConnectionStatus = {
         configured: isOAuthClientConfigured(),
+        linked: Boolean(settings?.folderId),
         signedIn: false,
-        folderId: null,
-        folderName: null,
-        autoUpload: true,
-      })
-      return null
+        folderId: settings?.folderId ?? null,
+        folderName: settings?.folderName ?? null,
+        autoUpload: settings?.autoUpload ?? true,
+      }
+      setDrive(fallback)
+      return fallback
     }
   }, [])
 
   useEffect(() => {
     if (!open) {
       setLoaded(false)
+      setAdvancedOpen(false)
       return
     }
     setSavedMsg(null)
     setFolderMsg(null)
     setDriveMsg(null)
+    setAdvancedMsg(null)
     setLoaded(false)
     let cancelled = false
     void (async () => {
@@ -200,11 +225,7 @@ export function SettingsPanel({
     try {
       const next = await saveApiSettings({ openaiApiKey: openai })
       onSaved?.(next)
-      setSavedMsg(
-        hasOpenAiKey(next)
-          ? 'Saved. Keys stay on this device.'
-          : 'Saved. Add an OpenAI key to enable Transcribe.',
-      )
+      setSavedMsg(hasOpenAiKey(next) ? 'Key saved.' : 'Cleared.')
     } finally {
       setSaving(false)
     }
@@ -226,13 +247,11 @@ export function SettingsPanel({
         const moved = await migrateIdbToFolder(handle)
         setFolderMsg(
           moved > 0
-            ? `Folder set to “${handle.name}”. Moved ${moved} recording${moved === 1 ? '' : 's'}.`
-            : `Folder set to “${handle.name}”. No browser recordings to move.`,
+            ? `Folder set. Moved ${moved} recording${moved === 1 ? '' : 's'}.`
+            : `Folder set to “${handle.name}”.`,
         )
       } else {
-        setFolderMsg(
-          `Folder set to “${handle.name}”. Pick the same folder in the Mac app to share recordings.`,
-        )
+        setFolderMsg(`Folder set to “${handle.name}”.`)
       }
       onLibraryFolderChanged?.(handle.name)
     } catch (err) {
@@ -260,7 +279,7 @@ export function SettingsPanel({
       await clearLibraryFolder()
       await refreshFolder()
       onLibraryFolderChanged?.(null)
-      setFolderMsg('Library folder cleared. Browser storage is used until you choose again.')
+      setFolderMsg('Folder cleared.')
     } finally {
       setFolderBusy(false)
     }
@@ -274,11 +293,14 @@ export function SettingsPanel({
       const status = await connectGoogleDrive()
       setDrive(status)
       setDriveErr(false)
-      setDriveMsg(
-        `Connected. Library folder “${status.folderName || DRIVE_LIBRARY_FOLDER_NAME}” on Google Drive.` +
-          ' Other Chrome browsers signed into the same Google account will share this folder via sync.',
-      )
-      onDriveChanged?.()
+      // Flush backlog while the connect gesture / token is fresh.
+      try {
+        await flushDriveUploads({ interactive: true })
+      } catch {
+        /* Library banner surfaces remaining pending */
+      }
+      setDriveMsg(`Connected — ${status.folderName || DRIVE_LIBRARY_FOLDER_NAME}`)
+      onDriveChanged?.(status)
     } catch (err) {
       const raw =
         err instanceof Error
@@ -303,9 +325,9 @@ export function SettingsPanel({
     setDriveErr(false)
     try {
       await disconnectGoogleDrive()
-      await refreshDrive()
-      setDriveMsg('Google Drive disconnected.')
-      onDriveChanged?.()
+      const status = await refreshDrive()
+      setDriveMsg('Disconnected.')
+      onDriveChanged?.(status ?? undefined)
     } catch (err) {
       setDriveErr(true)
       setDriveMsg(err instanceof Error ? err.message : 'Could not disconnect.')
@@ -316,23 +338,30 @@ export function SettingsPanel({
 
   async function onToggleAutoUpload(checked: boolean) {
     await setDriveAutoUpload(checked)
-    await refreshDrive()
+    const status = await refreshDrive()
+    if (checked && status?.linked) {
+      try {
+        await flushDriveUploads({ interactive: true })
+      } catch {
+        /* Library banner surfaces remaining pending */
+      }
+      onDriveChanged?.(status)
+    }
   }
 
-  const driveConnected = Boolean(drive?.signedIn && drive.folderId)
+  const driveConnected = Boolean(drive && isDriveLinked(drive))
+  const driveNeedsReconnect = driveConnected && !drive?.signedIn
+  const keySet = openai.trim().length > 0
+  const swOk = Boolean(swHealth?.reachable && swHealth.ready && swHealth.idMatch)
+  const swNeedsAttention = Boolean(
+    swHealth && (!swHealth.idMatch || !swHealth.reachable || !swHealth.ready),
+  )
 
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
-          <div>
-            <h2>Settings</h2>
-            <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
-              API keys are stored only in this browser via{' '}
-              <code>chrome.storage.local</code> — they never leave your device and are not
-              synced. Drive folder ID syncs with your Chrome profile.
-            </p>
-          </div>
+          <h2>Settings</h2>
           <button type="button" className="ghost" onClick={onClose}>
             Close
           </button>
@@ -343,129 +372,136 @@ export function SettingsPanel({
         ) : (
           <div className="settings-body">
             <section className="settings-section">
-              <h3>Extension health</h3>
-              <p className="muted feature-note">
-                Load unpacked from <code>apps/extension/dist</code> only (after{' '}
-                <code>npm run build</code>). Wrong folder = random extension ID and a dead
-                background worker.
-              </p>
-              {swHealth && (
-                <div className="folder-status" style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
-                  <div>
-                    ID: <code>{swHealth.id}</code>
-                    {!swHealth.idMatch && (
-                      <>
-                        {' '}
-                        <strong style={{ color: '#ff8a7a' }}>
-                          — mismatch (expected <code>{swHealth.expectedId}</code>)
-                        </strong>
-                      </>
-                    )}
-                  </div>
-                  <div>
-                    Service worker:{' '}
-                    {!swHealth.reachable
-                      ? 'unreachable'
-                      : swHealth.ready
-                        ? 'ready'
-                        : 'booting / main failed'}
-                    {swHealth.bootError ? ` — ${swHealth.bootError}` : ''}
-                    {swHealth.detail ? ` — ${swHealth.detail}` : ''}
-                  </div>
-                </div>
-              )}
-              {swHealth && (!swHealth.idMatch || !swHealth.reachable || !swHealth.ready) && (
-                <p className="settings-warn">
-                  Remove every MyPipCam entry on chrome://extensions → Load unpacked → select{' '}
-                  <code>apps/extension/dist</code> → confirm ID{' '}
-                  <code>{STABLE_EXTENSION_ID}</code> → open “service worker” and check the console.
-                </p>
-              )}
-              <div className="settings-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => void refreshSwHealth()}
-                >
-                  Re-check background
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    void chrome.runtime.sendMessage({ type: 'FORCE_STOP_CAPTURE' }).catch(() => {})
-                    setDriveMsg('Sent stop-capture to background (clears orphaned tab sharing).')
-                    setDriveErr(false)
-                  }}
-                >
-                  Stop orphaned sharing
-                </button>
+              <div className="settings-section-head">
+                <h3>Local folder</h3>
+                <p className="settings-hint">Where new recordings are saved on this device.</p>
               </div>
-            </section>
-
-            <section className="settings-section">
-              <h3>Recording library</h3>
-              <p className="muted feature-note">
-                Pick a local folder (e.g. <code>Movies/MyPipCam</code>). Chrome writes recordings
-                there; choose the same folder in the Mac app to browse and play them.
-              </p>
-              <p className="folder-status">
-                {folderName ? (
-                  <>
-                    Current folder: <strong>{folderName}</strong>
-                  </>
-                ) : (
-                  <>Not set — recordings stay in this browser only.</>
-                )}
-              </p>
-              <div className="settings-actions">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={folderBusy}
-                  onClick={() => void onChooseFolder()}
-                >
-                  {folderBusy ? 'Working…' : 'Choose folder…'}
-                </button>
-                {folderName && (
+              <div className="settings-row">
+                <div className="settings-status-line">
+                  {folderName ? (
+                    <>
+                      <span className="settings-status-label">{folderName}</span>
+                      {folderPermissionOk ? (
+                        <StatusChip tone="success">
+                          <span className="settings-chip-check" aria-hidden="true">
+                            ✓
+                          </span>
+                          Set
+                        </StatusChip>
+                      ) : (
+                        <StatusChip tone="warn">Access expired</StatusChip>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span className="settings-status-label muted">No folder</span>
+                      <StatusChip tone="neutral">Browser only</StatusChip>
+                    </>
+                  )}
+                </div>
+                <div className="settings-actions">
                   <button
                     type="button"
-                    className="ghost"
+                    className="primary"
                     disabled={folderBusy}
-                    onClick={() => void onClearFolder()}
+                    onClick={() => void onChooseFolder()}
                   >
-                    Clear
+                    {folderBusy
+                      ? 'Working…'
+                      : folderName
+                        ? folderPermissionOk
+                          ? 'Change…'
+                          : 'Choose folder again…'
+                        : 'Choose folder…'}
                   </button>
-                )}
+                  {folderName && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={folderBusy}
+                      onClick={() => void onClearFolder()}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
+              {!folderPermissionOk && folderName && (
+                <p className="settings-warn">
+                  Folder access expired — choose the folder again (or grant access from the
+                  library banner) to list recordings on disk.
+                </p>
+              )}
               {folderMsg && <p className="settings-saved">{folderMsg}</p>}
             </section>
 
             <section className="settings-section">
-              <h3>Google Drive</h3>
-              <p className="muted feature-note">
-                Optional cloud library. Creates a <code>{DRIVE_LIBRARY_FOLDER_NAME}</code> folder
-                in your Drive (app-owned files only — <code>drive.file</code> scope). Use the same
-                Chrome Google account on other computers to list and play shared uploads.
-              </p>
+              <div className="settings-section-head">
+                <h3>Google Drive</h3>
+                <p className="settings-hint">Optional sync via your Chrome Google account.</p>
+              </div>
               {!isOAuthClientConfigured() && (
                 <p className="settings-warn">
-                  OAuth client ID not set. Copy{' '}
-                  <code>apps/extension/.env.example</code> to{' '}
-                  <code>.env.local</code>, set{' '}
-                  <code>VITE_GOOGLE_OAUTH_CLIENT_ID</code>, rebuild, and reload the extension. See
-                  the README “Google Drive setup” section.
+                  OAuth client missing. Set <code>VITE_GOOGLE_OAUTH_CLIENT_ID</code> in{' '}
+                  <code>.env.local</code>, rebuild, and reload.
                 </p>
               )}
-              <p className="folder-status">
-                {driveConnected ? (
-                  <>
-                    Connected — Drive folder: <strong>{drive?.folderName || DRIVE_LIBRARY_FOLDER_NAME}</strong>
-                  </>
-                ) : (
-                  <>Not connected</>
-                )}
-              </p>
+              <div className="settings-row">
+                <div className="settings-status-line">
+                  {driveConnected ? (
+                    <>
+                      <StatusChip tone={driveNeedsReconnect ? 'warn' : 'success'}>
+                        {!driveNeedsReconnect && (
+                          <span className="settings-chip-check" aria-hidden="true">
+                            ✓
+                          </span>
+                        )}
+                        {driveNeedsReconnect ? 'Reconnect needed' : 'Connected'}
+                      </StatusChip>
+                      <span className="settings-status-meta">
+                        {drive?.folderName || DRIVE_LIBRARY_FOLDER_NAME}
+                      </span>
+                    </>
+                  ) : (
+                    <StatusChip tone="neutral">Not connected</StatusChip>
+                  )}
+                </div>
+                <div className="settings-actions">
+                  {driveConnected && !driveNeedsReconnect ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={driveBusy}
+                      onClick={() => void onDisconnectDrive()}
+                    >
+                      {driveBusy ? 'Working…' : 'Disconnect'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={driveBusy || !isOAuthClientConfigured()}
+                      onClick={() => void onConnectDrive()}
+                    >
+                      {driveBusy
+                        ? 'Connecting…'
+                        : driveNeedsReconnect
+                          ? 'Reconnect'
+                          : 'Connect'}
+                    </button>
+                  )}
+                  {driveNeedsReconnect && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={driveBusy}
+                      onClick={() => void onDisconnectDrive()}
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+              </div>
               {driveConnected && (
                 <label className="settings-check">
                   <input
@@ -473,77 +509,145 @@ export function SettingsPanel({
                     checked={drive?.autoUpload ?? true}
                     onChange={(e) => void onToggleAutoUpload(e.target.checked)}
                   />
-                  Auto-upload new recordings to Drive
+                  Auto-upload new recordings
                 </label>
               )}
-              <div className="settings-actions">
-                {driveConnected ? (
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={driveBusy}
-                    onClick={() => void onDisconnectDrive()}
-                  >
-                    {driveBusy ? 'Working…' : 'Disconnect'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={driveBusy || !isOAuthClientConfigured()}
-                    onClick={() => void onConnectDrive()}
-                  >
-                    {driveBusy ? 'Connecting…' : 'Connect Google'}
-                  </button>
-                )}
-              </div>
               {driveMsg && (
                 <p className={driveErr ? 'settings-warn' : 'settings-saved'}>{driveMsg}</p>
               )}
             </section>
 
             <section className="settings-section">
-              <h3>OpenAI API key</h3>
-              <p className="muted feature-note">
-                Required for <strong>Transcribe</strong> and caption / transcript download.
-                Uses Whisper (<code>whisper-1</code>).
-              </p>
-              <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
-                Get a key at{' '}
-                <a
-                  href="https://platform.openai.com/api-keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  platform.openai.com
-                </a>
-                .
-              </p>
-              <input
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="sk-…"
-                value={openai}
-                onChange={(e) => setOpenai(e.target.value)}
-              />
+              <div className="settings-section-head">
+                <h3>OpenAI</h3>
+                <p className="settings-hint">
+                  For Transcribe ·{' '}
+                  <a
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Get a key
+                  </a>
+                </p>
+              </div>
+              <div className="settings-status-line settings-status-line-spaced">
+                {keySet ? (
+                  <StatusChip tone="success">
+                    <span className="settings-chip-check" aria-hidden="true">
+                      ✓
+                    </span>
+                    Key set
+                  </StatusChip>
+                ) : (
+                  <StatusChip tone="neutral">Not set</StatusChip>
+                )}
+              </div>
+              <div className="settings-key-row">
+                <input
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="sk-…"
+                  value={openai}
+                  onChange={(e) => setOpenai(e.target.value)}
+                />
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={saving}
+                    onClick={() => void onSave()}
+                  >
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  {keySet && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        setOpenai('')
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+              {savedMsg && <p className="settings-saved">{savedMsg}</p>}
             </section>
 
-            <div className="settings-actions">
-              <button type="button" className="primary" disabled={saving} onClick={() => void onSave()}>
-                {saving ? 'Saving…' : 'Save key'}
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  setOpenai('')
-                }}
-              >
-                Clear field
-              </button>
-            </div>
-            {savedMsg && <p className="settings-saved">{savedMsg}</p>}
+            <details
+              className="settings-advanced"
+              open={advancedOpen}
+              onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+            >
+              <summary className="settings-advanced-summary">
+                <span className="settings-advanced-label">Advanced</span>
+                {swHealth && (
+                  <StatusChip tone={swOk ? 'success' : swNeedsAttention ? 'warn' : 'neutral'}>
+                    {swOk ? 'Healthy' : swNeedsAttention ? 'Needs attention' : 'Checking…'}
+                  </StatusChip>
+                )}
+              </summary>
+              <div className="settings-advanced-body">
+                <p className="settings-hint">
+                  Load unpacked from <code>apps/extension/dist</code> after build.
+                </p>
+                {swHealth && (
+                  <div className="settings-health-meta">
+                    <div>
+                      ID <code>{swHealth.id}</code>
+                      {!swHealth.idMatch && (
+                        <span className="settings-health-bad">
+                          {' '}
+                          mismatch (expected <code>{swHealth.expectedId}</code>)
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      Service worker:{' '}
+                      {!swHealth.reachable
+                        ? 'unreachable'
+                        : swHealth.ready
+                          ? 'ready'
+                          : 'booting / main failed'}
+                      {swHealth.bootError ? ` — ${swHealth.bootError}` : ''}
+                      {swHealth.detail ? ` — ${swHealth.detail}` : ''}
+                    </div>
+                  </div>
+                )}
+                {swNeedsAttention && (
+                  <p className="settings-warn">
+                    Remove MyPipCam on chrome://extensions → Load unpacked →{' '}
+                    <code>apps/extension/dist</code> → confirm ID{' '}
+                    <code>{STABLE_EXTENSION_ID}</code>.
+                  </p>
+                )}
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => void refreshSwHealth()}
+                  >
+                    Re-check background
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      void chrome.runtime
+                        .sendMessage({ type: 'FORCE_STOP_CAPTURE' })
+                        .catch(() => {})
+                      setAdvancedMsg('Stopped orphaned sharing.')
+                    }}
+                  >
+                    Stop orphaned sharing
+                  </button>
+                </div>
+                {advancedMsg && <p className="settings-saved">{advancedMsg}</p>}
+              </div>
+            </details>
           </div>
         )}
       </div>

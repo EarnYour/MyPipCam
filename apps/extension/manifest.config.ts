@@ -61,7 +61,12 @@ export default defineManifest({
       // Camera start is gated by a registered channel token (see pip + background).
       resources: [
         'src/pip/index.html',
-        'assets/pip*.js',
+        // Stable classic overlay (executeScript injects this; listed for clarity).
+        'src/content/pipOverlay.js',
+        // PiP iframe entry only — do NOT use assets/pip*.js (that also matches
+        // orphan CRX ESM chunks named assets/pipOverlay.ts-*.js).
+        'assets/pip-*.js',
+        'assets/security*.js',
         'assets/backgroundBlur*.js',
         'assets/modulepreload-polyfill*.js',
         'mediapipe/**/*',

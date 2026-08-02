@@ -1,18 +1,26 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { RecordingMeta, RecordingRecord, TranscriptData } from './types'
 import { defaultTitle } from './types'
+import { isOAuthClientConfigured } from './driveConfig'
 import {
   addPendingDriveUploadId,
   fetchDriveRecordingBlob,
   flushPendingDriveUploads,
-  getDriveConnectionStatus,
+  getLastDriveUploadError,
+  getPendingDriveUploadIds,
   listDriveLibraryRecordings,
+  removePendingDriveUploadId,
+  requestBackgroundDriveUpload,
+  setDriveUploadToast,
+  setLastDriveUploadError,
   uploadRecordingToDrive,
 } from './driveSync'
+import { loadDriveSettings } from './driveSettings'
 import {
   addPendingSyncId,
   deleteFromFolder,
   ensureLibraryPermission,
+  getLibraryFolderAccess,
   getLibraryHandle,
   getPendingSyncIds,
   hasLibraryFolder,
@@ -24,6 +32,7 @@ import {
   updateDriveMetaInFolder,
   updateTranscriptInFolder,
   writeRecordingToFolder,
+  type LibraryFolderAccess,
 } from './libraryFs'
 
 interface MyPipCamDB extends DBSchema {
@@ -95,8 +104,12 @@ export async function flushPendingToFolder(
     }
     try {
       await writeRecordingToFolder(rec, permitted)
-      await deleteIdb(id)
       await removePendingSyncId(id)
+      // Keep IDB while Drive auto-upload still needs the blob (SW cannot read FS).
+      const drivePending = await getPendingDriveUploadIds()
+      if (!drivePending.includes(id)) {
+        await deleteIdb(id)
+      }
       flushed += 1
     } catch {
       /* keep pending for next attempt */
@@ -151,12 +164,14 @@ export async function saveRecording(input: {
   if (root) {
     try {
       await writeRecordingToFolder(record, root)
-      void tryDriveUploadAfterSave(record)
+      // Keep an IDB copy so the service worker can upload (FS Access is unavailable in SW).
+      await putIdb(record)
+      await tryDriveUploadAfterSave(record)
       return record
     } catch {
       await putIdb(record)
       await addPendingSyncId(record.id)
-      void tryDriveUploadAfterSave(record)
+      await tryDriveUploadAfterSave(record)
       return record
     }
   }
@@ -165,39 +180,192 @@ export async function saveRecording(input: {
   if (await hasLibraryFolder()) {
     await putIdb(record)
     await addPendingSyncId(record.id)
-    void tryDriveUploadAfterSave(record)
+    await tryDriveUploadAfterSave(record)
     return record
   }
 
   await putIdb(record)
-  void tryDriveUploadAfterSave(record)
+  await tryDriveUploadAfterSave(record)
   return record
 }
 
+export type DriveUploadAfterSaveResult = {
+  attempted: boolean
+  uploaded: boolean
+  queued: boolean
+  error: string | null
+}
+
 /**
- * Best-effort Drive upload after local save. Failures stay queued for Library flush.
- * Does not throw.
+ * After local save: queue for Drive and hand off to the service worker.
+ *
+ * Do NOT upload from offscreen during OFFSCREEN_STOP — nested chrome.identity /
+ * GET_DRIVE_TOKEN while the SW awaits stop causes silent auth timeouts.
+ * The SW has chrome.identity and stays alive for the multipart upload.
  */
-async function tryDriveUploadAfterSave(record: RecordingRecord): Promise<void> {
+export async function tryDriveUploadAfterSave(
+  record: RecordingRecord,
+): Promise<DriveUploadAfterSaveResult> {
+  const skipped: DriveUploadAfterSaveResult = {
+    attempted: false,
+    uploaded: false,
+    queued: false,
+    error: null,
+  }
   try {
-    const status = await getDriveConnectionStatus()
-    if (!status.configured || !status.folderId || !status.autoUpload) return
-    if (record.driveFileId) return
+    const settings = await loadDriveSettings()
+    if (!isOAuthClientConfigured() || !settings.folderId || !settings.autoUpload) {
+      return skipped
+    }
+    if (record.driveFileId) {
+      return { attempted: false, uploaded: true, queued: false, error: null }
+    }
+
+    // SW cannot read File System Access handles — ensure blob is in IDB.
+    const existing = await getIdb(record.id)
+    if (!existing?.blob?.size) {
+      await putIdb(record)
+    }
 
     await addPendingDriveUploadId(record.id)
+    requestBackgroundDriveUpload(record.id)
+    return { attempted: true, uploaded: false, queued: true, error: null }
+  } catch (err) {
+    const error =
+      err instanceof Error ? err.message : 'Could not queue Drive upload.'
+    await setLastDriveUploadError(error).catch(() => undefined)
+    return { attempted: true, uploaded: false, queued: false, error }
+  }
+}
+
+/** Prevent duplicate multipart uploads when stop + save both kick the SW. */
+const driveAutoUploadingIds = new Set<string>()
+
+/**
+ * Service-worker entry: upload one queued recording (silent token + one retry).
+ * Publishes a Library toast on success or failure.
+ */
+export async function runDriveAutoUploadById(
+  id: string,
+): Promise<DriveUploadAfterSaveResult> {
+  const skipped: DriveUploadAfterSaveResult = {
+    attempted: false,
+    uploaded: false,
+    queued: false,
+    error: null,
+  }
+  if (driveAutoUploadingIds.has(id)) {
+    return { attempted: true, uploaded: false, queued: true, error: null }
+  }
+  driveAutoUploadingIds.add(id)
+  try {
+    const settings = await loadDriveSettings()
+    if (!isOAuthClientConfigured() || !settings.folderId || !settings.autoUpload) {
+      return skipped
+    }
+
+    // Prefer IDB — reliable in the service worker.
+    let record = await getIdb(id)
+    if (!record?.blob?.size) {
+      record = await getRecording(id)
+    }
+    if (!record?.blob?.size) {
+      const error = 'Recording not found for Drive upload.'
+      await setLastDriveUploadError(error)
+      await setDriveUploadToast({
+        message: error,
+        tone: 'warn',
+        at: Date.now(),
+        recordingId: id,
+      })
+      return { attempted: true, uploaded: false, queued: true, error }
+    }
+    if (record.driveFileId) {
+      await removePendingDriveUploadId(id)
+      return { attempted: false, uploaded: true, queued: false, error: null }
+    }
+
+    await addPendingDriveUploadId(id)
+
+    // Touch session storage while uploading so MV3 is less eager to kill the SW.
+    const keepAlive = setInterval(() => {
+      void chrome.storage.session.set({ driveUploadKeepAliveAt: Date.now() })
+    }, 15_000)
+
     try {
       const result = await uploadRecordingToDrive(record, { interactive: false })
-      await updateRecordingDriveMeta(record.id, {
+      await updateRecordingDriveMeta(id, {
         driveFileId: result.driveFileId,
         driveWebViewLink: result.driveWebViewLink,
         driveShared: result.driveShared,
       })
-    } catch {
-      /* keep pending for Library flush */
+      await setLastDriveUploadError(null)
+      await setDriveUploadToast({
+        message: 'Uploaded to Drive',
+        tone: 'ok',
+        at: Date.now(),
+        recordingId: id,
+      })
+      // Folder copy (if any) is canonical; drop the SW upload staging blob.
+      if (await hasLibraryFolder()) {
+        await deleteIdb(id).catch(() => undefined)
+      }
+      return { attempted: true, uploaded: true, queued: false, error: null }
+    } catch (err) {
+      const error =
+        err instanceof Error ? err.message : 'Could not upload recording to Google Drive.'
+      await setLastDriveUploadError(error)
+      await setDriveUploadToast({
+        message: error,
+        tone: 'warn',
+        at: Date.now(),
+        recordingId: id,
+      })
+      return { attempted: true, uploaded: false, queued: true, error }
+    } finally {
+      clearInterval(keepAlive)
     }
-  } catch {
-    /* ignore */
+  } catch (err) {
+    const error =
+      err instanceof Error ? err.message : 'Could not upload recording to Google Drive.'
+    await setLastDriveUploadError(error).catch(() => undefined)
+    await setDriveUploadToast({
+      message: error,
+      tone: 'warn',
+      at: Date.now(),
+      recordingId: id,
+    }).catch(() => undefined)
+    return { attempted: true, uploaded: false, queued: false, error }
+  } finally {
+    driveAutoUploadingIds.delete(id)
   }
+}
+
+/** Flush any pending auto-uploads from the SW (alarms / post-stop backup). */
+export async function runPendingDriveAutoUploads(): Promise<number> {
+  const settings = await loadDriveSettings()
+  if (!isOAuthClientConfigured() || !settings.folderId || !settings.autoUpload) {
+    return 0
+  }
+  const pending = await getPendingDriveUploadIds()
+  let uploaded = 0
+  for (const id of pending) {
+    const result = await runDriveAutoUploadById(id)
+    if (result.uploaded) uploaded += 1
+  }
+  return uploaded
+}
+
+/** Pending auto-uploads + last error for Library banners. */
+export async function getDriveUploadNotice(): Promise<{
+  pendingCount: number
+  lastError: string | null
+}> {
+  const [pending, lastError] = await Promise.all([
+    getPendingDriveUploadIds(),
+    getLastDriveUploadError(),
+  ])
+  return { pendingCount: pending.length, lastError }
 }
 
 export async function updateRecordingDriveMeta(
@@ -207,18 +375,20 @@ export async function updateRecordingDriveMeta(
     | 'driveFileId'
     | 'driveWebViewLink'
     | 'driveShared'
+    | 'driveProcessingStatus'
+    | 'driveReadyAt'
     | 'shareId'
     | 'shareViewCount'
     | 'shareLastViewedAt'
+    | 'shareExpiresAt'
   >,
 ): Promise<void> {
   const root = await folderRootQuiet()
   if (root) {
     try {
       await updateDriveMetaInFolder(id, patch, root)
-      return
     } catch {
-      /* fall through to IDB */
+      /* SW / no FS permission — still update IDB below */
     }
   }
 
@@ -229,6 +399,12 @@ export async function updateRecordingDriveMeta(
     driveFileId: patch.driveFileId ?? rec.driveFileId,
     driveWebViewLink: patch.driveWebViewLink ?? rec.driveWebViewLink,
     driveShared: patch.driveShared ?? rec.driveShared,
+    driveProcessingStatus:
+      patch.driveProcessingStatus !== undefined
+        ? patch.driveProcessingStatus
+        : rec.driveProcessingStatus,
+    driveReadyAt:
+      patch.driveReadyAt !== undefined ? patch.driveReadyAt : rec.driveReadyAt,
     shareId: patch.shareId ?? rec.shareId,
     shareViewCount:
       patch.shareViewCount !== undefined ? patch.shareViewCount : rec.shareViewCount,
@@ -236,6 +412,8 @@ export async function updateRecordingDriveMeta(
       patch.shareLastViewedAt !== undefined
         ? patch.shareLastViewedAt
         : rec.shareLastViewedAt,
+    shareExpiresAt:
+      patch.shareExpiresAt !== undefined ? patch.shareExpiresAt : rec.shareExpiresAt,
   })
 }
 
@@ -244,9 +422,24 @@ export async function flushDriveUploads(opts?: { interactive?: boolean }): Promi
   return flushPendingDriveUploads(getRecording, updateRecordingDriveMeta, opts)
 }
 
+export type LibraryListResult = {
+  items: RecordingMeta[]
+  folder: LibraryFolderAccess
+  /** True when disk listing succeeded under a granted handle. */
+  folderListed: boolean
+  driveError: string | null
+}
+
 export async function listRecordings(): Promise<RecordingMeta[]> {
+  const result = await listLibrary()
+  return result.items
+}
+
+/** Local folder + IndexedDB + Drive merge, with access/error diagnostics for the UI. */
+export async function listLibrary(): Promise<LibraryListResult> {
   let local: RecordingMeta[] = []
   let usedFolder = false
+  const folder = await getLibraryFolderAccess()
 
   const root = await folderRootQuiet()
   if (root) {
@@ -254,6 +447,22 @@ export async function listRecordings(): Promise<RecordingMeta[]> {
       await flushPendingToFolder(root)
       local = await listFolderRecordings(root)
       usedFolder = true
+      // Overlay Drive meta written to IDB by the service worker.
+      const db = await getDb()
+      const idbAll = await db.getAllFromIndex('recordings', 'by-created')
+      const idbById = new Map(idbAll.map((r) => [r.id, r]))
+      local = local.map((item) => {
+        const idb = idbById.get(item.id)
+        if (!idb?.driveFileId || item.driveFileId) return item
+        return {
+          ...item,
+          driveFileId: idb.driveFileId,
+          driveWebViewLink: idb.driveWebViewLink ?? item.driveWebViewLink,
+          driveShared: idb.driveShared ?? item.driveShared,
+          driveProcessingStatus: idb.driveProcessingStatus ?? item.driveProcessingStatus,
+          driveReadyAt: idb.driveReadyAt ?? item.driveReadyAt,
+        }
+      })
     } catch {
       /* fall through to IDB */
     }
@@ -265,15 +474,25 @@ export async function listRecordings(): Promise<RecordingMeta[]> {
     local = all.map(({ blob: _blob, ...meta }) => meta)
   }
 
-  return mergeWithDriveLibrary(local)
+  const { items, driveError } = await mergeWithDriveLibrary(local)
+  return {
+    items,
+    folder,
+    folderListed: usedFolder,
+    driveError,
+  }
 }
 
 /** Merge local items with Drive library listing (other browsers / devices). */
-async function mergeWithDriveLibrary(local: RecordingMeta[]): Promise<RecordingMeta[]> {
+async function mergeWithDriveLibrary(
+  local: RecordingMeta[],
+): Promise<{ items: RecordingMeta[]; driveError: string | null }> {
   const byId = new Map(local.map((item) => [item.id, item]))
+  let driveError: string | null = null
   try {
-    const driveItems = await listDriveLibraryRecordings()
-    for (const d of driveItems) {
+    const listed = await listDriveLibraryRecordings()
+    driveError = listed.error
+    for (const d of listed.items) {
       const existing = byId.get(d.id)
       if (existing) {
         byId.set(d.id, {
@@ -298,29 +517,47 @@ async function mergeWithDriveLibrary(local: RecordingMeta[]): Promise<RecordingM
         })
       }
     }
-  } catch {
-    /* Drive optional */
+  } catch (err) {
+    driveError =
+      err instanceof Error ? err.message : 'Could not list Google Drive recordings.'
   }
 
-  return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
+  return {
+    items: [...byId.values()].sort((a, b) => b.createdAt - a.createdAt),
+    driveError,
+  }
 }
 
 export async function getRecording(id: string): Promise<RecordingRecord | undefined> {
+  const fromIdb = await getIdb(id)
   const root = await folderRootQuiet()
   if (root) {
     try {
       const fromFolder = await readFolderRecording(id, root)
-      if (fromFolder) return fromFolder
+      if (fromFolder) {
+        // SW may have written Drive meta to IDB when folder update wasn't possible.
+        if (fromIdb?.driveFileId && !fromFolder.driveFileId) {
+          return {
+            ...fromFolder,
+            driveFileId: fromIdb.driveFileId,
+            driveWebViewLink: fromIdb.driveWebViewLink ?? fromFolder.driveWebViewLink,
+            driveShared: fromIdb.driveShared ?? fromFolder.driveShared,
+            driveProcessingStatus:
+              fromIdb.driveProcessingStatus ?? fromFolder.driveProcessingStatus,
+            driveReadyAt: fromIdb.driveReadyAt ?? fromFolder.driveReadyAt,
+          }
+        }
+        return fromFolder
+      }
     } catch {
       /* fall through */
     }
   }
-  const fromIdb = await getIdb(id)
   if (fromIdb) return fromIdb
 
   // Drive-only item (synced from another browser) — download for play.
   try {
-    const driveItems = await listDriveLibraryRecordings()
+    const { items: driveItems } = await listDriveLibraryRecordings()
     const remote = driveItems.find((d) => d.id === id)
     if (!remote?.driveFileId) return undefined
     const blob = await fetchDriveRecordingBlob(remote.driveFileId)

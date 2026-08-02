@@ -8,6 +8,8 @@ Monorepo for **MyPipCam**: Loom-style camera PiP on macOS and in Chrome.
 
 **Product site / funnel:** [mypipcam.earnyour.com](https://mypipcam.earnyour.com)
 
+**Tip jar (optional):** [Support MyPipCam on Stripe](https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09) — pay what you want; keeps the project free and open source.
+
 | Path | What |
 | --- | --- |
 | [`apps/macos`](apps/macos) | macOS companion — floating always-on-top camera bubble for OBS / desktop recording |

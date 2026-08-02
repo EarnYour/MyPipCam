@@ -81,6 +81,7 @@ export function RecorderApp() {
         shadow: next.shadow,
         bubbleShape: next.bubbleShape,
         backgroundEffect: next.backgroundEffect,
+        cameraFilter: next.cameraFilter,
       })
     }
     return next
@@ -106,6 +107,7 @@ export function RecorderApp() {
           shadow: next.shadow,
           bubbleShape: next.bubbleShape,
           backgroundEffect: next.backgroundEffect,
+          cameraFilter: next.cameraFilter,
         })
       }
     })()
@@ -214,6 +216,7 @@ export function RecorderApp() {
             shadow: settings.shadow,
             bubbleShape: settings.bubbleShape,
             backgroundEffect: settings.backgroundEffect,
+            cameraFilter: settings.cameraFilter,
           })) as { ok?: boolean; tabId?: number; reason?: string }
           if (res?.ok && res.tabId != null) {
             overlayTabIdRef.current = res.tabId
@@ -312,6 +315,7 @@ export function RecorderApp() {
       shadow: settings.shadow,
       bubbleShape: settings.bubbleShape,
       backgroundEffect: settings.backgroundEffect,
+      cameraFilter: settings.cameraFilter,
     })
   }
 

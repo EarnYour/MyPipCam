@@ -10,6 +10,11 @@
  * 3. OFFSCREEN_RESET — discard the current take but keep streams for restart.
  */
 
+import {
+  cameraFilterCss,
+  normalizeCameraFilter,
+  type CameraFilterId,
+} from '../shared/cameraFilters'
 import { saveRecording } from '../shared/db'
 import { preferredMimeType } from '../recorder/capture'
 
@@ -22,6 +27,7 @@ type PrepareMessage = {
   micDeviceId?: string | null
   cameraDeviceId?: string | null
   recordMode?: RecordMode
+  cameraFilter?: CameraFilterId | string | null
   /** When true (legacy OFFSCREEN_START), start MediaRecorder immediately. */
   commit?: boolean
 }
@@ -40,6 +46,10 @@ let paused = false
 /** Accumulated paused time, excluded from the saved duration. */
 let pausedTotalMs = 0
 let pausedAt = 0
+/** Canvas filter loop for cam-only when a color filter is active. */
+let filterLoopRaf = 0
+let filterVideo: HTMLVideoElement | null = null
+let filterCanvas: HTMLCanvasElement | null = null
 
 function errDetail(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.trim()) return err.message.trim()
@@ -272,6 +282,69 @@ function stopTracks(stream: MediaStream | null) {
   for (const track of stream.getTracks()) track.stop()
 }
 
+function stopCameraFilterPipeline() {
+  if (filterLoopRaf) {
+    cancelAnimationFrame(filterLoopRaf)
+    filterLoopRaf = 0
+  }
+  if (filterVideo) {
+    filterVideo.srcObject = null
+    filterVideo = null
+  }
+  filterCanvas = null
+}
+
+/**
+ * Pipe a camera stream through a canvas with a CSS filter so cam-only
+ * recordings match the PiP preview look.
+ */
+async function applyCameraFilterStream(
+  source: MediaStream,
+  filterId: CameraFilterId,
+): Promise<MediaStream> {
+  const css = cameraFilterCss(filterId)
+  if (!css || css === 'none') return source
+
+  const video = document.createElement('video')
+  video.muted = true
+  video.playsInline = true
+  video.srcObject = source
+  await video.play().catch(() => undefined)
+
+  // Wait briefly for dimensions.
+  for (let i = 0; i < 30 && !video.videoWidth; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  const w = video.videoWidth || 1280
+  const h = video.videoHeight || 720
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return source
+
+  filterVideo = video
+  filterCanvas = canvas
+
+  const draw = () => {
+    if (!filterVideo || !filterCanvas) return
+    filterLoopRaf = requestAnimationFrame(draw)
+    const vw = filterVideo.videoWidth
+    const vh = filterVideo.videoHeight
+    if (!vw || !vh) return
+    if (filterCanvas.width !== vw || filterCanvas.height !== vh) {
+      filterCanvas.width = vw
+      filterCanvas.height = vh
+    }
+    ctx.filter = css
+    ctx.drawImage(filterVideo, 0, 0, filterCanvas.width, filterCanvas.height)
+    ctx.filter = 'none'
+  }
+  draw()
+
+  return canvas.captureStream(30)
+}
+
 function cleanupMedia() {
   if (recorder && recorder.state !== 'inactive') {
     try {
@@ -286,6 +359,7 @@ function cleanupMedia() {
   pausedTotalMs = 0
   pausedAt = 0
   prepared = false
+  stopCameraFilterPipeline()
   stopTracks(mixedStream)
   stopTracks(tabStream)
   stopTracks(camStream)
@@ -318,10 +392,12 @@ async function prepareRecording(msg: PrepareMessage) {
       }
       throw new Error(errDetail(err, 'Camera unavailable for cam-only recording'))
     }
+    const filterId = normalizeCameraFilter(msg.cameraFilter)
+    const videoForRecord = await applyCameraFilterStream(camStream, filterId)
     if (wantMic) {
       micStream = await tryAcquireMic(msg.micDeviceId)
     }
-    const mixed = await mixAudio(camStream, micStream)
+    const mixed = await mixAudio(videoForRecord, micStream)
     mixedStream = mixed.stream
     audioCtx = mixed.ctx
   } else {

@@ -60,20 +60,31 @@
       }
       .timer {
         text-align: center;
-        font: 750 22px/1 ui-sans-serif, system-ui, sans-serif;
+        font: 750 28px/1 ui-sans-serif, system-ui, sans-serif;
         font-variant-numeric: tabular-nums;
         color: var(--primary);
       }
       .timer.is-hidden {
         display: none;
       }
-      .row {
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: auto;
+      }
+      .actions.is-hidden {
+        display: none;
+      }
+      .countdown-actions {
         display: flex;
         gap: 8px;
         margin-top: auto;
       }
+      .countdown-actions.is-hidden {
+        display: none;
+      }
       button {
-        flex: 1;
         border: 1px solid var(--border);
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.06);
@@ -82,13 +93,25 @@
         padding: 10px 8px;
         cursor: pointer;
       }
-      button:hover {
+      button:hover:not(:disabled) {
         background: rgba(255, 255, 255, 0.1);
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
       }
       button.danger {
         background: rgba(255, 94, 41, 0.18);
         border-color: rgba(255, 94, 41, 0.45);
         color: #ffe8e0;
+      }
+      button.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+      }
+      .span-2 {
+        grid-column: span 2;
       }
       .err {
         color: #ffe8e4;
@@ -110,9 +133,16 @@
     <div class="count" id="count" aria-live="polite">3</div>
     <div class="timer is-hidden" id="timer">0:00</div>
     <div class="err" id="err"></div>
-    <div class="row">
+    <div class="countdown-actions" id="countdownActions">
+      <button type="button" id="cancelCountdown">Cancel</button>
+      <button type="button" class="primary" id="skipCountdown">Skip</button>
+    </div>
+    <div class="actions is-hidden" id="recActions">
+      <button type="button" class="danger span-2" id="stop">Stop &amp; save</button>
+      <button type="button" id="pause">Pause</button>
+      <button type="button" id="trim">Rewind &amp; trim</button>
+      <button type="button" id="restart">Restart</button>
       <button type="button" id="discard">Discard</button>
-      <button type="button" class="danger" id="stop">Stop &amp; save</button>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

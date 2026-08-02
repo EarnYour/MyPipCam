@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto'
 import {
   cors,
   getSupabase,
+  isShareExpired,
   json,
   mapShare,
   readJson,
   serverError,
+  SHARE_SELECT,
 } from '../../_lib/supabase.js'
 import { rateLimit } from '../../_lib/rateLimit.js'
 
@@ -41,26 +43,55 @@ export default async function handler(req, res) {
       /* empty body ok */
     }
 
+    const supabase = getSupabase()
+
+    // Fast path: reject expired before inserting a view row.
+    const { data: existing, error: findErr } = await supabase
+      .from('mypipcam_shares')
+      .select(SHARE_SELECT)
+      .eq('id', id)
+      .maybeSingle()
+
+    if (findErr) {
+      serverError(res, 'share lookup failed', findErr)
+      return
+    }
+    if (!existing) {
+      json(res, 404, { error: 'Share not found' })
+      return
+    }
+    if (isShareExpired(existing)) {
+      json(res, 410, {
+        error: 'This link has expired',
+        expired: true,
+        share: mapShare(existing),
+      })
+      return
+    }
+
     const ua = String(req.headers['user-agent'] || '')
     const uaHash = ua
       ? createHash('sha256').update(ua).digest('hex').slice(0, 32)
       : null
 
-    const supabase = getSupabase()
     const { data, error } = await supabase.rpc('mypipcam_record_view', {
       p_share_id: id,
       p_ua_hash: uaHash,
     })
 
     if (error) {
+      // The RPC raises for expired / missing / malformed ids. Anything else is
+      // a real fault and must not leak its message to the caller.
       const msg = error.message || ''
+      const expired = /share expired/i.test(msg)
       const notFound =
-        /share not found|invalid share|share expired/i.test(msg) ||
-        error.code === 'P0001'
+        /share not found|invalid share/i.test(msg) || error.code === 'P0001'
+      if (expired) {
+        json(res, 410, { error: 'This link has expired', expired: true })
+        return
+      }
       if (notFound) {
-        json(res, 404, {
-          error: /expired/i.test(msg) ? 'Share link expired' : 'Share not found',
-        })
+        json(res, 404, { error: 'Share not found' })
         return
       }
       serverError(res, 'record view failed', error)
