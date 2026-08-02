@@ -23,6 +23,7 @@ import {
   getLibraryFolderAccess,
   getLibraryHandle,
   getPendingSyncIds,
+  grantLibraryAccess,
   hasLibraryFolder,
   listFolderRecordings,
   readRecording as readFolderRecording,
@@ -34,6 +35,8 @@ import {
   writeRecordingToFolder,
   type LibraryFolderAccess,
 } from './libraryFs'
+
+export { grantLibraryAccess, getLibraryFolderAccess }
 
 interface MyPipCamDB extends DBSchema {
   recordings: {
@@ -61,15 +64,18 @@ function getDb() {
 }
 
 /** Prefer folder when a handle exists and permission is granted (no UI prompt). */
-async function folderRootQuiet(): Promise<FileSystemDirectoryHandle | null> {
+export async function folderRootQuiet(): Promise<FileSystemDirectoryHandle | null> {
   if (!(await hasLibraryFolder())) return null
   return ensureLibraryPermission(undefined, { request: false })
 }
 
-/** Prefer folder; may prompt for permission (call from a user-gesture context). */
+/**
+ * Prefer folder; may prompt for permission (call from a user-gesture context).
+ * Does not clear the stored handle if the user denies or the prompt cannot open.
+ */
 export async function folderRootInteractive(): Promise<FileSystemDirectoryHandle | null> {
   if (!(await hasLibraryFolder())) return null
-  return ensureLibraryPermission(undefined, { request: true })
+  return grantLibraryAccess()
 }
 
 async function putIdb(record: RecordingRecord): Promise<void> {

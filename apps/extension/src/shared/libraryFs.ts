@@ -149,16 +149,49 @@ async function ensureLibraryStructure(root: FileSystemDirectoryHandle): Promise<
   await root.getDirectoryHandle(RECORDINGS_DIR, { create: true })
 }
 
+/** Best-effort: ask Chrome not to evict the handle IndexedDB under storage pressure. */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    if (navigator.storage?.persist) {
+      await navigator.storage.persist()
+    }
+  } catch {
+    /* optional */
+  }
+}
+
+/**
+ * Persist the directory handle in IndexedDB (structured clone) and the display
+ * name in chrome.storage.local. Never clears an existing handle on failure —
+ * soft auth / permission denials must not wipe the stored root.
+ */
 export async function persistLibraryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+  await requestPersistentStorage()
   const db = await getHandleDb()
   await db.put(HANDLE_STORE, handle, HANDLE_KEY)
   await chrome.storage.local.set({ [STORAGE_FOLDER_NAME]: handle.name })
+
+  // Verify round-trip so a silent IDB failure cannot leave only a folder name.
+  const stored = await db.get(HANDLE_STORE, HANDLE_KEY)
+  if (!stored || stored.name !== handle.name) {
+    throw new Error('Could not save the library folder handle. Try choosing the folder again.')
+  }
 }
 
 export async function getLibraryHandle(): Promise<FileSystemDirectoryHandle | null> {
-  const db = await getHandleDb()
-  const handle = await db.get(HANDLE_STORE, HANDLE_KEY)
-  return handle ?? null
+  try {
+    const db = await getHandleDb()
+    const handle = await db.get(HANDLE_STORE, HANDLE_KEY)
+    if (!handle) return null
+    // Sync display name if storage was cleared but the handle survived.
+    const name = await getLibraryFolderName()
+    if (!name && handle.name) {
+      await chrome.storage.local.set({ [STORAGE_FOLDER_NAME]: handle.name }).catch(() => undefined)
+    }
+    return handle
+  } catch {
+    return null
+  }
 }
 
 export async function getLibraryFolderName(): Promise<string | null> {
@@ -186,6 +219,17 @@ export type LibraryFolderAccess = {
   permission: LibraryFolderPermission
 }
 
+async function queryHandlePermission(
+  handle: FileSystemDirectoryHandle,
+): Promise<PermissionState> {
+  try {
+    return await handle.queryPermission({ mode: 'readwrite' })
+  } catch {
+    // Some Chromium builds throw when the handle is stale; treat as re-prompt.
+    return 'prompt'
+  }
+}
+
 /** Name from storage/handle + live File System Access permission (no prompt). */
 export async function getLibraryFolderAccess(): Promise<LibraryFolderAccess> {
   const folderName = await getLibraryFolderName()
@@ -193,22 +237,21 @@ export async function getLibraryFolderAccess(): Promise<LibraryFolderAccess> {
   if (!handle) {
     return { hasHandle: false, folderName, permission: 'none' }
   }
-  try {
-    const permission = await handle.queryPermission({ mode: 'readwrite' })
-    return {
-      hasHandle: true,
-      folderName: folderName || handle.name,
-      permission,
-    }
-  } catch {
-    return {
-      hasHandle: true,
-      folderName: folderName || handle.name,
-      permission: 'prompt',
-    }
+  const permission = await queryHandlePermission(handle)
+  return {
+    hasHandle: true,
+    folderName: folderName || handle.name,
+    permission,
   }
 }
 
+/**
+ * Ensure read/write access to the library root.
+ *
+ * - `request: false` (default for background/list): never prompts; returns null if not granted.
+ * - `request: true`: must run from a user gesture. Swallows "User activation required"
+ *   so callers (e.g. Library load) never wipe UI state or the stored handle.
+ */
 export async function ensureLibraryPermission(
   handle?: FileSystemDirectoryHandle | null,
   opts?: { request?: boolean },
@@ -217,13 +260,35 @@ export async function ensureLibraryPermission(
   if (!root) return null
 
   const mode = { mode: 'readwrite' as const }
-  let state = await root.queryPermission(mode)
+  let state = await queryHandlePermission(root)
   if (state === 'granted') return root
 
-  if (opts?.request !== false) {
+  if (opts?.request === false) return null
+
+  try {
     state = await root.requestPermission(mode)
+  } catch {
+    // No user gesture / permission UI unavailable — keep the stored handle.
+    return null
   }
   return state === 'granted' ? root : null
+}
+
+/**
+ * User-gesture re-grant for a previously picked folder (no directory picker).
+ * Re-persists the handle so Chrome can offer “Allow on every visit”.
+ */
+export async function grantLibraryAccess(): Promise<FileSystemDirectoryHandle | null> {
+  const root = await getLibraryHandle()
+  if (!root) return null
+  const permitted = await ensureLibraryPermission(root, { request: true })
+  if (!permitted) return null
+  try {
+    await persistLibraryHandle(permitted)
+  } catch {
+    /* permission granted; persistence retry is best-effort */
+  }
+  return permitted
 }
 
 /** User-gesture directory picker. Creates marker + recordings/ and persists the handle. */
