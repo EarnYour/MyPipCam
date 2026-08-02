@@ -37,3 +37,4 @@ apps/extension/keys/
 *client_secret*
 client_secret*.json
 **/Downloads/**
+.vercel
