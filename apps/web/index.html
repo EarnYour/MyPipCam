@@ -29,11 +29,12 @@
     <meta property="og:url" content="https://mypipcam.earnyour.com/" />
     <meta
       property="og:image"
-      content="https://mypipcam.earnyour.com/assets/og-image.jpg"
+      content="https://mypipcam.earnyour.com/assets/og.png"
     />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="MyPipCam — local screen and camera PiP recorder" />
+    <meta property="og:image:alt" content="MyPipCam — screen + camera PiP recorder for Chrome and macOS" />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta
@@ -46,8 +47,9 @@
     />
     <meta
       name="twitter:image"
-      content="https://mypipcam.earnyour.com/assets/og-image.jpg"
+      content="https://mypipcam.earnyour.com/assets/og.png"
     />
+    <meta name="twitter:image:alt" content="MyPipCam — screen + camera PiP recorder for Chrome and macOS" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -86,7 +88,7 @@
             "operatingSystem": "macOS, Chrome",
             "url": "https://mypipcam.earnyour.com/",
             "downloadUrl": "https://github.com/EarnYour/MyPipCam",
-            "image": "https://mypipcam.earnyour.com/assets/logo.png",
+            "image": "https://mypipcam.earnyour.com/assets/og.png",
             "description": "Free open-source screen and camera PiP recorder with Google Drive sync, share watch pages that track views, and a shared local library for Chrome and Mac.",
             "offers": {
               "@type": "Offer",
@@ -345,7 +347,7 @@
           </p>
           <ul class="feature-list">
             <li>
-              <strong>Chrome extension</strong>
+              <h3>Chrome extension</h3>
               <p>
                 Tab + camera PiP recording, countdown dock, rewind &amp; trim,
                 local library detail pages, and Whisper transcription when you
@@ -353,7 +355,7 @@
               </p>
             </li>
             <li>
-              <strong>macOS PiP bubble</strong>
+              <h3>macOS PiP bubble</h3>
               <p>
                 Always-on-top camera window for Continuity Camera, webcams, or
                 virtual cameras — and a native library that reads the same
@@ -361,7 +363,7 @@
               </p>
             </li>
             <li>
-              <strong>Open source &amp; free</strong>
+              <h3>Open source &amp; free</h3>
               <p>
                 MIT-licensed. Build and install from
                 <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
@@ -382,7 +384,7 @@
           </p>
           <ul class="feature-list feature-list--four">
             <li>
-              <strong>Connect Google Drive</strong>
+              <h3>Connect Google Drive</h3>
               <p>
                 In the Chrome Library → Settings → <strong>Connect Google</strong>.
                 MyPipCam creates a <code>MyPipCam</code> folder in
@@ -392,7 +394,7 @@
               </p>
             </li>
             <li>
-              <strong>Shared local library folder</strong>
+              <h3>Shared local library folder</h3>
               <p>
                 Pick the same folder (for example
                 <code>~/Movies/MyPipCam</code>) in Chrome and in the Mac app.
@@ -401,7 +403,7 @@
               </p>
             </li>
             <li>
-              <strong>Share links that track views</strong>
+              <h3>Share links that track views</h3>
               <p>
                 Share from the Library to copy a
                 <code>mypipcam.earnyour.com/w/…</code> watch link. Viewers open
@@ -411,7 +413,7 @@
               </p>
             </li>
             <li>
-              <strong>You stay in control</strong>
+              <h3>You stay in control</h3>
               <p>
                 Drive and OpenAI only run after you connect them. Disconnect
                 anytime. See the
@@ -434,19 +436,19 @@
           </p>
           <ol class="install-steps">
             <li>
-              <strong>Clone</strong>
+              <h3>Clone</h3>
               <p>
                 <code>git clone https://github.com/EarnYour/MyPipCam.git</code>
               </p>
             </li>
             <li>
-              <strong>Build the extension</strong>
+              <h3>Build the extension</h3>
               <p>
                 <code>cd apps/extension &amp;&amp; npm install &amp;&amp; npm run build</code>
               </p>
             </li>
             <li>
-              <strong>Load unpacked</strong>
+              <h3>Load unpacked</h3>
               <p>
                 Chrome → Extensions → Developer mode → Load
                 <code>apps/extension/dist</code>
@@ -478,7 +480,7 @@
           <h2 id="faq-title">Frequently asked questions</h2>
           <div class="faq">
             <details open>
-              <summary>What is MyPipCam?</summary>
+              <summary><h3>What is MyPipCam?</h3></summary>
               <p>
                 A free, open-source toolkit for screen recording with a live
                 camera picture-in-picture: Chrome extension for capture and
@@ -487,7 +489,7 @@
               </p>
             </details>
             <details>
-              <summary>Is MyPipCam a Loom alternative?</summary>
+              <summary><h3>Is MyPipCam a Loom alternative?</h3></summary>
               <p>
                 It’s inspired by picture-in-picture screen-recording workflows —
                 local-first and open source, with Drive + view-tracked share
@@ -496,7 +498,7 @@
               </p>
             </details>
             <details>
-              <summary>How does Google Drive connection work?</summary>
+              <summary><h3>How does Google Drive connection work?</h3></summary>
               <p>
                 Open Library → Settings → <strong>Connect Google</strong> and
                 finish the Google sign-in. Uploads go to a MyPipCam folder in
@@ -506,7 +508,7 @@
               </p>
             </details>
             <details>
-              <summary>Do shared links show view counts?</summary>
+              <summary><h3>Do shared links show view counts?</h3></summary>
               <p>
                 Yes. Library → Share copies a
                 <code>https://mypipcam.earnyour.com/w/…</code> link. Each open
@@ -516,7 +518,7 @@
               </p>
             </details>
             <details>
-              <summary>Where are my recordings stored?</summary>
+              <summary><h3>Where are my recordings stored?</h3></summary>
               <p>
                 On your device by default (browser storage or a folder you
                 choose). Optional Drive upload and OpenAI transcription only run
@@ -525,7 +527,7 @@
               </p>
             </details>
             <details>
-              <summary>How do I install MyPipCam?</summary>
+              <summary><h3>How do I install MyPipCam?</h3></summary>
               <p>
                 Get the extension and macOS app from
                 <a href="https://github.com/EarnYour/MyPipCam"
@@ -536,7 +538,7 @@
               </p>
             </details>
             <details>
-              <summary>Who makes MyPipCam?</summary>
+              <summary><h3>Who makes MyPipCam?</h3></summary>
               <p>
                 Created by
                 <a href="https://earnyour.com">EarnYour Marketing</a>. Support:
