@@ -30,7 +30,12 @@ export async function openLibraryTab(
   return chrome.tabs.create({ url, active: true })
 }
 
-export async function openEditorTab(id: string): Promise<chrome.tabs.Tab> {
+export type EditorFocus = 'trim' | 'silence'
+
+export async function openEditorTab(
+  id: string,
+  focus?: EditorFocus,
+): Promise<chrome.tabs.Tab> {
   // IDs are UUID folder names; reject anything else before putting it in a URL.
   const safe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     id.trim(),
@@ -38,6 +43,8 @@ export async function openEditorTab(id: string): Promise<chrome.tabs.Tab> {
     ? id.trim()
     : ''
   if (!safe) throw new Error('Invalid recording id')
-  const url = `${extensionPageUrl('src/editor/index.html')}?id=${encodeURIComponent(safe)}`
+  const params = new URLSearchParams({ id: safe })
+  if (focus) params.set('focus', focus)
+  const url = `${extensionPageUrl('src/editor/index.html')}?${params.toString()}`
   return chrome.tabs.create({ url, active: true })
 }

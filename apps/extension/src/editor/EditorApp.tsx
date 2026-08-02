@@ -55,7 +55,10 @@ export function EditorApp() {
   const [hasKey, setHasKey] = useState(false)
   const [noiseReduce, setNoiseReduce] = useState(false)
   const [showChapters, setShowChapters] = useState(false)
+  const [focusHint, setFocusHint] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const trimSectionRef = useRef<HTMLElement>(null)
+  const silenceSectionRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     void loadApiSettings().then((s) => setHasKey(hasOpenAiKey(s)))
@@ -67,7 +70,9 @@ export function EditorApp() {
   }, [])
 
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('id')
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('id')
+    const focus = params.get('focus')
     const safe =
       id &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
@@ -76,6 +81,11 @@ export function EditorApp() {
     if (!safe) {
       setError('Missing or invalid recording id')
       return
+    }
+    if (focus === 'silence') {
+      setFocusHint('Detect and remove silences below, then export.')
+    } else if (focus === 'trim') {
+      setFocusHint('Drag Out to trim the end, or set In/Out at the playhead — then export.')
     }
     void (async () => {
       const rec = await getRecording(safe)
@@ -92,6 +102,12 @@ export function EditorApp() {
       setOutSec(dur)
       setCutStart(dur * 0.35)
       setCutEnd(dur * 0.55)
+      // Scroll trim/silence tools into view after paint.
+      requestAnimationFrame(() => {
+        const el =
+          focus === 'silence' ? silenceSectionRef.current : trimSectionRef.current
+        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      })
     })()
   }, [])
 
@@ -284,6 +300,15 @@ export function EditorApp() {
         </div>
       </header>
 
+      {focusHint && (
+        <div className="editor-focus-hint" role="status">
+          <p>{focusHint}</p>
+          <button type="button" className="ghost" onClick={() => setFocusHint(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="editor-layout">
         <div className="preview-column">
           <div className="preview-panel">
@@ -365,7 +390,7 @@ export function EditorApp() {
         </div>
 
         <aside className="controls-panel">
-          <section className="tool-section">
+          <section className="tool-section" ref={trimSectionRef}>
             <h2>Trim &amp; cut</h2>
             <div className="btn-row">
               <button type="button" onClick={() => setInSec(Math.min(current, outSec - 0.1))}>
@@ -494,7 +519,7 @@ export function EditorApp() {
             </div>
           </section>
 
-          <section className="tool-section">
+          <section className="tool-section" ref={silenceSectionRef}>
             <h2>Cut silences</h2>
             <p className="muted tool-help">
               Analyzes audio locally, highlights silent ranges, then removes them on export.

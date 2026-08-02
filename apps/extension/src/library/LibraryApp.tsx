@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { hasOpenAiKey, loadApiSettings } from '../shared/apiSettings'
 import {
   deleteRecording,
   downloadBlob,
@@ -11,6 +12,7 @@ import {
   recordingFilename,
   renameRecording,
   updateRecordingDriveMeta,
+  updateRecordingTranscript,
 } from '../shared/db'
 import { InlineRename } from '../shared/InlineRename'
 import {
@@ -18,7 +20,11 @@ import {
   hasLibraryFolder,
   pickLibraryFolder,
 } from '../shared/libraryFs'
-import { openEditorTab, openRecorderTab } from '../shared/navigation'
+import {
+  openEditorTab,
+  openRecorderTab,
+  type EditorFocus,
+} from '../shared/navigation'
 import {
   getDriveConnectionStatus,
   shareRecordingOnDrive,
@@ -31,7 +37,16 @@ import {
   formatViewBadge,
 } from '../shared/shareApi'
 import { formatDate, formatDuration, type RecordingMeta } from '../shared/types'
+import { transcribeWithOpenAI } from '../editor/transcribe'
 import { SettingsPanel } from './SettingsPanel'
+
+type DetailTab = 'edit' | 'activity' | 'transcript' | 'settings'
+
+function formatDetailViews(viewCount: number | undefined): string {
+  const n = viewCount ?? 0
+  if (n <= 0) return 'Not viewed yet'
+  return n === 1 ? '1 view' : `${n} views`
+}
 
 type SortKey = 'date' | 'title'
 
@@ -379,27 +394,56 @@ export function LibraryApp() {
 
   const showDetail = Boolean(detailId)
 
+  async function onTranscribe(id: string) {
+    setBusyId(id)
+    setBannerMsg(null)
+    try {
+      const settings = await loadApiSettings()
+      if (!hasOpenAiKey(settings)) {
+        setSettingsOpen(true)
+        setBannerMsg('Add your OpenAI API key in Settings to generate a transcript.')
+        return
+      }
+      const rec = await getRecording(id)
+      if (!rec) throw new Error('Recording not found.')
+      const result = await transcribeWithOpenAI(
+        rec.blob,
+        rec.mimeType || 'video/webm',
+        settings.openaiApiKey,
+      )
+      await updateRecordingTranscript(id, result)
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, transcript: result } : i)))
+      setBannerMsg('Transcript ready.')
+    } catch (err) {
+      setBannerMsg(err instanceof Error ? err.message : 'Transcription failed.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
-    <div className="page">
-      <header className="page-header">
-        <div>
-          <h1 className="brand">MyPipCam Library</h1>
-          <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-            {folderName
-              ? `Shared folder “${folderName}” — pick the same path in the Mac app to browse these clips.`
-              : 'Local recordings only — nothing leaves this browser unless you use cloud features.'}
-            {driveConnected ? ' Google Drive connected.' : ''}
-          </p>
-        </div>
-        <div className="row">
-          <button type="button" className="ghost" onClick={() => setSettingsOpen(true)} title="Settings">
-            Settings
-          </button>
-          <button type="button" className="primary" onClick={() => void openRecorderTab()}>
-            New recording
-          </button>
-        </div>
-      </header>
+    <div className={`page ${showDetail ? 'page-detail' : ''}`}>
+      {!showDetail && (
+        <header className="page-header">
+          <div>
+            <h1 className="brand">MyPipCam Library</h1>
+            <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+              {folderName
+                ? `Shared folder “${folderName}” — pick the same path in the Mac app to browse these clips.`
+                : 'Local recordings only — nothing leaves this browser unless you use cloud features.'}
+              {driveConnected ? ' Google Drive connected.' : ''}
+            </p>
+          </div>
+          <div className="row">
+            <button type="button" className="ghost" onClick={() => setSettingsOpen(true)} title="Settings">
+              Settings
+            </button>
+            <button type="button" className="primary" onClick={() => void openRecorderTab()}>
+              New recording
+            </button>
+          </div>
+        </header>
+      )}
 
       {!folderName && !showDetail && (
         <div className="library-banner" role="status">
@@ -449,8 +493,17 @@ export function LibraryApp() {
           onDelete={onDelete}
           onDownload={onDownload}
           onUploadToDrive={onUploadToDrive}
-          onShare={onShare}
-          onEdit={(id) => void openEditorTab(id)}
+          onShare={async (id) => {
+            if (!driveConnected) {
+              setBannerMsg('Connect Google Drive in Settings to share a MyPipCam link.')
+              setSettingsOpen(true)
+              return
+            }
+            await onShare(id)
+          }}
+          onEdit={(id, focus) => void openEditorTab(id, focus)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onTranscribe={onTranscribe}
         />
       ) : (
         <>
@@ -573,7 +626,9 @@ type DetailProps = {
   onDownload: (id: string) => Promise<void>
   onUploadToDrive: (id: string) => Promise<void>
   onShare: (id: string) => Promise<void>
-  onEdit: (id: string) => void
+  onEdit: (id: string, focus?: EditorFocus) => void
+  onOpenSettings: () => void
+  onTranscribe: (id: string) => Promise<void>
 }
 
 function RecordingDetail({
@@ -591,122 +646,291 @@ function RecordingDetail({
   onUploadToDrive,
   onShare,
   onEdit,
+  onOpenSettings,
+  onTranscribe,
 }: DetailProps) {
   const title = item?.title ?? playing?.title ?? 'Recording'
   const busy = busyId === detailId
   const hasShareMeta = Boolean(item?.shareId) || item?.shareViewCount != null
+  const [tab, setTab] = useState<DetailTab>('edit')
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  function rewind20() {
+    const v = videoRef.current
+    if (!v) return
+    v.currentTime = Math.max(0, v.currentTime - 20)
+  }
 
   return (
     <section className="recording-detail" aria-label="Recording detail">
-      <div className="detail-toolbar">
-        <button type="button" className="ghost" onClick={onBack}>
-          ← Back to library
-        </button>
-      </div>
-
-      <div className="detail-player">
-        {playerLoading && !playing ? (
-          <div className="detail-player-placeholder muted">Loading video…</div>
-        ) : playerError && !playing ? (
-          <div className="detail-player-placeholder muted">{playerError}</div>
-        ) : playing ? (
-          <video key={playing.url} src={playing.url} controls autoPlay playsInline />
-        ) : (
-          <div className="detail-player-placeholder muted">No preview available.</div>
-        )}
-      </div>
-
-      <div className="detail-body">
-        <InlineRename
-          title={title}
-          as="h1"
-          className="detail-title"
-          onSave={(next) => onRename(detailId, next)}
-        />
-
-        {item ? (
-          <div className="detail-meta">
-            <span>{formatDate(item.createdAt)}</span>
-            <span aria-hidden="true">·</span>
-            <span>{formatDuration(item.durationMs)}</span>
-            <span aria-hidden="true">·</span>
-            <span>{(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
-            {item.transcript ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>Transcript</span>
-              </>
-            ) : null}
-            {item.driveOnly ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>Drive only</span>
-              </>
-            ) : null}
-            {item.driveFileId ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>On Drive</span>
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <div className="detail-meta muted">
-            {playerLoading ? 'Loading details…' : 'Recording metadata unavailable.'}
-          </div>
-        )}
-
-        {/* Slot for share view-tracking (populated when share meta exists). */}
-        <div className="detail-views" data-slot="share-views">
-          {hasShareMeta ? (
-            <>
-              <span className="detail-views-count">
-                {formatViewBadge(item?.shareViewCount)}
-              </span>
-              <span className="detail-views-last muted">
-                {formatLastViewed(item?.shareLastViewedAt)}
-              </span>
-            </>
-          ) : item?.driveShared ? (
-            <span className="muted">Views appear after the share page tracks opens.</span>
-          ) : null}
-        </div>
-
-        <div className="detail-actions">
-          {item && !item.driveOnly && (
-            <button type="button" className="primary" onClick={() => onEdit(detailId)}>
-              Edit
-            </button>
-          )}
-          {driveConnected && (
-            <button type="button" disabled={busy} onClick={() => void onShare(detailId)}>
-              {busy ? 'Working…' : item?.driveShared ? 'Copy link' : 'Share'}
-            </button>
-          )}
-          {driveConnected && item && !item.driveFileId && !item.driveOnly && (
-            <button type="button" disabled={busy} onClick={() => void onUploadToDrive(detailId)}>
-              {busy ? 'Uploading…' : 'Upload to Drive'}
-            </button>
-          )}
-          {item?.driveWebViewLink && (
-            <a
-              className="button-link"
-              href={item.driveWebViewLink}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open in Drive
-            </a>
-          )}
-          <button type="button" onClick={() => void onDownload(detailId)}>
-            Download
+      <header className="detail-header">
+        <div className="detail-header-main">
+          <button type="button" className="ghost detail-back" onClick={onBack}>
+            ← Library
           </button>
-          {item && !item.driveOnly && (
-            <button type="button" className="danger" onClick={() => void onDelete(detailId)}>
-              Delete
-            </button>
-          )}
+          <div className="detail-header-titles">
+            <InlineRename
+              title={title}
+              as="h1"
+              className="detail-title"
+              onSave={(next) => onRename(detailId, next)}
+            />
+            <div className="detail-views" data-slot="share-views">
+              <span className="detail-views-count">{formatDetailViews(item?.shareViewCount)}</span>
+              {hasShareMeta && item?.shareLastViewedAt != null && (
+                <span className="detail-views-last muted">
+                  {formatLastViewed(item.shareLastViewedAt)}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
+        <button
+          type="button"
+          className="primary detail-share-btn"
+          disabled={busy}
+          onClick={() => void onShare(detailId)}
+        >
+          {busy ? 'Working…' : item?.shareId || item?.driveShared ? 'Copy link' : 'Share'}
+        </button>
+      </header>
+
+      <div className="detail-layout">
+        <div className="detail-main">
+          <div className="detail-player">
+            {playerLoading && !playing ? (
+              <div className="detail-player-placeholder muted">Loading video…</div>
+            ) : playerError && !playing ? (
+              <div className="detail-player-placeholder muted">{playerError}</div>
+            ) : playing ? (
+              <video
+                ref={videoRef}
+                key={playing.url}
+                src={playing.url}
+                controls
+                autoPlay
+                playsInline
+              />
+            ) : (
+              <div className="detail-player-placeholder muted">No preview available.</div>
+            )}
+          </div>
+
+          <div className="detail-player-bar">
+            <button
+              type="button"
+              className="detail-rewind-btn"
+              disabled={!playing}
+              onClick={rewind20}
+              title="Rewind 20 seconds"
+            >
+              <span className="detail-rewind-icon" aria-hidden="true">
+                ↺
+              </span>
+              20 sec
+            </button>
+            {item ? (
+              <div className="detail-meta">
+                <span>{formatDate(item.createdAt)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{formatDuration(item.durationMs)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
+              </div>
+            ) : (
+              <div className="detail-meta muted">
+                {playerLoading ? 'Loading details…' : 'Recording metadata unavailable.'}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <aside className="detail-sidebar" aria-label="Recording tools">
+          <div className="detail-tabs" role="tablist">
+            {(
+              [
+                ['edit', 'Edit'],
+                ['activity', 'Activity'],
+                ['transcript', 'Transcript'],
+                ['settings', 'Settings'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={`detail-tab ${tab === id ? 'is-active' : ''}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="detail-tab-panel" role="tabpanel">
+            {tab === 'edit' && (
+              <div className="detail-panel-stack">
+                <div>
+                  <h2 className="detail-panel-title">Edit and trim video</h2>
+                  <p className="muted detail-panel-copy">
+                    Open the trim editor to cut the start/end, remove a selection, or export a new
+                    take.
+                  </p>
+                </div>
+                {item && !item.driveOnly ? (
+                  <>
+                    <button
+                      type="button"
+                      className="primary detail-panel-action"
+                      onClick={() => onEdit(detailId, 'trim')}
+                    >
+                      Edit and trim video
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-panel-action"
+                      onClick={() => onEdit(detailId, 'silence')}
+                    >
+                      Cut silences
+                    </button>
+                  </>
+                ) : (
+                  <p className="muted">Editing needs a local copy of this recording.</p>
+                )}
+                <button
+                  type="button"
+                  className="detail-panel-action"
+                  onClick={() => void onDownload(detailId)}
+                >
+                  Download
+                </button>
+              </div>
+            )}
+
+            {tab === 'activity' && (
+              <div className="detail-panel-stack">
+                <div>
+                  <h2 className="detail-panel-title">Activity</h2>
+                  <p className="muted detail-panel-copy">
+                    View activity from your MyPipCam share link.
+                  </p>
+                </div>
+                {hasShareMeta ? (
+                  <ul className="detail-activity-list">
+                    <li>
+                      <strong>{formatDetailViews(item?.shareViewCount)}</strong>
+                      <span className="muted">
+                        {formatLastViewed(item?.shareLastViewedAt)}
+                      </span>
+                    </li>
+                  </ul>
+                ) : (
+                  <p className="muted">
+                    Views appear when you share a MyPipCam link.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {tab === 'transcript' && (
+              <div className="detail-panel-stack">
+                <div>
+                  <h2 className="detail-panel-title">Transcript</h2>
+                  <p className="muted detail-panel-copy">
+                    Captions stay on-device. Transcription uses your OpenAI key (Whisper).
+                  </p>
+                </div>
+                {item?.transcript ? (
+                  <div className="detail-transcript">
+                    {item.transcript.segments.length > 0 ? (
+                      item.transcript.segments.map((seg, i) => (
+                        <p key={i} className="detail-transcript-seg">
+                          <span className="muted mono">
+                            {formatDuration(seg.start * 1000)}
+                          </span>
+                          {seg.text}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="detail-transcript-plain">{item.transcript.text}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="muted">No transcript yet.</p>
+                )}
+                {item && !item.driveOnly && (
+                  <button
+                    type="button"
+                    className="primary detail-panel-action"
+                    disabled={busy}
+                    onClick={() => void onTranscribe(detailId)}
+                  >
+                    {busy
+                      ? 'Working…'
+                      : item.transcript
+                        ? 'Re-generate transcript'
+                        : 'Generate transcript'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ghost detail-panel-action"
+                  onClick={onOpenSettings}
+                >
+                  Open API key settings
+                </button>
+              </div>
+            )}
+
+            {tab === 'settings' && (
+              <div className="detail-panel-stack">
+                <div>
+                  <h2 className="detail-panel-title">Settings</h2>
+                  <p className="muted detail-panel-copy">
+                    Rename, manage Drive, or delete this recording.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="detail-panel-action"
+                  onClick={onOpenSettings}
+                >
+                  Library &amp; Drive settings
+                </button>
+                {driveConnected && item && !item.driveFileId && !item.driveOnly && (
+                  <button
+                    type="button"
+                    className="detail-panel-action"
+                    disabled={busy}
+                    onClick={() => void onUploadToDrive(detailId)}
+                  >
+                    {busy ? 'Uploading…' : 'Upload to Drive'}
+                  </button>
+                )}
+                {item?.driveWebViewLink && (
+                  <a
+                    className="button-link detail-panel-action"
+                    href={item.driveWebViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Drive
+                  </a>
+                )}
+                {item && !item.driveOnly && (
+                  <button
+                    type="button"
+                    className="danger detail-panel-action"
+                    onClick={() => void onDelete(detailId)}
+                  >
+                    Delete recording
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </section>
   )

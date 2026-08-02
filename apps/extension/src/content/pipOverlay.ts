@@ -1,7 +1,7 @@
 /**
  * Loom-style recording chrome injected into the tab:
  * - Freely draggable circular camera bubble (extension-origin iframe)
- * - Left-edge vertical control dock (timer / stop / pause / restart / discard)
+ * - Left-edge vertical control dock (timer / stop / pause / rewind&trim / restart / discard)
  * - Center-screen 3→2→1 countdown before capture begins
  *
  * Mounted in a closed Shadow DOM under a fixed max-z host. Prefer Popover
@@ -292,6 +292,30 @@ function overlayStyles(): string {
       display: block;
     }
     .mpc-dock .mpc-stop svg { width: 16px; height: 16px; }
+    .mpc-dock .mpc-trim {
+      position: relative;
+    }
+    .mpc-dock .mpc-trim svg { width: 17px; height: 17px; }
+    .mpc-dock .mpc-trim-label {
+      position: absolute;
+      left: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(17, 19, 18, 0.94);
+      color: #fafaf7;
+      font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s ease;
+    }
+    .mpc-dock .mpc-trim:hover .mpc-trim-label,
+    .mpc-dock .mpc-trim:focus-visible .mpc-trim-label {
+      opacity: 1;
+    }
 
     /* Camera failure chip — visible even while dock is hidden during countdown */
     .mpc-cam-status {
@@ -631,6 +655,10 @@ function iconTrash(): string {
 function iconRestart(): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>`
 }
+function iconTrim(): string {
+  // Scissors / trim glyph (Loom-style Rewind & Trim affordance).
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M20 4 8.5 12 20 20"/><path d="M8.5 12H14"/></svg>`
+}
 
 class TabOverlay {
   private root: HTMLDivElement
@@ -643,6 +671,7 @@ class TabOverlay {
   private timerEl: HTMLSpanElement
   private stopBtn: HTMLButtonElement
   private pauseBtn: HTMLButtonElement
+  private trimBtn: HTMLButtonElement
   private restartBtn: HTMLButtonElement
   private discardBtn: HTMLButtonElement
   private countdownEl: HTMLDivElement
@@ -829,6 +858,13 @@ class TabOverlay {
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
     this.pauseBtn.innerHTML = iconPause()
 
+    this.trimBtn = document.createElement('button')
+    this.trimBtn.type = 'button'
+    this.trimBtn.className = 'mpc-trim'
+    this.trimBtn.title = 'Rewind & Trim'
+    this.trimBtn.setAttribute('aria-label', 'Rewind and trim — stop and open editor')
+    this.trimBtn.innerHTML = `${iconTrim()}<span class="mpc-trim-label">Rewind &amp; Trim</span>`
+
     this.restartBtn = document.createElement('button')
     this.restartBtn.type = 'button'
     this.restartBtn.className = 'mpc-restart'
@@ -842,7 +878,13 @@ class TabOverlay {
     this.discardBtn.setAttribute('aria-label', 'Discard recording')
     this.discardBtn.innerHTML = iconTrash()
 
-    btns.append(this.stopBtn, this.pauseBtn, this.restartBtn, this.discardBtn)
+    btns.append(
+      this.stopBtn,
+      this.pauseBtn,
+      this.trimBtn,
+      this.restartBtn,
+      this.discardBtn,
+    )
     this.dock.append(this.timerEl, btns)
 
     // —— Countdown ——
@@ -881,6 +923,11 @@ class TabOverlay {
       e.preventDefault()
       e.stopPropagation()
       void this.togglePause()
+    })
+    this.trimBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      void this.requestTrimAndStop()
     })
     this.restartBtn.addEventListener('click', (e) => {
       e.preventDefault()
@@ -1367,6 +1414,35 @@ class TabOverlay {
     }
   }
 
+  /**
+   * Loom-style Rewind & Trim: MediaRecorder can't true-trim mid-flight, so
+   * confirm → stop & save → open the trim editor focused on end trim.
+   */
+  private async requestTrimAndStop() {
+    if (this.stopping || this.restarting) return
+    if (this.state.phase === 'countdown') return
+    const ok = window.confirm(
+      'Stop and trim in editor?\n\nRecording will save, then open so you can trim the end.',
+    )
+    if (!ok) return
+    this.stopping = true
+    this.setDockBusy(true)
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'STOP_LOOM_RECORDING',
+        openEditor: true,
+      })) as { ok?: boolean; reason?: string } | undefined
+      if (!res?.ok) {
+        this.stopping = false
+        this.setDockBusy(false)
+        this.showError(res?.reason?.trim() || 'Could not stop recording to trim.')
+      }
+    } catch {
+      this.stopping = false
+      this.setDockBusy(false)
+    }
+  }
+
   private async togglePause() {
     if (this.state.phase === 'countdown' || this.stopping || this.restarting) return
     const pausing = this.state.phase !== 'paused'
@@ -1411,6 +1487,7 @@ class TabOverlay {
   private setDockBusy(busy: boolean) {
     this.stopBtn.disabled = busy
     this.pauseBtn.disabled = busy
+    this.trimBtn.disabled = busy
     this.restartBtn.disabled = busy
     this.discardBtn.disabled = busy
   }

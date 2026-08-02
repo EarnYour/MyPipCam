@@ -9,7 +9,7 @@ import {
 } from '../shared/driveAuth'
 import { connectGoogleDriveInBackground } from '../shared/driveSync'
 import { loadPipSettings, savePipSettings } from '../shared/settings'
-import { openLibraryTab, openRecorderTab } from '../shared/navigation'
+import { openEditorTab, openLibraryTab, openRecorderTab } from '../shared/navigation'
 import {
   isContentScriptSender,
   isPipChannelToken,
@@ -760,7 +760,9 @@ async function failCaptureKeepOverlay(_tabId: number) {
   await closeOffscreen()
 }
 
-async function stopLoomRecording(): Promise<{
+async function stopLoomRecording(opts?: {
+  openEditor?: boolean
+}): Promise<{
   ok: boolean
   id?: string
   reason?: string
@@ -796,9 +798,17 @@ async function stopLoomRecording(): Promise<{
       return { ok: false, reason: result?.reason?.trim() || 'Could not stop recording.' }
     }
 
-    const settings = await loadPipSettings()
-    if (settings.openLibraryOnFinish && result.id) {
-      await openLibraryTab(result.id)
+    if (result.id && opts?.openEditor) {
+      try {
+        await openEditorTab(result.id, 'trim')
+      } catch {
+        await openLibraryTab(result.id)
+      }
+    } else {
+      const settings = await loadPipSettings()
+      if (settings.openLibraryOnFinish && result.id) {
+        await openLibraryTab(result.id)
+      }
     }
 
     return { ok: true, id: result.id }
@@ -1316,7 +1326,9 @@ function dispatchExtensionMessage(
   if (message?.type === 'STOP_LOOM_RECORDING') {
     void (async () => {
       try {
-        const result = await stopLoomRecording()
+        const result = await stopLoomRecording({
+          openEditor: Boolean(message.openEditor),
+        })
         sendResponse(result)
       } catch (err) {
         sendResponse({
