@@ -12,6 +12,7 @@ Monorepo for **MyPipCam**: Loom-style camera PiP on macOS and in Chrome.
 | --- | --- |
 | [`apps/macos`](apps/macos) | macOS companion — floating always-on-top camera bubble for OBS / desktop recording |
 | [`apps/extension`](apps/extension) | Chrome extension — screen + camera PiP recording, local library, trim/cut editor |
+| [`apps/web`](apps/web) | Product site + share watch pages (`/w/{shareId}`) and view-count API |
 
 **Legal & safety:** [Terms of Use](TERMS.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
@@ -63,7 +64,11 @@ Transcription still uses an **OpenAI** API key in extension Settings only (Deepg
 
 ## Google Drive (optional cloud library)
 
-Chrome extension only. Local folder + Mac shared-folder support are unchanged. Drive is an optional layer: upload after save, list/play from Drive on other browsers, and create “anyone with the link” share URLs.
+Chrome extension only. Local folder + Mac shared-folder support are unchanged. Drive is an optional layer: upload after save, list/play from Drive on other browsers, and create Loom-style **MyPipCam watch links** with view counts.
+
+### Why a custom watch page (not Drive analytics)
+
+Google Drive does **not** expose reliable “anyone with the link” view analytics to third-party apps. MyPipCam therefore shares a link to **`https://mypipcam.earnyour.com/w/{shareId}`**. Opening that page counts as a view; the page embeds the Drive preview when a `driveFileId` is available. The Library shows **👁 N views** / last viewed (refreshed on Library load).
 
 ### Scope tradeoff
 
@@ -122,8 +127,31 @@ Then **Reload** the extension on `chrome://extensions`.
 
 1. **Library → Settings → Google Drive → Connect Google** — sign in; a `MyPipCam` folder is created/found on Drive.
 2. Leave **Auto-upload new recordings to Drive** on (default) so new clips upload after local save (retries when you open Library).
-3. Per clip: **Upload to Drive** (if not uploaded), **Share** / **Copy link** (“Anyone with the link can view”).
-4. Cards show a **Drive** badge when the file is on Drive; **Drive only** means it exists remotely but not in this browser’s local library.
+3. Per clip: **Upload to Drive** (if not uploaded), **Share** / **Copy link** — copies the MyPipCam watch URL (also enables Drive anyone-with-link so the embed can play).
+4. Cards show a **Drive** badge when the file is on Drive; shared clips also show **👁 views** / last viewed. **Drive only** means it exists remotely but not in this browser’s local library.
+
+### Share view tracking (web API)
+
+| Piece | Role |
+| --- | --- |
+| `apps/web` watch page | `/w/{shareId}` embeds Drive preview + `POST /api/shares/:id/view` |
+| Supabase tables | `mypipcam_shares`, `mypipcam_views` (see `apps/web/.env.example`) |
+| Extension Library | Creates share via `POST /api/shares`, copies watch URL, refreshes stats |
+
+**Vercel env vars** (project `mypipcam`, Production + Preview):
+
+```bash
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=<anon key from Supabase dashboard>
+```
+
+Deploy from `apps/web`:
+
+```bash
+cd apps/web
+npm install
+vercel --prod
+```
 
 ### Multi-device / multi-browser sync
 

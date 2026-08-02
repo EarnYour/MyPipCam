@@ -6,7 +6,7 @@ This policy describes how **MyPipCam** (Chrome extension and macOS companion app
 
 **Product site:** [https://mypipcam.earnyour.com](https://mypipcam.earnyour.com) (public privacy page when mirrored: [https://mypipcam.earnyour.com/privacy](https://mypipcam.earnyour.com/privacy)). Source of truth for this policy remains this repository file until the live page is updated.
 
-**Short version:** MyPipCam is local-first. Recordings and secrets stay on your device unless **you** connect optional cloud features. EarnYour Marketing does not run an analytics or telemetry backend for this project as shipped.
+**Short version:** MyPipCam is local-first. Recordings and secrets stay on your device unless **you** connect optional cloud features (OpenAI, Google Drive, or MyPipCam share links). Share-link view counts are optional and only apply when you use Library → Share.
 
 ## 1. Who this applies to
 
@@ -63,10 +63,9 @@ Chrome and Apple may process permission prompts, crash reports, or other system-
 
 As of the last review of this repository’s published code:
 
-- There is **no** EarnYour Marketing analytics, marketing pixel, or phone-home telemetry claimed or wired into MyPipCam for product usage tracking.
+- There is **no** marketing pixel or general product-usage telemetry for browsing the extension UI.
 - Optional third-party APIs (OpenAI, Google) are used only for the features you invoke.
-
-If a future release adds telemetry, it should be documented here and in the changelog before shipping.
+- **Share link views (optional):** When you use **Share** in the Library, MyPipCam registers a watch-page link on `mypipcam.earnyour.com`. Opening that page records a view event (count + timestamp). Viewers do not need an account. We may store a short hash of the viewer’s User-Agent (not the raw string, and not IP addresses in this MVP). No visitor names or emails are collected.
 
 ## 6. macOS camera bubble behavior
 
@@ -74,7 +73,7 @@ The macOS companion is a real always-on-top window that shows your selected came
 
 ## 7. Sharing and “anyone with the link”
 
-If you use Google Drive share links from the extension, people with the link can view what you shared under Google’s access model. You choose when to share and when to revoke access in Google Drive / Google Account settings.
+**Share** in the Library (1) enables Google Drive “anyone with the link can view” so the video can play, and (2) copies a **MyPipCam watch URL** (`https://mypipcam.earnyour.com/w/…`) that embeds the Drive preview and counts opens. Google’s access model still governs who can stream the file; revoke access in Google Drive / Google Account settings. View counts are stored by the MyPipCam share API (see §5).
 
 ## 8. Children
 

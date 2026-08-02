@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Watch — MyPipCam</title>
+    <meta name="description" content="Watch a MyPipCam shared recording." />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#111312" />
+    <link rel="icon" href="/assets/logo.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/w/watch.css" />
+  </head>
+  <body>
+    <header class="watch-header">
+      <a class="brand" href="/">MyPipCam</a>
+      <span class="muted" id="status">Loading…</span>
+    </header>
+
+    <main class="watch-main">
+      <div class="stage" id="stage">
+        <div class="placeholder" id="placeholder">
+          <p class="placeholder-title" id="placeholderTitle">Opening recording…</p>
+          <p class="placeholder-body" id="placeholderBody">
+            One moment while we load the shared video.
+          </p>
+        </div>
+        <iframe
+          id="player"
+          class="player"
+          title="Shared recording"
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+          allowfullscreen
+          hidden
+        ></iframe>
+      </div>
+      <p class="hint" id="hint" hidden></p>
+    </main>
+
+    <footer class="watch-footer">
+      <a href="/">Record with MyPipCam</a>
+      ·
+      <a href="/privacy">Privacy</a>
+    </footer>
+
+    <script src="/w/watch.js" defer></script>
+  </body>
+</html>
