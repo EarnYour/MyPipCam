@@ -1,5 +1,5 @@
 /**
- * Recording control HUD — extension popup window (outside tabCapture).
+ * Recording control HUD — narrow left dock outside tabCapture.
  *
  * When `?drive=1`, this window owns the 3→2→1 countdown (page overlay failed).
  * Otherwise the page overlay drives countdown; HUD mirrors status and provides
@@ -14,6 +14,7 @@ const statusEl = document.getElementById('status') as HTMLParagraphElement
 const countEl = document.getElementById('count') as HTMLDivElement
 const timerEl = document.getElementById('timer') as HTMLDivElement
 const errEl = document.getElementById('err') as HTMLDivElement
+const recDot = document.getElementById('recDot') as HTMLDivElement
 const countdownActions = document.getElementById('countdownActions') as HTMLDivElement
 const recActions = document.getElementById('recActions') as HTMLDivElement
 const stopBtn = document.getElementById('stop') as HTMLButtonElement
@@ -23,6 +24,10 @@ const trimBtn = document.getElementById('trim') as HTMLButtonElement
 const restartBtn = document.getElementById('restart') as HTMLButtonElement
 const cancelCountdownBtn = document.getElementById('cancelCountdown') as HTMLButtonElement
 const skipCountdownBtn = document.getElementById('skipCountdown') as HTMLButtonElement
+
+const PAUSE_ICON =
+  '<rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />'
+const PLAY_ICON = '<path d="M8 5v14l11-7-11-7z" />'
 
 let phase: 'countdown' | 'recording' | 'paused' | 'idle' = 'countdown'
 let countdownLeft = 3
@@ -60,6 +65,18 @@ function setBusy(next: boolean) {
   }
 }
 
+function setPauseUi(paused: boolean) {
+  pauseBtn.title = paused ? 'Resume' : 'Pause'
+  pauseBtn.setAttribute('aria-label', paused ? 'Resume' : 'Pause')
+  const icon = pauseBtn.querySelector('svg')
+  if (icon) icon.innerHTML = paused ? PLAY_ICON : PAUSE_ICON
+}
+
+function setRecDot(mode: 'countdown' | 'recording' | 'paused') {
+  recDot.classList.toggle('is-countdown', mode === 'countdown')
+  recDot.classList.toggle('is-paused', mode === 'paused')
+}
+
 function clearCountdownTimer() {
   if (countdownTimer != null) {
     window.clearInterval(countdownTimer)
@@ -70,6 +87,7 @@ function clearCountdownTimer() {
 
 function showCountdown(n: number) {
   phase = 'countdown'
+  setRecDot('countdown')
   countEl.classList.remove('is-hidden')
   timerEl.classList.add('is-hidden')
   countdownActions.classList.remove('is-hidden')
@@ -78,6 +96,7 @@ function showCountdown(n: number) {
   statusEl.textContent = driveCountdown
     ? 'Countdown — recording starts after 3…2…1'
     : 'Countdown on page — use Cancel / Skip here'
+  document.title = 'REC'
 }
 
 function elapsedMs(): number {
@@ -91,12 +110,14 @@ function elapsedMs(): number {
 function showRecording(opts?: { resumeClock?: boolean }) {
   phase = 'recording'
   clearCountdownTimer()
+  setRecDot('recording')
   countEl.classList.add('is-hidden')
   timerEl.classList.remove('is-hidden')
   countdownActions.classList.add('is-hidden')
   recActions.classList.remove('is-hidden')
   statusEl.textContent = 'Recording'
-  pauseBtn.textContent = 'Pause'
+  setPauseUi(false)
+  document.title = 'REC'
   if (!opts?.resumeClock || !recordingStartedAt) {
     recordingStartedAt = Date.now()
     pausedAccumMs = 0
@@ -115,9 +136,11 @@ function showPaused() {
     pauseStartedAt = Date.now()
   }
   phase = 'paused'
+  setRecDot('paused')
   statusEl.textContent = 'Paused'
-  pauseBtn.textContent = 'Resume'
+  setPauseUi(true)
   timerEl.textContent = formatDuration(elapsedMs())
+  document.title = 'PAUSED'
 }
 
 function commitCountdown() {
@@ -254,8 +277,9 @@ pauseBtn.addEventListener('click', () => {
           pauseStartedAt = 0
         }
         phase = 'recording'
+        setRecDot('recording')
         statusEl.textContent = 'Recording'
-        pauseBtn.textContent = 'Pause'
+        setPauseUi(false)
       }
     })
     .catch((err: unknown) => {

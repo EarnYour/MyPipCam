@@ -267,8 +267,12 @@ async function focusHudWindow(): Promise<boolean> {
   return false
 }
 
+/** Narrow Loom-style left dock — chrome.windows popup (no frameless option). */
+const HUD_DOCK_WIDTH = 72
+const HUD_DOCK_HEIGHT = 400
+
 async function resolveHudAnchor(anchorTabId?: number): Promise<{ left: number; top: number }> {
-  const height = 420
+  const height = HUD_DOCK_HEIGHT
   try {
     let win: chrome.windows.Window | undefined
     if (typeof anchorTabId === 'number') {
@@ -278,21 +282,23 @@ async function resolveHudAnchor(anchorTabId?: number): Promise<{ left: number; t
       }
     }
     if (!win) win = await chrome.windows.getLastFocused()
-    const left = Math.max(8, (win.left ?? 0) + 16)
+    // Prefer just outside the browser's left edge; clamp onto the display if needed.
+    const besideLeft = (win.left ?? 0) - HUD_DOCK_WIDTH - 4
+    const left = Math.max(0, besideLeft >= 0 ? besideLeft : (win.left ?? 0) + 6)
     const top = Math.max(
-      8,
+      0,
       (win.top ?? 0) + Math.round(((win.height ?? 800) - height) / 2),
     )
     return { left, top }
   } catch {
-    return { left: 24, top: 120 }
+    return { left: 0, top: 120 }
   }
 }
 
 /**
- * Recording controls live in an extension popup so tabCapture never records
- * the stop/pause/timer dock. Always open focused + positioned beside the
- * captured window — otherwise focusCapturedTab buries an unfocused HUD.
+ * Recording controls live in a narrow extension popup dock so tabCapture never
+ * records stop/pause/timer chrome. Always open focused + pinned to the left of
+ * the captured window — otherwise focusCapturedTab buries an unfocused HUD.
  */
 async function openRecordingHud(options?: {
   driveCountdown?: boolean
@@ -323,8 +329,8 @@ async function openRecordingHud(options?: {
     const win = await chrome.windows.create({
       url,
       type: 'popup',
-      width: 320,
-      height: 420,
+      width: HUD_DOCK_WIDTH,
+      height: HUD_DOCK_HEIGHT,
       left,
       top,
       focused: true,
@@ -334,7 +340,14 @@ async function openRecordingHud(options?: {
       throw new Error('Recording controls window opened without an id')
     }
     // Second focus pass — create(..., focused:true) is flaky after tabCapture.
-    await chrome.windows.update(hudWindowId, { focused: true, drawAttention: true })
+    await chrome.windows.update(hudWindowId, {
+      focused: true,
+      drawAttention: true,
+      width: HUD_DOCK_WIDTH,
+      height: HUD_DOCK_HEIGHT,
+      left,
+      top,
+    })
     startLog('recording HUD opened', { windowId: hudWindowId, driveCountdown, left, top })
     return { ok: true }
   } catch (err) {
@@ -345,8 +358,8 @@ async function openRecordingHud(options?: {
       const win = await chrome.windows.create({
         url,
         type: 'normal',
-        width: 360,
-        height: 480,
+        width: HUD_DOCK_WIDTH + 16,
+        height: HUD_DOCK_HEIGHT + 40,
         left,
         top,
         focused: true,
