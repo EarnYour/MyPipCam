@@ -968,6 +968,7 @@ class TabOverlay {
     })
 
     document.addEventListener('pointerdown', this.onDocPointerDown, true)
+    window.addEventListener('resize', this.onWindowResize)
 
     this.apply()
 
@@ -1310,6 +1311,12 @@ class TabOverlay {
     this.bubble.classList.toggle('is-square', this.state.shape === 'square')
   }
 
+  // Bubble position is stored normalized (0..1) and applied in viewport pixels,
+  // so a window resize must re-apply or the bubble drifts off-screen.
+  private onWindowResize = () => {
+    this.apply()
+  }
+
   private persistTimer: number | null = null
 
   /**
@@ -1580,6 +1587,7 @@ class TabOverlay {
     if (this.countdownId != null) window.clearInterval(this.countdownId)
     if (this.camWatchId != null) window.clearTimeout(this.camWatchId)
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
+    window.removeEventListener('resize', this.onWindowResize)
     window.removeEventListener('message', this.onPipMessage)
     void chrome.runtime.sendMessage({
       type: 'REVOKE_PIP_CHANNEL',
@@ -1634,7 +1642,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         throw new Error('Recording overlay failed to attach to the page')
       }
       // Popover top-layer can take a frame to apply :popover-open styles.
-      requestAnimationFrame(() => {
+      // rAF never fires while the tab is hidden, so race it with a timer —
+      // otherwise the background's sendMessage await would hang forever.
+      let responded = false
+      const finishVisibleCheck = () => {
+        if (responded) return
+        responded = true
         try {
           if (!overlay) throw new Error('Recording overlay disappeared after mount')
           const visibility = overlay.getVisibility()
@@ -1660,7 +1673,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           console.error('[MyPipCam][start] PIP_OVERLAY_START visible-check failed:', reason, err)
           sendResponse({ ok: false, reason })
         }
-      })
+      }
+      requestAnimationFrame(finishVisibleCheck)
+      window.setTimeout(finishVisibleCheck, 300)
     } catch (err) {
       try {
         overlay?.dispose()

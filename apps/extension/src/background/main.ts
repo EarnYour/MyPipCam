@@ -509,7 +509,10 @@ function restrictedPageReason(url: string | undefined): string {
   return "Can't record this page. Open a normal website tab (https://…) and try again."
 }
 
-async function resolveTargetTab(explicitTabId?: number): Promise<
+async function resolveTargetTab(
+  explicitTabId?: number,
+  opts?: { fallbackToRecentTab?: boolean },
+): Promise<
   | { ok: true; tab: chrome.tabs.Tab }
   | { ok: false; reason: string }
 > {
@@ -528,6 +531,19 @@ async function resolveTargetTab(explicitTabId?: number): Promise<
 
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (active?.id && isInjectableUrl(active.url)) return { ok: true, tab: active }
+
+  // The advanced recorder calls from its own extension tab, so the active tab
+  // is never injectable there — target the most recently used http(s) tab in
+  // the window instead. Main record-start must NOT do this: capture targets
+  // the active tab, and silently recording a different tab would be wrong.
+  if (opts?.fallbackToRecentTab) {
+    const tabs = await chrome.tabs.query({ currentWindow: true })
+    const recent = tabs
+      .filter((t) => t.id != null && t.id !== active?.id && isInjectableUrl(t.url))
+      .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0]
+    if (recent) return { ok: true, tab: recent }
+  }
+
   if (active?.url) return { ok: false, reason: restrictedPageReason(active.url) }
 
   return {
@@ -1559,7 +1575,9 @@ function dispatchExtensionMessage(
     void (async () => {
       let toastTabId: number | undefined
       try {
-        const resolved = await resolveTargetTab(message.tabId)
+        const resolved = await resolveTargetTab(message.tabId, {
+          fallbackToRecentTab: true,
+        })
         if (!resolved.ok || !resolved.tab.id) {
           sendResponse({ ok: false, reason: resolved.ok ? 'no-tab' : resolved.reason })
           return

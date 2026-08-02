@@ -89,9 +89,20 @@ if [[ ! -d "$APP_SRC" ]]; then
 fi
 
 echo "==> Installing to ${APP_DST} ..."
-# Quit running instance if any
-pkill -x MyPipCam 2>/dev/null || true
-sleep 0.3
+# Quit any running instance and wait for it to actually exit — a fixed sleep
+# raced the shutdown and `rm -rf` could delete the bundle out from under a
+# still-running app, leaving a half-installed .app behind.
+if pkill -x MyPipCam 2>/dev/null; then
+  for _ in $(seq 1 40); do
+    pgrep -x MyPipCam >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  if pgrep -x MyPipCam >/dev/null 2>&1; then
+    echo "==> MyPipCam still running after 10s; forcing quit"
+    pkill -9 -x MyPipCam 2>/dev/null || true
+    sleep 0.5
+  fi
+fi
 
 # Replace existing install
 rm -rf "${APP_DST}"

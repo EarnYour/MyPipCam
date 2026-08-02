@@ -1,4 +1,5 @@
 import { cors, getSupabase, json, mapShare, serverError } from '../_lib/supabase.js'
+import { rateLimit } from '../_lib/rateLimit.js'
 
 /**
  * GET /api/shares/:id — public share metadata for the watch page
@@ -17,6 +18,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!rateLimit(req, res, 'share-get', 120)) return
+
     const id = String(req.query?.id || '').trim()
     if (!id || id.length < 8 || id.length > 64) {
       json(res, 400, { error: 'Invalid share id' })
@@ -27,7 +30,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabase
       .from('mypipcam_shares')
       .select(
-        'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at',
+        'id,recording_id,drive_file_id,drive_web_view_link,owner_hint,created_at,view_count,last_viewed_at,expires_at',
       )
       .eq('id', id)
       .maybeSingle()
@@ -38,6 +41,10 @@ export default async function handler(req, res) {
     }
     if (!data) {
       json(res, 404, { error: 'Share not found' })
+      return
+    }
+    if (data.expires_at && new Date(data.expires_at).getTime() <= Date.now()) {
+      json(res, 404, { error: 'Share link expired' })
       return
     }
 

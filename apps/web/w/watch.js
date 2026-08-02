@@ -69,9 +69,20 @@
       const res = await fetch(`/api/shares/${encodeURIComponent(shareId)}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        if (res.status === 429) {
+          showError('Too many requests', 'Please wait a moment and reload this page.')
+          return
+        }
+        const expired = /expired/i.test(String(data.error || ''))
         showError(
-          res.status === 404 ? 'Recording not found' : 'Could not load',
-          data.error || 'This share link may have been removed.',
+          expired
+            ? 'Link expired'
+            : res.status === 404
+              ? 'Recording not found'
+              : 'Could not load',
+          expired
+            ? 'Share links expire 30 days after they are created. Ask the owner to share it again.'
+            : data.error || 'This share link may have been removed.',
         )
         return
       }

@@ -23,6 +23,9 @@ final class CameraManager: ObservableObject {
     private var isConfigured = false
     private let sessionQueue = DispatchQueue(label: "com.mypipcam.session")
     private var deviceObservers: [NSObjectProtocol] = []
+    /// uniqueID of the device currently wired into `session`, so an activation
+    /// that changes nothing can skip the teardown/rebuild entirely.
+    private var configuredDeviceID: String?
 
     init() {
         authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -62,6 +65,14 @@ final class CameraManager: ObservableObject {
         )
         devices = discovery.devices
 
+        // A device that unplugged and came back keeps its uniqueID, so the
+        // "nothing changed" fast path in startSession would wrongly skip the
+        // rebuild the dead capture graph needs. Forget it while it is absent.
+        if let configured = configuredDeviceID,
+           !devices.contains(where: { $0.uniqueID == configured }) {
+            configuredDeviceID = nil
+        }
+
         if selectedDeviceID.isEmpty || !devices.contains(where: { $0.uniqueID == selectedDeviceID }) {
             if let obs = devices.first(where: { $0.localizedName.localizedCaseInsensitiveContains("OBS") }) {
                 selectedDeviceID = obs.uniqueID
@@ -99,7 +110,9 @@ final class CameraManager: ObservableObject {
         }
     }
 
-    func startSession() async {
+    /// - Parameter force: rebuild the capture graph even if it already runs the
+    ///   selected device (used when the device list changes underneath us).
+    func startSession(force: Bool = false) async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         authorizationStatus = status
 
@@ -115,6 +128,16 @@ final class CameraManager: ObservableObject {
 
         errorMessage = nil
         let deviceID = selectedDeviceID
+
+        // Tearing down and re-adding the input drops frames — the bubble goes
+        // black for a moment, which is visible to anyone capturing it (OBS).
+        // Every app activation calls in here, so no-op when nothing changed.
+        // `session.isRunning` is the authoritative check: the published
+        // `isRunning` can lag if the session stopped on its own.
+        if !force, isConfigured, configuredDeviceID == deviceID, session.isRunning {
+            return
+        }
+
         let session = self.session
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -140,6 +163,7 @@ final class CameraManager: ObservableObject {
                         self.errorMessage = "Couldn't open that camera. Is OBS Virtual Camera started?"
                         self.isRunning = false
                         self.isConfigured = false
+                        self.configuredDeviceID = nil
                     }
                     continuation.resume()
                     return
@@ -149,9 +173,11 @@ final class CameraManager: ObservableObject {
                 session.commitConfiguration()
                 session.startRunning()
 
+                let openedDeviceID = device.uniqueID
                 DispatchQueue.main.async {
                     self.isConfigured = true
                     self.isRunning = session.isRunning
+                    self.configuredDeviceID = session.isRunning ? openedDeviceID : nil
                     if !session.isRunning {
                         self.errorMessage = "Camera session failed to start."
                     }
@@ -163,7 +189,8 @@ final class CameraManager: ObservableObject {
 
     private func restartSessionIfNeeded() async {
         guard isConfigured || isRunning || authorizationStatus == .authorized else { return }
-        await startSession()
+        // The selected device just changed, so the running graph is stale.
+        await startSession(force: true)
     }
 
     func stopSession() {
@@ -173,6 +200,7 @@ final class CameraManager: ObservableObject {
             }
             DispatchQueue.main.async {
                 self.isRunning = false
+                self.configuredDeviceID = nil
             }
         }
     }

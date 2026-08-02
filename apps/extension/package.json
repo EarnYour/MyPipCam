@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "prepare-assets": "node scripts/prepare-assets.mjs",
-    "postinstall": "npm run prepare-assets",
+    "postinstall": "node scripts/prepare-assets.mjs --tolerant",
     "dev": "npm run prepare-assets && vite",
     "build": "npm run prepare-assets && tsc --noEmit && vite build && node scripts/verify-sw-no-dynamic-import.mjs",
     "preview": "vite preview"

@@ -59,7 +59,7 @@ struct CameraBubbleView: View {
         }
         .onChange(of: showControls) { _, expanded in
             if expanded {
-                Task { await microphone.ensureAccess() }
+                microphone.refreshWithoutPrompting()
                 dismissHelper.install(
                     isPopoverOpen: { showBorderPopover },
                     onDismiss: {
@@ -322,10 +322,7 @@ struct CameraBubbleView: View {
             }
             Divider()
             Button("Refresh Microphones") {
-                Task {
-                    await microphone.ensureAccess()
-                    microphone.refreshDevices()
-                }
+                microphone.refreshWithoutPrompting()
             }
             if microphone.needsMicrophonePermissionInSettings {
                 Button("Open Microphone Settings…") {
@@ -334,7 +331,7 @@ struct CameraBubbleView: View {
             }
         }
         .onAppear {
-            Task { await microphone.ensureAccess() }
+            microphone.refreshWithoutPrompting()
         }
 
         Button("Appearance…") {

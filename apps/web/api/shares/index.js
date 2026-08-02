@@ -9,6 +9,7 @@ import {
   readJson,
   serverError,
 } from '../_lib/supabase.js'
+import { rateLimit } from '../_lib/rateLimit.js'
 
 /**
  * GET  /api/shares?ids=a,b,c  — batch stats for Library
@@ -26,6 +27,7 @@ export default async function handler(req, res) {
     const supabase = getSupabase()
 
     if (req.method === 'GET') {
+      if (!rateLimit(req, res, 'shares-batch', 60)) return
       const idsParam = String(req.query?.ids || '')
       const ids = idsParam
         .split(',')
@@ -55,6 +57,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (!rateLimit(req, res, 'shares-create', 20)) return
       const body = await readJson(req)
       const recordingId = String(body.recordingId || '').trim()
       const driveFileId = body.driveFileId ? String(body.driveFileId).trim() : null

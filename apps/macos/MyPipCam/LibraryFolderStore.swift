@@ -150,14 +150,21 @@ final class LibraryFolderStore: ObservableObject {
         )
 
         if isStale {
-            let refreshed = try url.bookmarkData(
-                options: [.withSecurityScope],
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-            bookmarkData = refreshed
-            defaults.set(url.path, forKey: "libraryFolderDisplayPath")
-            displayPath = url.path
+            // Re-minting a security-scoped bookmark only works from inside the
+            // resolved URL's scope; without this the refresh throws and the
+            // stale bookmark is kept, so access dies for good on the next boot.
+            if url.startAccessingSecurityScopedResource() {
+                defer { url.stopAccessingSecurityScopedResource() }
+                if let refreshed = try? url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                ) {
+                    bookmarkData = refreshed
+                    defaults.set(url.path, forKey: "libraryFolderDisplayPath")
+                    displayPath = url.path
+                }
+            }
         }
 
         return url
@@ -257,27 +264,42 @@ final class LibraryFolderStore: ObservableObject {
         }
     }
 
-    /// Returns a file URL suitable for AVPlayer while holding scoped access
-    /// for the duration of playback setup. Caller should keep the store alive.
-    func scopedVideoURL(for id: String) throws -> URL {
+    /// Returns a file URL suitable for AVPlayer. The recording is copied into
+    /// the temp directory so AVPlayer can keep reading after scoped access ends.
+    ///
+    /// The copy runs off the main actor: recordings routinely run to hundreds of
+    /// megabytes, and doing this inline froze the whole UI until it finished.
+    func scopedVideoURL(for id: String) async throws -> URL {
         guard Self.isSafeRecordingID(id) else {
             throw LibraryFolderError.recordingNotFound(id)
         }
-        return try withScopedAccess { root in
-            let folder = try Self.recordingFolder(root: root, id: id)
-            guard let video = findVideo(in: folder) else {
+        let root = try resolveURL()
+
+        return try await Task.detached(priority: .userInitiated) {
+            guard root.startAccessingSecurityScopedResource() else {
+                throw LibraryFolderError.accessDenied
+            }
+            defer { root.stopAccessingSecurityScopedResource() }
+
+            let folder = try LibraryFolderStore.recordingFolder(root: root, id: id)
+            let fm = FileManager.default
+            let video: URL
+            if fm.fileExists(atPath: folder.appendingPathComponent("video.webm").path) {
+                video = folder.appendingPathComponent("video.webm")
+            } else if fm.fileExists(atPath: folder.appendingPathComponent("video.mp4").path) {
+                video = folder.appendingPathComponent("video.mp4")
+            } else {
                 throw LibraryFolderError.recordingNotFound(id)
             }
-            // Copy into a temporary file so AVPlayer can read after scoped access ends.
+
             let ext = video.pathExtension.isEmpty ? "mp4" : video.pathExtension
-            let temp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("mypipcam-\(id).\(ext)")
-            if FileManager.default.fileExists(atPath: temp.path) {
-                try? FileManager.default.removeItem(at: temp)
+            let temp = fm.temporaryDirectory.appendingPathComponent("mypipcam-\(id).\(ext)")
+            if fm.fileExists(atPath: temp.path) {
+                try? fm.removeItem(at: temp)
             }
-            try FileManager.default.copyItem(at: video, to: temp)
+            try fm.copyItem(at: video, to: temp)
             return temp
-        }
+        }.value
     }
 
     // MARK: - Internals
@@ -429,7 +451,9 @@ final class LibraryFolderStore: ObservableObject {
     }
 
     /// UUID-shaped recording folder names only — blocks path traversal segments.
-    static func isSafeRecordingID(_ id: String) -> Bool {
+    /// `nonisolated` so background file work can validate ids without hopping
+    /// back to the main actor.
+    nonisolated static func isSafeRecordingID(_ id: String) -> Bool {
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count == 36 else { return false }
         if trimmed.contains("/") || trimmed.contains("\\") || trimmed.contains("..") {
@@ -439,7 +463,7 @@ final class LibraryFolderStore: ObservableObject {
         return trimmed.range(of: pattern, options: .regularExpression) != nil
     }
 
-    static func recordingFolder(root: URL, id: String) throws -> URL {
+    nonisolated static func recordingFolder(root: URL, id: String) throws -> URL {
         guard isSafeRecordingID(id) else {
             throw LibraryFolderError.recordingNotFound(id)
         }

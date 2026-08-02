@@ -7,6 +7,7 @@ import {
   readJson,
   serverError,
 } from '../../_lib/supabase.js'
+import { rateLimit } from '../../_lib/rateLimit.js'
 
 /**
  * POST /api/shares/:id/view — record a watch-page open (counts as a view)
@@ -25,6 +26,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!rateLimit(req, res, 'share-view', 30)) return
+
     const id = String(req.query?.id || '').trim()
     if (!id || id.length < 8 || id.length > 64) {
       json(res, 400, { error: 'Invalid share id' })
@@ -50,11 +53,14 @@ export default async function handler(req, res) {
     })
 
     if (error) {
+      const msg = error.message || ''
       const notFound =
-        /share not found|invalid share/i.test(error.message || '') ||
+        /share not found|invalid share|share expired/i.test(msg) ||
         error.code === 'P0001'
       if (notFound) {
-        json(res, 404, { error: 'Share not found' })
+        json(res, 404, {
+          error: /expired/i.test(msg) ? 'Share link expired' : 'Share not found',
+        })
         return
       }
       serverError(res, 'record view failed', error)

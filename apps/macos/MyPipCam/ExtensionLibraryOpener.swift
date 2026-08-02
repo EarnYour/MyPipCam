@@ -19,8 +19,12 @@ enum ExtensionLibraryOpener {
 
     /// Resolves which extension ID to use, in order:
     /// 1. UserDefaults override (`chromeExtensionId`)
-    /// 2. Auto-detected install under Chromium profiles (name match)
-    /// 3. Stable ID from the packed manifest `key`
+    /// 2. Stable ID from the packed manifest `key`
+    ///
+    /// Deliberately does not go looking through browser profile directories:
+    /// that meant reading the manifest of every extension the user has in every
+    /// Chromium-family browser, which is a lot of snooping to save one paste.
+    /// When the ID differs, “Set Extension ID…” handles it.
     static func resolveExtensionID(preferred: String? = nil) -> String {
         if let preferred {
             let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,10 +38,6 @@ enum ExtensionLibraryOpener {
             if !trimmed.isEmpty {
                 return sanitizedExtensionID(trimmed)
             }
-        }
-
-        if let detected = detectInstalledExtensionID() {
-            return detected
         }
 
         return defaultExtensionID
@@ -98,7 +98,7 @@ enum ExtensionLibraryOpener {
         field.placeholderString = "e.g. \(defaultExtensionID)"
         field.stringValue = UserDefaults.standard.string(forKey: extensionIdDefaultsKey) ?? ""
         if field.stringValue.isEmpty {
-            field.stringValue = detectInstalledExtensionID() ?? defaultExtensionID
+            field.stringValue = defaultExtensionID
         }
         alert.accessoryView = field
 
@@ -136,9 +136,12 @@ enum ExtensionLibraryOpener {
         openChromeExtensionsPage()
         revealExtensionDistInFinder()
 
-        let detected = detectInstalledExtensionID()
-        let idLine = detected.map { "Detected installed ID: \($0)" }
-            ?? "Default (manifest key) ID: \(defaultExtensionID)"
+        let configured = UserDefaults.standard.string(forKey: extensionIdDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveID = (configured?.isEmpty == false) ? configured! : defaultExtensionID
+        let idLine = (configured?.isEmpty == false)
+            ? "Configured extension ID: \(effectiveID)"
+            : "Default (manifest key) ID: \(defaultExtensionID)"
 
         let alert = NSAlert()
         alert.messageText = "Install MyPipCam Chrome Extension"
@@ -153,7 +156,7 @@ enum ExtensionLibraryOpener {
 
         \(idLine)
         Library path: \(libraryPath)
-        Example URL: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
+        Example URL: chrome-extension://\(effectiveID)/\(libraryPath)
 
         Use Open in Chrome… for the editor/transcription UI. If that page fails, use Set Extension ID… and paste the ID from chrome://extensions.
         """
@@ -163,81 +166,6 @@ enum ExtensionLibraryOpener {
         if alert.runModal() == .alertSecondButtonReturn {
             promptForExtensionID(reason: .manual, thenOpen: true)
         }
-    }
-
-    // MARK: - Detection
-
-    /// Scans Chromium-family profile Extension folders for a manifest named MyPipCam.
-    static func detectInstalledExtensionID() -> String? {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        let support = home.appendingPathComponent("Library/Application Support")
-
-        let roots: [URL] = [
-            support.appendingPathComponent("Google/Chrome"),
-            support.appendingPathComponent("Google/Chrome Canary"),
-            support.appendingPathComponent("Google/Chrome Beta"),
-            support.appendingPathComponent("Chromium"),
-            support.appendingPathComponent("BraveSoftware/Brave-Browser"),
-            support.appendingPathComponent("Microsoft Edge"),
-            support.appendingPathComponent("Arc/User Data"),
-            support.appendingPathComponent("Vivaldi"),
-        ]
-
-        var found: [String] = []
-
-        for root in roots {
-            guard let profiles = try? fm.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-
-            for profile in profiles {
-                let extensionsDir = profile.appendingPathComponent("Extensions")
-                guard let ids = try? fm.contentsOfDirectory(
-                    at: extensionsDir,
-                    includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles]
-                ) else { continue }
-
-                for idDir in ids {
-                    let candidateID = idDir.lastPathComponent.lowercased()
-                    guard isValidExtensionID(candidateID) else { continue }
-                    if extensionDirectoryMatches(idDir) {
-                        found.append(candidateID)
-                    }
-                }
-            }
-        }
-
-        // Prefer the stable key ID when both that and an older unpacked ID exist.
-        if found.contains(defaultExtensionID) {
-            return defaultExtensionID
-        }
-        return found.first
-    }
-
-    private static func extensionDirectoryMatches(_ idDir: URL) -> Bool {
-        let fm = FileManager.default
-        guard let versions = try? fm.contentsOfDirectory(
-            at: idDir,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else { return false }
-
-        for version in versions {
-            let manifestURL = version.appendingPathComponent("manifest.json")
-            guard let data = try? Data(contentsOf: manifestURL),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let name = json["name"] as? String
-            else { continue }
-
-            if name.caseInsensitiveCompare(extensionDisplayName) == .orderedSame {
-                return true
-            }
-        }
-        return false
     }
 
     // MARK: - Browser

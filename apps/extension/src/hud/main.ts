@@ -10,7 +10,7 @@ const errEl = document.getElementById('err') as HTMLDivElement
 const stopBtn = document.getElementById('stop') as HTMLButtonElement
 const discardBtn = document.getElementById('discard') as HTMLButtonElement
 
-let phase: 'countdown' | 'recording' | 'paused' | 'idle' = 'countdown'
+let phase: 'countdown' | 'recording' | 'paused' | 'idle' = 'idle'
 let countdownLeft = 3
 let countdownTimer: number | null = null
 let recordingStartedAt = 0
@@ -54,6 +54,12 @@ async function syncFromBackground() {
       phase?: string | null
     } | null
     if (!res?.recording) {
+      if (countdownTimer != null) {
+        window.clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+      phase = 'idle'
+      countEl.classList.add('is-hidden')
       statusEl.textContent = 'No active capture'
       return
     }
@@ -130,5 +136,8 @@ chrome.runtime.onMessage.addListener((message) => {
 })
 
 console.log('[MyPipCam][start] fallback HUD opened')
-beginLocalCountdown()
+// Don't start a local countdown until the background confirms the phase — an
+// unconditional one here would fire LOOM_COUNTDOWN_DONE into a session that is
+// already recording (double-commit) or has no active capture at all.
+statusEl.textContent = 'Connecting…'
 void syncFromBackground()

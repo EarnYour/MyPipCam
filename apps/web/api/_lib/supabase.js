@@ -103,6 +103,8 @@ export function mapShare(row) {
     createdAt: row.created_at,
     viewCount: row.view_count ?? 0,
     lastViewedAt: row.last_viewed_at ?? null,
+    // Only present when the endpoint selects it; JSON drops undefined.
+    expiresAt: row.expires_at ?? undefined,
     watchUrl: `https://mypipcam.earnyour.com/w/${row.id}`,
   }
 }

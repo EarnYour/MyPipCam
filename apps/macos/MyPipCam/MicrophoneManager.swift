@@ -71,8 +71,19 @@ final class MicrophoneManager: ObservableObject {
         }
     }
 
+    /// Refreshes the device list without ever showing the system mic prompt.
+    /// Use when simply opening a menu: this app never captures audio, so a
+    /// permission dialog raised by hovering the controls looks like spyware.
+    func refreshWithoutPrompting() {
+        authorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if authorizationStatus == .authorized {
+            errorMessage = nil
+        }
+        refreshDevices()
+    }
+
     /// Prompts for mic access when status is `.notDetermined` so device labels appear.
-    /// Call when the user opens the Microphone menu or picks a device.
+    /// Call ONLY from an explicit user action that selects a microphone.
     func ensureAccess() async {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         authorizationStatus = status
