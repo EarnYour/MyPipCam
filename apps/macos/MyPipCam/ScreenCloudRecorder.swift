@@ -1,14 +1,15 @@
 import AVFoundation
 import AppKit
 import Combine
+import CoreGraphics
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
+import Security
 
 enum CloudCaptureTarget: String, CaseIterable, Identifiable {
     case screen
     case window
-    case tab
 
     var id: String { rawValue }
 
@@ -16,14 +17,6 @@ enum CloudCaptureTarget: String, CaseIterable, Identifiable {
         switch self {
         case .screen: return "Screen"
         case .window: return "Window"
-        case .tab: return "Tab"
-        }
-    }
-
-    var isAvailable: Bool {
-        switch self {
-        case .screen, .window: return true
-        case .tab: return false
         }
     }
 }
@@ -59,18 +52,105 @@ enum ScreenCloudRecorderError: LocalizedError {
     case writerFailed(String)
     case startFailed(String)
 
+    /// User-facing guidance when Screen Recording TCC is missing or stale (common after reinstall).
+    static let permissionHelpText = """
+    macOS blocked display/window capture for this copy of MyPipCam.
+
+    System Settings may still show MyPipCam as allowed after a reinstall — that grant often belongs to an older app signature.
+
+    Fix:
+    1. Open Screen Recording settings
+    2. Turn MyPipCam OFF, then ON again
+    3. Fully quit MyPipCam (menu bar icon → Quit)
+    4. Reopen the app and try Record again
+    """
+
     var errorDescription: String? {
         switch self {
         case .noDisplay: return "No display available to capture."
         case .noWindow: return "Select a window to capture."
-        case .permissionDenied:
-            return "Screen Recording permission is required. Enable MyPipCam in System Settings → Privacy & Security → Screen Recording."
+        case .permissionDenied: return Self.permissionHelpText
         case .unsupported: return "That capture mode isn’t available here."
         case .alreadyRecording: return "A recording is already in progress."
         case .notRecording: return "Nothing is recording."
         case .writerFailed(let detail): return detail
         case .startFailed(let detail): return detail
         }
+    }
+
+    static func isScreenCaptureTCCError(_ error: Error) -> Bool {
+        if let err = error as? ScreenCloudRecorderError, case .permissionDenied = err {
+            return true
+        }
+        let ns = error as NSError
+        let blob = "\(ns.domain) \(ns.code) \(ns.localizedDescription) \(ns.localizedFailureReason ?? "")"
+            .lowercased()
+        if blob.contains("declined tcc") { return true }
+        if blob.contains("tcc") && (blob.contains("screen") || blob.contains("display") || blob.contains("capture")) {
+            return true
+        }
+        if blob.contains("screen recording") && (blob.contains("denied") || blob.contains("not authorized") || blob.contains("permission")) {
+            return true
+        }
+        // ScreenCaptureKit commonly surfaces these under SCStreamError / NSOSStatusError.
+        if ns.domain.contains("ScreenCaptureKit") || ns.domain.contains("SCStream") {
+            // -3801 and nearby codes often mean user declined / missing screen capture TCC.
+            if (-3900 ... -3800).contains(ns.code) { return true }
+        }
+        return false
+    }
+
+    static func mapCaptureError(_ error: Error) -> Error {
+        if isScreenCaptureTCCError(error) { return ScreenCloudRecorderError.permissionDenied }
+        return error
+    }
+}
+
+/// Tracks code-signing identity so we can warn after reinstalls invalidate Screen Recording TCC.
+enum ScreenCaptureSigningIdentity {
+    private static let defaultsKey = "mypipcam.lastScreenCaptureSigningIdentity"
+
+    /// Stable fingerprint of the running binary (CDHash when available).
+    static func current() -> String {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else {
+            return fallbackIdentity()
+        }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(rawValue: 0), &staticCode) == errSecSuccess,
+              let staticCode
+        else {
+            return fallbackIdentity()
+        }
+        var infoCF: CFDictionary?
+        let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        guard SecCodeCopySigningInformation(staticCode, flags, &infoCF) == errSecSuccess,
+              let info = infoCF as? [String: Any]
+        else {
+            return fallbackIdentity()
+        }
+        if let unique = info[kSecCodeInfoUnique as String] as? Data {
+            return unique.base64EncodedString()
+        }
+        let team = info[kSecCodeInfoTeamIdentifier as String] as? String ?? ""
+        return "\(team)|\(Bundle.main.bundlePath)"
+    }
+
+    private static func fallbackIdentity() -> String {
+        let path = Bundle.main.bundlePath
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        return "\(path)|\(mtime)"
+    }
+
+    /// Returns true when this launch’s binary identity differs from the last recorded one.
+    @discardableResult
+    static func detectIdentityChange() -> Bool {
+        let current = current()
+        let previous = UserDefaults.standard.string(forKey: defaultsKey)
+        UserDefaults.standard.set(current, forKey: defaultsKey)
+        guard let previous, !previous.isEmpty else { return false }
+        return previous != current
     }
 }
 
@@ -80,6 +160,10 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedSeconds: TimeInterval = 0
     @Published var errorMessage: String?
+    /// True when ScreenCaptureKit rejected capture (TCC missing/stale), even if Settings looks enabled.
+    @Published private(set) var needsScreenRecordingPermission = false
+    /// True after a reinstall / code-signature change until capture succeeds again.
+    @Published private(set) var signingIdentityChanged = false
 
     @Published private(set) var displays: [CapturableDisplay] = []
     @Published private(set) var windows: [CapturableWindow] = []
@@ -97,12 +181,18 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     private let sampleQueue = DispatchQueue(label: "com.mypipcam.desktop-recorder.samples")
     private var excludeWindowIDs: [CGWindowID] = []
 
+    func noteLaunchIdentity() {
+        if ScreenCaptureSigningIdentity.detectIdentityChange() {
+            signingIdentityChanged = true
+            // Preflight can stay true for a stale TCC row; force a real SCK probe later.
+            needsScreenRecordingPermission = false
+        }
+    }
+
     func refreshShareableContent() async {
+        _ = ensureScreenCaptureAccess()
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(
-                false,
-                onScreenWindowsOnly: true
-            )
+            let content = try await fetchShareableContent()
             displays = content.displays.map { display in
                 let name: String
                 if let screen = NSScreen.screens.first(where: {
@@ -138,25 +228,59 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 }
                 .sorted { $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending }
             errorMessage = nil
+            needsScreenRecordingPermission = false
+            signingIdentityChanged = false
         } catch {
-            errorMessage = error.localizedDescription
+            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
+                needsScreenRecordingPermission = true
+                errorMessage = ScreenCloudRecorderError.permissionHelpText
+            } else {
+                needsScreenRecordingPermission = false
+                errorMessage = mapped.localizedDescription
+            }
             displays = []
             windows = []
         }
     }
 
+    /// Triggers the system Screen Recording prompt when needed.
+    /// Note: after reinstall, `CGPreflightScreenCaptureAccess()` can return true for a stale TCC
+    /// entry while ScreenCaptureKit still declines — always follow with `refreshShareableContent()`.
+    @discardableResult
     func ensureScreenCaptureAccess() -> Bool {
         if CGPreflightScreenCaptureAccess() { return true }
-        return CGRequestScreenCaptureAccess()
+        let granted = CGRequestScreenCaptureAccess()
+        if !granted {
+            needsScreenRecordingPermission = true
+        }
+        return granted
+    }
+
+    /// True only after a successful SCShareableContent fetch in this session.
+    var hasVerifiedScreenCaptureAccess: Bool {
+        !needsScreenRecordingPermission && (!displays.isEmpty || errorMessage == nil)
     }
 
     static func openScreenRecordingSettings() {
         let candidates = [
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-            "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_ScreenCapture"
+            "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         ]
         for string in candidates {
             if let url = URL(string: string), NSWorkspace.shared.open(url) { return }
+        }
+    }
+
+    private func fetchShareableContent() async throws -> SCShareableContent {
+        do {
+            return try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: true
+            )
+        } catch {
+            throw ScreenCloudRecorderError.mapCaptureError(error)
         }
     }
 
@@ -170,23 +294,30 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     ) async throws -> URL {
         guard !isRecording else { throw ScreenCloudRecorderError.alreadyRecording }
         guard ensureScreenCaptureAccess() else {
+            needsScreenRecordingPermission = true
             throw ScreenCloudRecorderError.permissionDenied
         }
 
         self.excludeWindowIDs = excludeWindowIDs
 
-        let content = try await SCShareableContent.excludingDesktopWindows(
-            false,
-            onScreenWindowsOnly: true
-        )
+        let content: SCShareableContent
+        do {
+            content = try await fetchShareableContent()
+            needsScreenRecordingPermission = false
+            signingIdentityChanged = false
+        } catch {
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(error) {
+                needsScreenRecordingPermission = true
+                throw ScreenCloudRecorderError.permissionDenied
+            }
+            throw error
+        }
 
         let filter: SCContentFilter
         let width: Int
         let height: Int
 
         switch target {
-        case .tab:
-            throw ScreenCloudRecorderError.unsupported
         case .screen:
             guard
                 let display = content.displays.first(where: { $0.displayID == displayID })
@@ -229,24 +360,32 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         }
         outputURL = url
 
-        if #available(macOS 15.0, *) {
-            try await startWithRecordingOutput(
-                filter: filter,
-                width: width,
-                height: height,
-                outputURL: url,
-                microphoneDeviceID: microphoneDeviceID,
-                includeSystemAudio: includeSystemAudio
-            )
-        } else {
-            try await startWithAssetWriter(
-                filter: filter,
-                width: width,
-                height: height,
-                outputURL: url,
-                microphoneDeviceID: microphoneDeviceID,
-                includeSystemAudio: includeSystemAudio
-            )
+        do {
+            if #available(macOS 15.0, *) {
+                try await startWithRecordingOutput(
+                    filter: filter,
+                    width: width,
+                    height: height,
+                    outputURL: url,
+                    microphoneDeviceID: microphoneDeviceID,
+                    includeSystemAudio: includeSystemAudio
+                )
+            } else {
+                try await startWithAssetWriter(
+                    filter: filter,
+                    width: width,
+                    height: height,
+                    outputURL: url,
+                    microphoneDeviceID: microphoneDeviceID,
+                    includeSystemAudio: includeSystemAudio
+                )
+            }
+        } catch {
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(error) {
+                needsScreenRecordingPermission = true
+                throw ScreenCloudRecorderError.permissionDenied
+            }
+            throw error
         }
 
         startedAt = Date()
@@ -498,7 +637,13 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
 extension ScreenCloudRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            self.errorMessage = error.localizedDescription
+            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
+                self.needsScreenRecordingPermission = true
+                self.errorMessage = ScreenCloudRecorderError.permissionHelpText
+            } else {
+                self.errorMessage = mapped.localizedDescription
+            }
             self.isRecording = false
         }
     }

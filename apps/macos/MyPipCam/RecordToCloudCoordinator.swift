@@ -83,6 +83,7 @@ final class RecordToCloudCoordinator: ObservableObject {
 
         Task {
             await microphone.ensureAccess()
+            recorder.noteLaunchIdentity()
             _ = recorder.ensureScreenCaptureAccess()
             await recorder.refreshShareableContent()
         }
@@ -140,9 +141,11 @@ final class RecordToCloudCoordinator: ObservableObject {
             lastStatusMessage = nil
         } catch {
             hideHUD()
-            presentAlert(title: "Couldn’t Start Recording", message: error.localizedDescription)
-            if let err = error as? ScreenCloudRecorderError, case .permissionDenied = err {
-                ScreenCloudRecorder.openScreenRecordingSettings()
+            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
+                presentScreenRecordingHelp()
+            } else {
+                presentAlert(title: "Couldn’t Start Recording", message: mapped.localizedDescription)
             }
         }
     }
@@ -255,6 +258,25 @@ final class RecordToCloudCoordinator: ObservableObject {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func presentScreenRecordingHelp() {
+        let alert = NSAlert()
+        alert.messageText = "Screen Recording Permission Needed"
+        alert.informativeText = ScreenCloudRecorderError.permissionHelpText
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Screen Recording Settings")
+        alert.addButton(withTitle: "Quit MyPipCam")
+        alert.addButton(withTitle: "OK")
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            ScreenCloudRecorder.openScreenRecordingSettings()
+        case .alertSecondButtonReturn:
+            NSApp.terminate(nil)
+        default:
+            break
+        }
     }
 }
 
