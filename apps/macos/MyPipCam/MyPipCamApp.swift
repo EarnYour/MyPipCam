@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // Detect reinstall / new code signature so Record can guide Screen Recording re-grant.
+        RecordToCloudCoordinator.shared.recorder.noteLaunchIdentity()
+
         let bubble = CameraBubbleController(loginItem: loginItem)
         bubbleController = bubble
         bubble.show()
@@ -28,7 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             loginItem: loginItem,
             settings: bubble.settings,
             libraryStore: .shared,
+            isBubbleVisible: { bubble.isBubbleVisible },
             onShowBubble: { bubble.showAgain() },
+            onHideBubble: { bubble.hideBubble() },
             onQuit: { bubble.quit() }
         )
         statusItemController?.install()
