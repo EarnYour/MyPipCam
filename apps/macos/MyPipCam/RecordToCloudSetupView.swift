@@ -90,25 +90,40 @@ struct RecordToCloudSetupView: View {
     private var screenRecordingPermissionBanner: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(
-                recorder.signingIdentityChanged && !recorder.needsScreenRecordingPermission
+                ScreenRecordingPermission.shared.status == .grantedPendingRelaunch
+                    ? "Quit & Relaunch required"
+                    : recorder.signingIdentityChanged && !recorder.needsScreenRecordingPermission
                     ? "App was reinstalled — confirm Screen Recording"
                     : "Screen Recording permission needed"
             )
             .font(.system(size: 13, weight: .semibold))
             Text(
-                recorder.needsScreenRecordingPermission
-                    ? "macOS declined capture for this copy of MyPipCam. Quit the app, click Record again, and click Allow on the system dialog (a Settings toggle alone is often not enough)."
-                    : "Developer-signed rebuilds often need a fresh Allow. Click Record and accept the system Screen Recording dialog, or remove MyPipCam from Screen Recording settings and try again."
+                ScreenRecordingPermission.shared.status == .grantedPendingRelaunch
+                    ? ScreenCloudRecorderError.relaunchHelpText
+                    : recorder.needsScreenRecordingPermission
+                    ? "On this macOS, Screen Recording often has no Allow sheet. Enable MyPipCam under Screen & System Audio Recording, then Quit & Relaunch before Record will work."
+                    : "Developer-signed rebuilds need Screen Recording re-enabled in Settings, then a full Quit & Relaunch."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            if let diag = recorder.lastFailureDiagnostic {
+                Text(diag)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
             HStack(spacing: 10) {
-                Button("Open Screen Recording Settings…") {
+                Button("Quit & Relaunch") {
+                    ScreenRecordingPermission.shared.relaunch()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Open Settings…") {
                     ScreenCloudRecorder.openScreenRecordingSettings()
                 }
                 Button("Recheck") {
                     Task {
+                        ScreenRecordingPermission.shared.refresh()
                         _ = recorder.ensureScreenCaptureAccess()
                         await recorder.refreshShareableContent()
                     }

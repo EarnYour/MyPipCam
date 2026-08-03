@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         // Detect reinstall / new code signature so Record can guide Screen Recording re-grant.
         RecordToCloudCoordinator.shared.recorder.noteLaunchIdentity()
+        // Seed relaunch-aware Screen Recording state (preflight at process start).
+        ScreenRecordingPermission.shared.refresh()
 
         // Copy LoomCam sandbox prefs into MyPipCam before settings managers read them.
         LegacySettingsMigration.migrateIfNeeded()

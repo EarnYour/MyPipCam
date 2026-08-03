@@ -142,10 +142,15 @@ final class RecordToCloudCoordinator: ObservableObject {
         } catch {
             hideHUD()
             let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            let diag = recorder.lastFailureDiagnostic
+                ?? ScreenCloudRecorderError.diagnosticSummary(error)
             if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
-                presentScreenRecordingHelp()
+                presentScreenRecordingHelp(diagnostic: diag)
             } else {
-                presentAlert(title: "Couldn’t Start Recording", message: mapped.localizedDescription)
+                presentAlert(
+                    title: "Couldn’t Start Recording",
+                    message: "\(mapped.localizedDescription)\n\n(\(diag))"
+                )
             }
         }
     }
@@ -261,25 +266,37 @@ final class RecordToCloudCoordinator: ObservableObject {
         alert.runModal()
     }
 
-    private func presentScreenRecordingHelp() {
-        // Kick the APIs that can surface a fresh system Allow dialog before we send the user to Settings.
-        _ = recorder.ensureScreenCaptureAccess()
-        Task { await recorder.refreshShareableContent() }
+    private func presentScreenRecordingHelp(diagnostic: String? = nil) {
+        let perm = ScreenRecordingPermission.shared
+        perm.refresh()
+        perm.requestPermission()
+        perm.startPolling()
 
         let alert = NSAlert()
-        alert.messageText = "Screen Recording Permission Needed"
-        alert.informativeText = ScreenCloudRecorderError.permissionHelpText
+        let pendingRelaunch = perm.status == .grantedPendingRelaunch
+        alert.messageText = pendingRelaunch
+            ? "Quit & Relaunch Required"
+            : "Screen Recording Permission Needed"
+        var body = pendingRelaunch
+            ? ScreenCloudRecorderError.relaunchHelpText
+            : ScreenCloudRecorderError.permissionHelpText
+        if let diagnostic, !diagnostic.isEmpty {
+            body += "\n\nTechnical detail: \(diagnostic)"
+        }
+        alert.informativeText = body
         alert.alertStyle = .warning
+        // Primary action is always relaunch — Settings toggle alone never activates SCK mid-session.
+        alert.addButton(withTitle: "Quit & Relaunch")
         alert.addButton(withTitle: "Open Screen Recording Settings")
-        alert.addButton(withTitle: "Quit MyPipCam")
         alert.addButton(withTitle: "Try Again")
         alert.addButton(withTitle: "OK")
         let response = alert.runModal()
+        perm.stopPolling()
         switch response {
         case .alertFirstButtonReturn:
-            ScreenCloudRecorder.openScreenRecordingSettings()
+            perm.relaunch()
         case .alertSecondButtonReturn:
-            NSApp.terminate(nil)
+            ScreenCloudRecorder.openScreenRecordingSettings()
         case .alertThirdButtonReturn:
             presentSetup()
         default:

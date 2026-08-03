@@ -6,7 +6,12 @@
 	<true/>
 	<key>com.apple.security.device.camera</key>
 	<true/>
+	<!-- Sandbox microphone capability -->
 	<key>com.apple.security.device.microphone</key>
+	<true/>
+	<!-- Hardened Runtime microphone TCC (required when ENABLE_HARDENED_RUNTIME=YES;
+	     without this, tccd logs "Policy disallows prompt" for kTCCServiceMicrophone). -->
+	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>

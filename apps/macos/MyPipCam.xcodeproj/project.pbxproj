@@ -25,6 +25,7 @@
 		A10000000000000000000011 /* RecordToCloudCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* RecordToCloudCoordinator.swift */; };
 		A10000000000000000000012 /* RecordToCloudSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* RecordToCloudSetupView.swift */; };
 		A10000000000000000000013 /* LegacySettingsMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* LegacySettingsMigration.swift */; };
+		A10000000000000000000014 /* ScreenRecordingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* ScreenRecordingPermission.swift */; };
 		A10000000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -47,6 +48,7 @@
 		A20000000000000000000014 /* RecordToCloudCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordToCloudCoordinator.swift; sourceTree = "<group>"; };
 		A20000000000000000000015 /* RecordToCloudSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordToCloudSetupView.swift; sourceTree = "<group>"; };
 		A20000000000000000000016 /* LegacySettingsMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySettingsMigration.swift; sourceTree = "<group>"; };
+		A20000000000000000000017 /* ScreenRecordingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecordingPermission.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000A /* MyPipCam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MyPipCam.entitlements; sourceTree = "<group>"; };
@@ -93,6 +95,7 @@
 				A20000000000000000000014 /* RecordToCloudCoordinator.swift */,
 				A20000000000000000000015 /* RecordToCloudSetupView.swift */,
 				A20000000000000000000016 /* LegacySettingsMigration.swift */,
+				A20000000000000000000017 /* ScreenRecordingPermission.swift */,
 				A20000000000000000000008 /* Assets.xcassets */,
 				A20000000000000000000009 /* Info.plist */,
 				A2000000000000000000000A /* MyPipCam.entitlements */,
@@ -195,6 +198,7 @@
 				A10000000000000000000011 /* RecordToCloudCoordinator.swift in Sources */,
 				A10000000000000000000012 /* RecordToCloudSetupView.swift in Sources */,
 				A10000000000000000000013 /* LegacySettingsMigration.swift in Sources */,
+				A10000000000000000000014 /* ScreenRecordingPermission.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +246,7 @@
 				CODE_SIGN_ENTITLEMENTS = MyPipCam/MyPipCam.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = 977CN6XFAH;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -252,7 +256,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.11;
+				MARKETING_VERSION = 1.1.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stevenmartinez.MyPipCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -268,7 +272,7 @@
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = 977CN6XFAH;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -278,7 +282,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.1.11;
+				MARKETING_VERSION = 1.1.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stevenmartinez.MyPipCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
