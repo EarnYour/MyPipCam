@@ -157,14 +157,31 @@ export function isCaptureQuality(value: unknown): value is CaptureQuality {
 }
 
 export function normalizeCaptureQuality(value: unknown): CaptureQuality {
-  return isCaptureQuality(value) ? value : '4k'
+  return isCaptureQuality(value) ? value : '1080p'
 }
 
 export function captureQualitySize(quality: CaptureQuality): { width: number; height: number } {
   const preset = CAPTURE_QUALITY_OPTIONS.find((o) => o.id === quality)
   return preset
     ? { width: preset.width, height: preset.height }
-    : { width: 3840, height: 2160 }
+    : { width: 1920, height: 1080 }
+}
+
+/**
+ * Target MediaRecorder video bitrate by capture quality.
+ * Screen capture needs more bits than typical webcam encodes at the same resolution.
+ */
+export const CAPTURE_QUALITY_VIDEO_BITRATE: Record<CaptureQuality, number> = {
+  '720p': 3_500_000,
+  '1080p': 10_000_000,
+  '1440p': 16_000_000,
+  '4k': 28_000_000,
+}
+
+export const CAPTURE_AUDIO_BITRATE = 128_000
+
+export function captureQualityVideoBitrate(quality: CaptureQuality): number {
+  return CAPTURE_QUALITY_VIDEO_BITRATE[quality] ?? CAPTURE_QUALITY_VIDEO_BITRATE['1080p']
 }
 
 /** Border thickness presets (CSS px) shown in Effects / overlay / advanced recorder. */
@@ -211,7 +228,7 @@ export const DEFAULT_PIP_SETTINGS: PipSettings = {
   cameraFilter: 'none',
   openLibraryOnFinish: true,
   captureCursor: true,
-  captureQuality: '4k',
+  captureQuality: '1080p',
 }
 
 /** Corner radius as a fraction of bubble side length (square shape). */

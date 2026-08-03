@@ -1,9 +1,12 @@
 import {
+  CAPTURE_AUDIO_BITRATE,
   canvasBorderLineWidth,
   captureQualitySize,
+  captureQualityVideoBitrate,
   cursorCaptureConstraint,
   normalizeCaptureQuality,
   type BubbleShape,
+  type CaptureQuality,
   type PipSettings,
 } from '../shared/types'
 import { SQUARE_CORNER_FRACTION } from '../shared/types'
@@ -393,13 +396,29 @@ export function stopStreams(bundle: CaptureBundle | null) {
   for (const track of bundle.canvasStream.getTracks()) track.stop()
 }
 
-export function createRecorder(stream: MediaStream): {
+export function createRecorder(
+  stream: MediaStream,
+  quality: CaptureQuality = '1080p',
+): {
   recorder: MediaRecorder
   mimeType: string
   chunks: Blob[]
 } {
   const mimeType = pickMimeType()
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 5_000_000 } : undefined)
+  const videoBitsPerSecond = captureQualityVideoBitrate(normalizeCaptureQuality(quality))
+  const recorder = new MediaRecorder(
+    stream,
+    mimeType
+      ? {
+          mimeType,
+          videoBitsPerSecond,
+          audioBitsPerSecond: CAPTURE_AUDIO_BITRATE,
+        }
+      : {
+          videoBitsPerSecond,
+          audioBitsPerSecond: CAPTURE_AUDIO_BITRATE,
+        },
+  )
   const chunks: Blob[] = []
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data)

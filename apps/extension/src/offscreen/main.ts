@@ -26,7 +26,9 @@ import {
 } from '../shared/liveTrimMedia'
 import { preferredMimeType } from '../recorder/capture'
 import {
+  CAPTURE_AUDIO_BITRATE,
   captureQualitySize,
+  captureQualityVideoBitrate,
   cursorCaptureConstraint,
   normalizeCaptureQuality,
   type CaptureQuality,
@@ -44,7 +46,7 @@ type PrepareMessage = {
   cameraFilter?: CameraFilterId | string | null
   /** Include mouse cursor in tab capture (default true). Not camera PiP. */
   captureCursor?: boolean
-  /** Tab/screen capture resolution preset (default 4k). Not camera PiP. */
+  /** Tab/screen capture resolution preset (default 1080p). Not camera PiP. */
   captureQuality?: CaptureQuality | string | null
   /** When true (legacy OFFSCREEN_START), start MediaRecorder immediately. */
   commit?: boolean
@@ -62,6 +64,8 @@ let micStream: MediaStream | null = null
 let mixedStream: MediaStream | null = null
 let audioCtx: AudioContext | null = null
 let prepared = false
+/** Quality chosen at prepare — drives MediaRecorder bitrate on commit. */
+let activeCaptureQuality: CaptureQuality = '1080p'
 let paused = false
 let pausedAccumMs = 0
 let pauseStartedAt = 0
@@ -471,6 +475,7 @@ async function prepareRecording(msg: PrepareMessage) {
 
   const mode: RecordMode = msg.recordMode || 'screen-cam'
   const wantMic = msg.includeMic !== false
+  activeCaptureQuality = normalizeCaptureQuality(msg.captureQuality)
 
   if (mode === 'cam') {
     // Cam-only: camera must succeed. Pre-grant from the popup (Allow camera) so
@@ -497,9 +502,11 @@ async function prepareRecording(msg: PrepareMessage) {
     // Tab first — streamId expires in seconds; never delay it behind mic/cam.
     if (!msg.streamId) throw new Error('Missing tab stream id (tabCapture token expired or not granted)')
     const captureCursor = msg.captureCursor !== false
-    const captureQuality = normalizeCaptureQuality(msg.captureQuality)
     try {
-      tabStream = await acquireTabStream(msg.streamId, { captureCursor, captureQuality })
+      tabStream = await acquireTabStream(msg.streamId, {
+        captureCursor,
+        captureQuality: activeCaptureQuality,
+      })
     } catch (err) {
       throw new Error(
         errDetail(
@@ -554,12 +561,20 @@ async function startRecorder(opts?: { continueSession?: boolean }) {
   pausedAccumMs = 0
   pauseStartedAt = 0
   rewindUiOpen = false
+  const videoBitsPerSecond = captureQualityVideoBitrate(activeCaptureQuality)
   try {
     recorder = new MediaRecorder(
       mixedStream,
       mimeType
-        ? { mimeType, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 128_000 }
-        : { videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 128_000 },
+        ? {
+            mimeType,
+            videoBitsPerSecond,
+            audioBitsPerSecond: CAPTURE_AUDIO_BITRATE,
+          }
+        : {
+            videoBitsPerSecond,
+            audioBitsPerSecond: CAPTURE_AUDIO_BITRATE,
+          },
     )
   } catch (err) {
     throw new Error(errDetail(err, 'MediaRecorder could not start with this stream'))

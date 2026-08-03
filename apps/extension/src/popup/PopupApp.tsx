@@ -218,7 +218,7 @@ export function PopupApp() {
   const [borderColor, setBorderColor] = useState('#ffffff')
   const [borderWidth, setBorderWidth] = useState(3)
   const [captureCursor, setCaptureCursor] = useState(true)
-  const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('4k')
+  const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('1080p')
   const [effectsOpen, setEffectsOpen] = useState(false)
   const [micDeviceId, setMicDeviceId] = useState('')
   const [cameraDeviceId, setCameraDeviceId] = useState('')

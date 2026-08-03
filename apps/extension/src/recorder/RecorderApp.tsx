@@ -190,7 +190,10 @@ export function RecorderApp() {
       setDisplaySurface(started.displaySurface)
       setBubbleTick((n) => n + 1)
 
-      const { recorder, mimeType, chunks } = createRecorder(started.bundle.canvasStream)
+      const { recorder, mimeType, chunks } = createRecorder(
+        started.bundle.canvasStream,
+        settings.captureQuality,
+      )
       recorderRef.current = recorder
       chunksRef.current = chunks
       mimeRef.current = mimeType

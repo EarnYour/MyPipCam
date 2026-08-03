@@ -54,25 +54,50 @@ export {
 
 export { grantLibraryAccess, getLibraryFolderAccess }
 
+/** Lightweight Drive / share status — never stores video blobs. */
+export type RecordingDriveMeta = Pick<
+  RecordingMeta,
+  | 'id'
+  | 'driveFileId'
+  | 'driveWebViewLink'
+  | 'driveShared'
+  | 'driveProcessingStatus'
+  | 'driveReadyAt'
+  | 'shareId'
+  | 'shareViewCount'
+  | 'shareLastViewedAt'
+  | 'shareExpiresAt'
+>
+
 interface MyPipCamDB extends DBSchema {
   recordings: {
     key: string
     value: RecordingRecord
     indexes: { 'by-created': number }
   }
+  /** Meta-only overlay for folder-backed libraries (avoids getAll of multi‑GB blobs). */
+  driveMeta: {
+    key: string
+    value: RecordingDriveMeta
+  }
 }
 
 const DB_NAME = 'mypipcam'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 let dbPromise: Promise<IDBPDatabase<MyPipCamDB>> | null = null
 
 function getDb() {
   if (!dbPromise) {
     dbPromise = openDB<MyPipCamDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const store = db.createObjectStore('recordings', { keyPath: 'id' })
-        store.createIndex('by-created', 'createdAt')
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const store = db.createObjectStore('recordings', { keyPath: 'id' })
+          store.createIndex('by-created', 'createdAt')
+        }
+        if (oldVersion < 2 && !db.objectStoreNames.contains('driveMeta')) {
+          db.createObjectStore('driveMeta', { keyPath: 'id' })
+        }
       },
     })
   }
@@ -107,6 +132,45 @@ async function getIdb(id: string): Promise<RecordingRecord | undefined> {
 async function deleteIdb(id: string): Promise<void> {
   const db = await getDb()
   await db.delete('recordings', id)
+}
+
+async function putDriveMeta(meta: RecordingDriveMeta): Promise<void> {
+  const db = await getDb()
+  await db.put('driveMeta', meta)
+}
+
+async function getDriveMeta(id: string): Promise<RecordingDriveMeta | undefined> {
+  const db = await getDb()
+  return db.get('driveMeta', id)
+}
+
+async function listDriveMeta(): Promise<RecordingDriveMeta[]> {
+  const db = await getDb()
+  return db.getAll('driveMeta')
+}
+
+async function deleteDriveMeta(id: string): Promise<void> {
+  const db = await getDb()
+  await db.delete('driveMeta', id)
+}
+
+function mergeDriveMetaOnto<T extends RecordingMeta>(
+  item: T,
+  meta: RecordingDriveMeta | undefined,
+): T {
+  if (!meta) return item
+  return {
+    ...item,
+    driveFileId: item.driveFileId ?? meta.driveFileId,
+    driveWebViewLink: item.driveWebViewLink ?? meta.driveWebViewLink,
+    driveShared: item.driveShared ?? meta.driveShared,
+    driveProcessingStatus: item.driveProcessingStatus ?? meta.driveProcessingStatus,
+    driveReadyAt: item.driveReadyAt ?? meta.driveReadyAt,
+    shareId: item.shareId ?? meta.shareId,
+    shareViewCount: item.shareViewCount ?? meta.shareViewCount,
+    shareLastViewedAt: item.shareLastViewedAt ?? meta.shareLastViewedAt,
+    shareExpiresAt: item.shareExpiresAt ?? meta.shareExpiresAt,
+  }
 }
 
 /** Flush IndexedDB recordings marked pending (or all given) into the library folder. */
@@ -186,8 +250,8 @@ export async function saveRecording(input: {
   if (root) {
     try {
       await writeRecordingToFolder(record, root)
-      // Keep an IDB copy so the service worker can upload (FS Access is unavailable in SW).
-      await putIdb(record)
+      // Folder is canonical. Only stage a blob in IDB when Drive auto-upload
+      // needs it (SW cannot read File System Access handles) — see tryDriveUploadAfterSave.
       await tryDriveUploadAfterSave(record)
       return record
     } catch {
@@ -243,7 +307,7 @@ export async function tryDriveUploadAfterSave(
       return { attempted: false, uploaded: true, queued: false, error: null }
     }
 
-    // SW cannot read File System Access handles — ensure blob is in IDB.
+    // SW cannot read File System Access handles — stage blob in IDB only for upload.
     const existing = await getIdb(record.id)
     if (!existing?.blob?.size) {
       await putIdb(record)
@@ -410,32 +474,48 @@ export async function updateRecordingDriveMeta(
     try {
       await updateDriveMetaInFolder(id, patch, root)
     } catch {
-      /* SW / no FS permission — still update IDB below */
+      /* SW / no FS permission — still persist lightweight driveMeta below */
     }
   }
 
+  const prev = (await getDriveMeta(id)) ?? { id }
+  const nextMeta: RecordingDriveMeta = {
+    id,
+    driveFileId: patch.driveFileId ?? prev.driveFileId,
+    driveWebViewLink: patch.driveWebViewLink ?? prev.driveWebViewLink,
+    driveShared: patch.driveShared ?? prev.driveShared,
+    driveProcessingStatus:
+      patch.driveProcessingStatus !== undefined
+        ? patch.driveProcessingStatus
+        : prev.driveProcessingStatus,
+    driveReadyAt:
+      patch.driveReadyAt !== undefined ? patch.driveReadyAt : prev.driveReadyAt,
+    shareId: patch.shareId ?? prev.shareId,
+    shareViewCount:
+      patch.shareViewCount !== undefined ? patch.shareViewCount : prev.shareViewCount,
+    shareLastViewedAt:
+      patch.shareLastViewedAt !== undefined
+        ? patch.shareLastViewedAt
+        : prev.shareLastViewedAt,
+    shareExpiresAt:
+      patch.shareExpiresAt !== undefined ? patch.shareExpiresAt : prev.shareExpiresAt,
+  }
+  await putDriveMeta(nextMeta)
+
+  // Mirror onto a staged recordings blob only when one already exists (Drive SW upload).
   const rec = await getIdb(id)
   if (!rec) return
   await putIdb({
     ...rec,
-    driveFileId: patch.driveFileId ?? rec.driveFileId,
-    driveWebViewLink: patch.driveWebViewLink ?? rec.driveWebViewLink,
-    driveShared: patch.driveShared ?? rec.driveShared,
-    driveProcessingStatus:
-      patch.driveProcessingStatus !== undefined
-        ? patch.driveProcessingStatus
-        : rec.driveProcessingStatus,
-    driveReadyAt:
-      patch.driveReadyAt !== undefined ? patch.driveReadyAt : rec.driveReadyAt,
-    shareId: patch.shareId ?? rec.shareId,
-    shareViewCount:
-      patch.shareViewCount !== undefined ? patch.shareViewCount : rec.shareViewCount,
-    shareLastViewedAt:
-      patch.shareLastViewedAt !== undefined
-        ? patch.shareLastViewedAt
-        : rec.shareLastViewedAt,
-    shareExpiresAt:
-      patch.shareExpiresAt !== undefined ? patch.shareExpiresAt : rec.shareExpiresAt,
+    driveFileId: nextMeta.driveFileId,
+    driveWebViewLink: nextMeta.driveWebViewLink,
+    driveShared: nextMeta.driveShared,
+    driveProcessingStatus: nextMeta.driveProcessingStatus,
+    driveReadyAt: nextMeta.driveReadyAt,
+    shareId: nextMeta.shareId,
+    shareViewCount: nextMeta.shareViewCount,
+    shareLastViewedAt: nextMeta.shareLastViewedAt,
+    shareExpiresAt: nextMeta.shareExpiresAt,
   })
 }
 
@@ -471,22 +551,10 @@ export async function listLibrary(): Promise<LibraryListResult> {
       await flushPendingToFolder(root)
       local = await listFolderRecordings(root)
       usedFolder = true
-      // Overlay Drive meta written to IDB by the service worker.
-      const db = await getDb()
-      const idbAll = await db.getAllFromIndex('recordings', 'by-created')
-      const idbById = new Map(idbAll.map((r) => [r.id, r]))
-      local = local.map((item) => {
-        const idb = idbById.get(item.id)
-        if (!idb?.driveFileId || item.driveFileId) return item
-        return {
-          ...item,
-          driveFileId: idb.driveFileId,
-          driveWebViewLink: idb.driveWebViewLink ?? item.driveWebViewLink,
-          driveShared: idb.driveShared ?? item.driveShared,
-          driveProcessingStatus: idb.driveProcessingStatus ?? item.driveProcessingStatus,
-          driveReadyAt: idb.driveReadyAt ?? item.driveReadyAt,
-        }
-      })
+      // Overlay Drive meta from lightweight store (never pull full video blobs).
+      const driveAll = await listDriveMeta()
+      const driveById = new Map(driveAll.map((r) => [r.id, r]))
+      local = local.map((item) => mergeDriveMetaOnto(item, driveById.get(item.id)))
     } catch {
       /* fall through to IDB */
     }
@@ -556,30 +624,23 @@ async function mergeWithDriveLibrary(
 
 export async function getRecording(id: string): Promise<RecordingRecord | undefined> {
   const fromIdb = await getIdb(id)
+  const driveMeta = await getDriveMeta(id)
   const root = await folderRootQuiet()
   if (root) {
     try {
       const fromFolder = await readFolderRecording(id, root)
       if (fromFolder) {
-        // SW may have written Drive meta to IDB when folder update wasn't possible.
-        if (fromIdb?.driveFileId && !fromFolder.driveFileId) {
-          return {
-            ...fromFolder,
-            driveFileId: fromIdb.driveFileId,
-            driveWebViewLink: fromIdb.driveWebViewLink ?? fromFolder.driveWebViewLink,
-            driveShared: fromIdb.driveShared ?? fromFolder.driveShared,
-            driveProcessingStatus:
-              fromIdb.driveProcessingStatus ?? fromFolder.driveProcessingStatus,
-            driveReadyAt: fromIdb.driveReadyAt ?? fromFolder.driveReadyAt,
-          }
-        }
-        return fromFolder
+        // Prefer folder blob; overlay Drive status from lightweight meta (or staged IDB).
+        return mergeDriveMetaOnto(
+          mergeDriveMetaOnto(fromFolder, fromIdb),
+          driveMeta,
+        )
       }
     } catch {
       /* fall through */
     }
   }
-  if (fromIdb) return fromIdb
+  if (fromIdb) return mergeDriveMetaOnto(fromIdb, driveMeta)
 
   // Drive-only item (synced from another browser) — download for play.
   try {
@@ -698,7 +759,9 @@ export async function deleteRecording(id: string): Promise<void> {
     }
   }
   await deleteIdb(id)
+  await deleteDriveMeta(id)
   await removePendingSyncId(id)
+  await removePendingDriveUploadId(id).catch(() => undefined)
 }
 
 export async function updateRecordingBlob(
