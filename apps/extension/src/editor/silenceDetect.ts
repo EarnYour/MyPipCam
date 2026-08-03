@@ -154,3 +154,37 @@ export function rangeContaining(ranges: TimeRange[], t: number): TimeRange | nul
   }
   return null
 }
+
+/**
+ * Next source time that should play under an edit decision list of removes
+ * within [inSec, outSec]. Used by preview playback to jump cut gaps.
+ *
+ * Half-open removes: time === remove.end is playable (start of next keep).
+ */
+export function nextPlayableTime(
+  t: number,
+  inSec: number,
+  outSec: number,
+  removes: TimeRange[],
+): { time: number; ended: boolean } {
+  if (!(outSec > inSec)) return { time: inSec, ended: true }
+
+  const merged = mergeRanges(
+    removes.map((r) => ({
+      start: Math.max(inSec, r.start),
+      end: Math.min(outSec, r.end),
+    })),
+  )
+
+  let time = Math.min(Math.max(t, inSec), outSec)
+  if (time >= outSec) return { time: outSec, ended: true }
+
+  for (let i = 0; i < merged.length + 2; i++) {
+    const hit = rangeContaining(merged, time)
+    if (!hit) return { time, ended: false }
+    if (hit.end >= outSec - 1e-3) return { time: outSec, ended: true }
+    time = hit.end
+  }
+
+  return { time: outSec, ended: true }
+}

@@ -30,6 +30,7 @@ import {
 import {
   detectSilenceRanges,
   mergeRanges,
+  nextPlayableTime,
   normalizeRange,
   rangeContaining,
   type TimeRange,
@@ -135,6 +136,12 @@ export function EditorApp() {
   const selectAnchorRef = useRef<number | null>(null)
   const autoRanRef = useRef(false)
   const skipGuardRef = useRef(false)
+  const skipSeekingRef = useRef(false)
+  const seekGenRef = useRef(0)
+  const previewEditsRef = useRef(true)
+  const inSecRef = useRef(0)
+  const outSecRef = useRef(0)
+  const skipRangesRef = useRef<TimeRange[]>([])
 
   useEffect(() => {
     void loadApiSettings().then((s) => setHasKey(hasOpenAiKey(s)))
@@ -237,6 +244,11 @@ export function EditorApp() {
     return mergeRanges(ranges)
   }, [cutRanges, applySilences, silenceRanges, applyFillers, fillerRanges])
 
+  previewEditsRef.current = previewEdits
+  inSecRef.current = inSec
+  outSecRef.current = outSec
+  skipRangesRef.current = skipRanges
+
   function pushUndo(prev: TimeRange[]) {
     setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), prev.map((r) => ({ ...r }))])
   }
@@ -260,12 +272,95 @@ export function EditorApp() {
   function seekTo(t: number) {
     const v = videoRef.current
     const next = clamp(t, 0, duration || t)
+    const gen = ++seekGenRef.current
     skipGuardRef.current = true
+    skipSeekingRef.current = false
     if (v) v.currentTime = next
     setCurrent(next)
-    window.setTimeout(() => {
+    const clear = () => {
+      if (seekGenRef.current !== gen) return
       skipGuardRef.current = false
-    }, 40)
+    }
+    v?.addEventListener('seeked', clear, { once: true })
+    window.setTimeout(clear, 160)
+  }
+
+  /** Jump the element out of a remove range; retries if keyframe snap lands back inside. */
+  function skipVideoPastRemoves(v: HTMLVideoElement, fromTime: number) {
+    if (skipSeekingRef.current || skipGuardRef.current) return
+    if (!previewEditsRef.current) return
+
+    const inS = inSecRef.current
+    const outS = outSecRef.current
+    const removes = skipRangesRef.current
+    const mapped = nextPlayableTime(fromTime, inS, outS, removes)
+
+    if (!mapped.ended && Math.abs(mapped.time - fromTime) < 1e-4) return
+
+    skipSeekingRef.current = true
+    skipGuardRef.current = true
+    const gen = ++seekGenRef.current
+    let attempts = 0
+    let target = mapped.ended ? outS : mapped.time
+
+    const finish = (time: number, pause: boolean) => {
+      if (seekGenRef.current !== gen) return
+      if (pause && !v.paused) v.pause()
+      setCurrent(time)
+      skipSeekingRef.current = false
+      skipGuardRef.current = false
+    }
+
+    const step = () => {
+      if (seekGenRef.current !== gen) return
+      attempts += 1
+      v.currentTime = target
+
+      const onSeeked = () => {
+        if (seekGenRef.current !== gen) return
+        const landed = v.currentTime
+
+        if (mapped.ended || landed >= outS - 0.02) {
+          finish(outS, true)
+          if (Math.abs(landed - outS) > 0.02) v.currentTime = outS
+          return
+        }
+
+        const still = rangeContaining(removes, landed)
+        if (still && landed < still.end - 1e-3) {
+          // Keyframe snap put us back inside the cut — nudge further ahead.
+          if (attempts >= 24) {
+            finish(Math.min(outS, still.end), still.end >= outS - 0.02)
+            return
+          }
+          target = Math.min(outS, Math.max(still.end, landed + 0.12 * attempts))
+          step()
+          return
+        }
+
+        // Landed outside removes (or exactly on a keep boundary).
+        const again = nextPlayableTime(landed, inS, outS, removes)
+        if (again.ended) {
+          finish(outS, true)
+          v.currentTime = outS
+          return
+        }
+        if (again.time > landed + 1e-3) {
+          target = again.time
+          step()
+          return
+        }
+        finish(landed, false)
+      }
+
+      v.addEventListener('seeked', onSeeked, { once: true })
+    }
+
+    if (mapped.ended) {
+      if (!v.paused) v.pause()
+      target = outS
+    }
+    step()
   }
 
   function clientXToTime(clientX: number) {
@@ -403,13 +498,17 @@ export function EditorApp() {
       return
     }
     const removed = clipped.end - clipped.start
+    const nextCuts = mergeRanges([...cutRanges, clipped])
     commitCuts(
-      [...cutRanges, clipped],
+      nextCuts,
       `Removed ${secLabel(removed)} from the middle. Undo if that wasn’t right.`,
     )
     setSelection(null)
     setSelectMode(false)
     setError(null)
+    // Don't leave the playhead inside the deleted range (preview would look "stuck").
+    const join = nextPlayableTime(clipped.start, inSec, outSec, nextCuts)
+    seekTo(join.ended ? Math.max(inSec, clipped.start) : join.time)
   }
 
   function markSelectionStart() {
@@ -658,50 +757,75 @@ export function EditorApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record, editorFocus])
 
-  // Preview: skip cut / applied overlay regions while playing.
+  // Preview: skip cut / applied overlay regions while playing (RAF + seeked retries).
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
 
-    const onTime = () => {
-      if (skipGuardRef.current) return
+    let raf = 0
+
+    const syncAndSkip = () => {
+      if (skipGuardRef.current || skipSeekingRef.current) return
       const t = v.currentTime
       setCurrent(t)
 
-      if (!previewEdits) return
+      if (!previewEditsRef.current) return
 
-      if (t < inSec - 0.02) {
-        skipGuardRef.current = true
-        v.currentTime = inSec
-        skipGuardRef.current = false
+      const inS = inSecRef.current
+      const outS = outSecRef.current
+
+      if (t < inS - 0.02) {
+        skipVideoPastRemoves(v, inS)
         return
       }
-      if (t >= outSec - 0.02) {
+      if (t >= outS - 0.02) {
         if (!v.paused) {
           v.pause()
           skipGuardRef.current = true
-          v.currentTime = outSec
-          skipGuardRef.current = false
+          v.currentTime = outS
+          setCurrent(outS)
+          window.setTimeout(() => {
+            skipGuardRef.current = false
+          }, 40)
         }
         return
       }
 
-      const hit = rangeContaining(skipRanges, t)
-      if (hit) {
-        skipGuardRef.current = true
-        if (hit.end >= outSec - 0.02) {
-          v.pause()
-          v.currentTime = outSec
-        } else {
-          v.currentTime = hit.end + 0.001
-        }
-        skipGuardRef.current = false
+      const hit = rangeContaining(skipRangesRef.current, t)
+      if (hit) skipVideoPastRemoves(v, t)
+    }
+
+    const tick = () => {
+      syncAndSkip()
+      if (!v.paused && !v.ended) {
+        raf = requestAnimationFrame(tick)
       }
     }
 
+    const onPlay = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(tick)
+    }
+    const onPause = () => cancelAnimationFrame(raf)
+    const onTime = () => {
+      // Keep UI in sync while paused/scrubbing; also catch skips if RAF isn't running.
+      syncAndSkip()
+    }
+
+    v.addEventListener('play', onPlay)
+    v.addEventListener('pause', onPause)
     v.addEventListener('timeupdate', onTime)
-    return () => v.removeEventListener('timeupdate', onTime)
-  }, [previewEdits, inSec, outSec, skipRanges])
+    if (!v.paused) raf = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      v.removeEventListener('play', onPlay)
+      v.removeEventListener('pause', onPause)
+      v.removeEventListener('timeupdate', onTime)
+    }
+    // skipVideoPastRemoves closes over stable refs; rebind when element identity changes only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -893,10 +1017,28 @@ export function EditorApp() {
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
-      if (previewEdits && (v.currentTime < inSec || v.currentTime >= outSec)) {
-        v.currentTime = inSec
+      if (previewEdits) {
+        let startFrom = v.currentTime
+        if (startFrom < inSec || startFrom >= outSec - 0.02) {
+          startFrom = inSec
+        }
+        const mapped = nextPlayableTime(startFrom, inSec, outSec, skipRanges)
+        if (mapped.ended) {
+          const restart = nextPlayableTime(inSec, inSec, outSec, skipRanges)
+          if (restart.ended) {
+            setError('Nothing left to play — loosen your cuts or trim.')
+            return
+          }
+          seekTo(restart.time)
+        } else if (Math.abs(mapped.time - v.currentTime) > 1e-3) {
+          seekTo(mapped.time)
+        }
       }
-      await v.play()
+      try {
+        await v.play()
+      } catch {
+        /* autoplay / abort */
+      }
     } else {
       v.pause()
     }
