@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { hasOpenAiKey, loadApiSettings } from '../shared/apiSettings'
 import {
+  createLibraryFolder,
+  deleteLibraryFolderAndUnfile,
   deleteRecording,
   downloadBlob,
   flushDriveUploads,
@@ -11,17 +13,25 @@ import {
   grantLibraryAccess,
   listLibrary,
   migrateIdbToFolder,
+  moveRecordingToFolder,
   recordingFilename,
+  renameLibraryFolder,
   renameRecording,
+  syncFoldersAfterFolderPick,
   updateRecordingDriveMeta,
   updateRecordingTranscript,
 } from '../shared/db'
 import { InlineRename } from '../shared/InlineRename'
 import {
+  folderMatchesFilter,
+  type LibraryBrowseFilter,
+} from '../shared/libraryFolders'
+import {
   getLibraryFolderName,
   hasLibraryFolder,
   pickLibraryFolder,
 } from '../shared/libraryFs'
+import { LibrarySidebar } from './LibrarySidebar'
 import {
   openEditorTab,
   openRecorderTab,
@@ -51,9 +61,43 @@ import {
   updateShareProcessing,
 } from '../shared/shareApi'
 import { watchUrlForShareId } from '../shared/shareConfig'
-import { formatDate, formatDuration, type RecordingMeta } from '../shared/types'
+import {
+  formatDate,
+  formatDuration,
+  type LibraryFolder,
+  type RecordingMeta,
+} from '../shared/types'
 import { transcribeWithOpenAI } from '../editor/transcribe'
 import { SettingsPanel } from './SettingsPanel'
+
+const RECORDING_DRAG_MIME = 'application/x-mypipcam-recording'
+const BROWSE_FILTER_STORAGE_KEY = 'mypipcam.library.browseFilter'
+
+function readStoredBrowseFilter(): LibraryBrowseFilter {
+  try {
+    const raw = localStorage.getItem(BROWSE_FILTER_STORAGE_KEY)
+    if (!raw) return 'all'
+    if (raw === 'all' || raw === 'unfiled') return raw
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        raw,
+      )
+    ) {
+      return raw
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'all'
+}
+
+function persistBrowseFilter(filter: LibraryBrowseFilter) {
+  try {
+    localStorage.setItem(BROWSE_FILTER_STORAGE_KEY, filter)
+  } catch {
+    /* ignore */
+  }
+}
 
 type DetailTab = 'edit' | 'activity' | 'transcript' | 'settings'
 
@@ -192,6 +236,12 @@ function writeDetailIdToUrl(id: string | null) {
 
 export function LibraryApp() {
   const [items, setItems] = useState<RecordingMeta[]>([])
+  const [folders, setFolders] = useState<LibraryFolder[]>([])
+  const [browseFilter, setBrowseFilter] = useState<LibraryBrowseFilter>(() =>
+    readStoredBrowseFilter(),
+  )
+  const [dropTarget, setDropTarget] = useState<LibraryBrowseFilter | null>(null)
+  const [moveMenuId, setMoveMenuId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('date')
@@ -219,6 +269,11 @@ export function LibraryApp() {
   const [folderHandleMissing, setFolderHandleMissing] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [hasOpenAiKeyStored, setHasOpenAiKeyStored] = useState(false)
+
+  const selectBrowseFilter = useCallback((next: LibraryBrowseFilter) => {
+    setBrowseFilter(next)
+    persistBrowseFilter(next)
+  }, [])
 
   const refreshOpenAiKeyStatus = useCallback(async () => {
     const settings = await loadApiSettings()
@@ -379,6 +434,14 @@ export function LibraryApp() {
       }
 
       setItems(list)
+      setFolders(listed.folders)
+      // Drop stale filter if the folder was deleted elsewhere.
+      setBrowseFilter((prev) => {
+        if (prev === 'all' || prev === 'unfiled') return prev
+        if (listed.folders.some((f) => f.id === prev)) return prev
+        persistBrowseFilter('all')
+        return 'all'
+      })
       const urls: Record<string, string> = {}
       for (const item of list) {
         if (item.thumbnail) {
@@ -516,6 +579,10 @@ export function LibraryApp() {
     void showDriveToast()
 
     const onPopState = () => setDetailId(readDetailIdFromUrl())
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest('.card-move-wrap')) setMoveMenuId(null)
+    }
     const onStorage: Parameters<typeof chrome.storage.onChanged.addListener>[0] = (
       changes,
       area,
@@ -532,8 +599,10 @@ export function LibraryApp() {
     }
     chrome.storage.onChanged.addListener(onStorage)
     window.addEventListener('popstate', onPopState)
+    document.addEventListener('pointerdown', onPointerDown)
     return () => {
       window.removeEventListener('popstate', onPopState)
+      document.removeEventListener('pointerdown', onPointerDown)
       chrome.storage.onChanged.removeListener(onStorage)
       Object.values(thumbUrls).forEach((u) => URL.revokeObjectURL(u))
     }
@@ -593,14 +662,20 @@ export function LibraryApp() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    let next = items
+    let next = items.filter((i) => folderMatchesFilter(i.folderId, browseFilter))
     if (q) next = next.filter((i) => i.title.toLowerCase().includes(q))
     next = [...next].sort((a, b) => {
       if (sort === 'title') return a.title.localeCompare(b.title)
       return b.createdAt - a.createdAt
     })
     return next
-  }, [items, query, sort])
+  }, [browseFilter, items, query, sort])
+
+  const browseLabel = useMemo(() => {
+    if (browseFilter === 'all') return 'All recordings'
+    if (browseFilter === 'unfiled') return 'Unfiled'
+    return folders.find((f) => f.id === browseFilter)?.name ?? 'Folder'
+  }, [browseFilter, folders])
 
   const detailItem = useMemo(
     () => (detailId ? items.find((i) => i.id === detailId) ?? null : null),
@@ -619,6 +694,71 @@ export function LibraryApp() {
     await deleteRecording(id)
     if (detailId === id) closeDetail()
     await refresh()
+  }
+
+  async function onCreateFolder(name: string) {
+    try {
+      const folder = await createLibraryFolder(name)
+      await refresh()
+      selectBrowseFilter(folder.id)
+      showBanner(`Created folder “${folder.name}”.`)
+    } catch (err) {
+      showBanner(err instanceof Error ? err.message : 'Could not create folder.', null, 'warn')
+      throw err
+    }
+  }
+
+  async function onRenameFolder(id: string, name: string) {
+    try {
+      const folder = await renameLibraryFolder(id, name)
+      setFolders((prev) => prev.map((f) => (f.id === id ? folder : f)))
+      showBanner(`Renamed folder to “${folder.name}”.`)
+    } catch (err) {
+      showBanner(err instanceof Error ? err.message : 'Could not rename folder.', null, 'warn')
+      throw err
+    }
+  }
+
+  async function onDeleteFolder(id: string) {
+    const folder = folders.find((f) => f.id === id)
+    const count = items.filter((i) => i.folderId === id).length
+    const label = folder?.name ?? 'this folder'
+    if (
+      !window.confirm(
+        count > 0
+          ? `Delete “${label}”? ${count} recording${count === 1 ? '' : 's'} will move to Unfiled. Videos are not deleted.`
+          : `Delete “${label}”?`,
+      )
+    ) {
+      return
+    }
+    try {
+      await deleteLibraryFolderAndUnfile(id)
+      if (browseFilter === id) selectBrowseFilter('unfiled')
+      await refresh()
+      showBanner(`Deleted folder “${label}”. Clips moved to Unfiled.`)
+    } catch (err) {
+      showBanner(err instanceof Error ? err.message : 'Could not delete folder.', null, 'warn')
+    }
+  }
+
+  async function onMoveRecording(id: string, target: LibraryBrowseFilter) {
+    if (target === 'all') return
+    const folderId = target === 'unfiled' ? null : target
+    setMoveMenuId(null)
+    try {
+      await moveRecordingToFolder(id, folderId)
+      setItems((prev) =>
+        prev.map((i) => (i.id === id ? { ...i, folderId } : i)),
+      )
+      const dest =
+        folderId === null
+          ? 'Unfiled'
+          : folders.find((f) => f.id === folderId)?.name ?? 'folder'
+      showBanner(`Moved to ${dest}.`)
+    } catch (err) {
+      showBanner(err instanceof Error ? err.message : 'Could not move recording.', null, 'warn')
+    }
   }
 
   async function onDownload(id: string) {
@@ -840,6 +980,7 @@ export function LibraryApp() {
     showBanner(null)
     try {
       const handle = await pickLibraryFolder()
+      await syncFoldersAfterFolderPick(handle)
       await refreshFolderName()
       const shouldMigrate = window.confirm(
         `Use “${handle.name}” as your recording library?\n\n` +
@@ -1138,127 +1279,227 @@ export function LibraryApp() {
           hasOpenAiKey={hasOpenAiKeyStored}
         />
       ) : (
-        <>
-          <div className="search-row">
-            <input
-              type="search"
-              placeholder="Search titles…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="date">Newest first</option>
-              <option value="title">Title A–Z</option>
-            </select>
-          </div>
-
-          {loading ? (
-            <p className="muted">Loading…</p>
-          ) : filtered.length === 0 ? (
-            <div className="empty">
-              <h2>No recordings yet</h2>
-              <p>
-                {folderAccessNeeded
-                  ? `Can’t read “${folderName || 'your folder'}” until you grant access. Recordings on disk will show up after one click.`
-                  : folderHandleMissing
-                    ? `Chrome forgot the handle for “${folderName}”. Choose that folder again once.`
-                    : folderName
-                      ? `Nothing in “${folderName}” yet. Capture a clip and it will appear here and on disk.`
-                      : 'Capture your screen with a camera PiP, then manage clips here.'}
-              </p>
-              {folderAccessNeeded ? (
-                <button
-                  className="primary"
-                  disabled={folderBusy}
-                  onClick={() => void onGrantFolderAccess()}
-                >
-                  {folderBusy
-                    ? 'Working…'
-                    : `Grant access to ${folderName || 'folder'}`}
-                </button>
-              ) : (
-                <button className="primary" onClick={() => void openRecorderTab()}>
-                  Start a recording
-                </button>
-              )}
+        <div className="library-layout">
+          <LibrarySidebar
+            folders={folders}
+            items={items}
+            filter={browseFilter}
+            dropTarget={dropTarget}
+            onSelect={selectBrowseFilter}
+            onCreate={onCreateFolder}
+            onRename={onRenameFolder}
+            onDelete={onDeleteFolder}
+            onDragOverFilter={setDropTarget}
+            onDropRecording={(recordingId, target) => {
+              void onMoveRecording(recordingId, target)
+            }}
+          />
+          <div className="library-main">
+            <div className="search-row">
+              <div className="library-browse-label muted">{browseLabel}</div>
+              <input
+                type="search"
+                placeholder="Search titles…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                <option value="date">Newest first</option>
+                <option value="title">Title A–Z</option>
+              </select>
             </div>
-          ) : (
-            <div className="library-grid">
-              {filtered.map((item) => (
-                <article
-                  key={item.id}
-                  className="recording-card recording-card-clickable"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Open ${item.title}`}
-                  onClick={() => openDetail(item.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      openDetail(item.id)
-                    }
-                  }}
-                >
-                  <div className="thumb">
-                    {thumbUrls[item.id] ? (
-                      <img src={thumbUrls[item.id]} alt="" />
-                    ) : (
-                      <div className="thumb-fallback" />
-                    )}
-                    <span className="duration">{formatDurationBadge(item.durationMs)}</span>
-                    {item.driveFileId && (
-                      <span className="drive-badge" title="On Google Drive">
-                        Drive
-                      </span>
-                    )}
-                  </div>
-                  <div className="card-body">
-                    <div className="card-meta card-meta-top">
-                      <span>You · {formatRelativeTime(item.createdAt)}</span>
-                      <span className="card-share-status">
-                        {item.driveProcessingStatus === 'processing'
-                          ? 'Processing on Drive…'
-                          : item.driveShared || item.shareId
-                            ? item.driveProcessingStatus === 'ready'
-                              ? 'Link ready'
-                              : 'Shared'
-                            : 'Not shared'}
-                      </span>
-                    </div>
-                    <h3 className="card-title">{item.title}</h3>
-                    <div className="card-stats">
-                      <span className="card-stat" title="Views">
-                        <span aria-hidden="true">👁</span>
-                        {item.shareViewCount ?? 0}
-                      </span>
-                      {item.transcript ? (
-                        <span className="card-stat" title="Has transcript">
-                          Transcript
+
+            {loading ? (
+              <p className="muted">Loading…</p>
+            ) : filtered.length === 0 ? (
+              <div className="empty">
+                <h2>
+                  {items.length === 0
+                    ? 'No recordings yet'
+                    : browseFilter === 'unfiled'
+                      ? 'Nothing unfiled'
+                      : browseFilter === 'all'
+                        ? 'No recordings yet'
+                        : 'This folder is empty'}
+                </h2>
+                <p>
+                  {items.length > 0
+                    ? 'Drag a recording onto a folder in the sidebar, or use Move on a card.'
+                    : folderAccessNeeded
+                      ? `Can’t read “${folderName || 'your folder'}” until you grant access. Recordings on disk will show up after one click.`
+                      : folderHandleMissing
+                        ? `Chrome forgot the handle for “${folderName}”. Choose that folder again once.`
+                        : folderName
+                          ? `Nothing in “${folderName}” yet. Capture a clip and it will appear here and on disk.`
+                          : 'Capture your screen with a camera PiP, then manage clips here.'}
+                </p>
+                {folderAccessNeeded ? (
+                  <button
+                    className="primary"
+                    disabled={folderBusy}
+                    onClick={() => void onGrantFolderAccess()}
+                  >
+                    {folderBusy
+                      ? 'Working…'
+                      : `Grant access to ${folderName || 'folder'}`}
+                  </button>
+                ) : items.length === 0 ? (
+                  <button className="primary" onClick={() => void openRecorderTab()}>
+                    Start a recording
+                  </button>
+                ) : (
+                  <button
+                    className="ghost"
+                    onClick={() => selectBrowseFilter('all')}
+                  >
+                    Show all
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="library-grid">
+                {filtered.map((item) => (
+                  <article
+                    key={item.id}
+                    className="recording-card recording-card-clickable"
+                    role="link"
+                    tabIndex={0}
+                    draggable={!item.driveOnly}
+                    aria-label={`Open ${item.title}`}
+                    onClick={() => openDetail(item.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        openDetail(item.id)
+                      }
+                    }}
+                    onDragStart={(e) => {
+                      if (item.driveOnly) {
+                        e.preventDefault()
+                        return
+                      }
+                      e.dataTransfer.setData(RECORDING_DRAG_MIME, item.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragEnd={() => setDropTarget(null)}
+                  >
+                    <div className="thumb">
+                      {thumbUrls[item.id] ? (
+                        <img src={thumbUrls[item.id]} alt="" />
+                      ) : (
+                        <div className="thumb-fallback" />
+                      )}
+                      <span className="duration">{formatDurationBadge(item.durationMs)}</span>
+                      {item.driveFileId && (
+                        <span className="drive-badge" title="On Google Drive">
+                          Drive
                         </span>
-                      ) : null}
-                      <span className="card-stat muted">
-                        {(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB
-                      </span>
-                      {!item.driveOnly && (
-                        <button
-                          type="button"
-                          className="danger card-action-delete"
-                          title="Delete"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void onDelete(item.id)
-                          }}
-                        >
-                          Delete
-                        </button>
                       )}
                     </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </>
+                    <div className="card-body">
+                      <div className="card-meta card-meta-top">
+                        <span>You · {formatRelativeTime(item.createdAt)}</span>
+                        <span className="card-share-status">
+                          {item.driveProcessingStatus === 'processing'
+                            ? 'Processing on Drive…'
+                            : item.driveShared || item.shareId
+                              ? item.driveProcessingStatus === 'ready'
+                                ? 'Link ready'
+                                : 'Shared'
+                              : 'Not shared'}
+                        </span>
+                      </div>
+                      <h3 className="card-title">{item.title}</h3>
+                      {item.folderId ? (
+                        <div className="card-folder-chip muted">
+                          {folders.find((f) => f.id === item.folderId)?.name ?? 'Folder'}
+                        </div>
+                      ) : null}
+                      <div className="card-stats">
+                        <span className="card-stat" title="Views">
+                          <span aria-hidden="true">👁</span>
+                          {item.shareViewCount ?? 0}
+                        </span>
+                        {item.transcript ? (
+                          <span className="card-stat" title="Has transcript">
+                            Transcript
+                          </span>
+                        ) : null}
+                        <span className="card-stat muted">
+                          {(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                        </span>
+                        {!item.driveOnly && (
+                          <div className="card-actions">
+                            <div className="card-move-wrap">
+                              <button
+                                type="button"
+                                className="ghost card-action-move"
+                                title="Move to folder"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setMoveMenuId((prev) =>
+                                    prev === item.id ? null : item.id,
+                                  )
+                                }}
+                              >
+                                Move
+                              </button>
+                              {moveMenuId === item.id && (
+                                <div
+                                  className="card-move-menu"
+                                  role="menu"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    disabled={!item.folderId}
+                                    onClick={() => void onMoveRecording(item.id, 'unfiled')}
+                                  >
+                                    Unfiled
+                                  </button>
+                                  {folders.map((folder) => (
+                                    <button
+                                      key={folder.id}
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={item.folderId === folder.id}
+                                      onClick={() =>
+                                        void onMoveRecording(item.id, folder.id)
+                                      }
+                                    >
+                                      {folder.name}
+                                    </button>
+                                  ))}
+                                  {folders.length === 0 && (
+                                    <p className="muted card-move-empty">
+                                      Create a folder in the sidebar first.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              className="danger card-action-delete"
+                              title="Delete"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void onDelete(item.id)
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       <SettingsPanel

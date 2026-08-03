@@ -21,6 +21,15 @@ export type TranscriptData = {
   provider: 'openai'
 }
 
+/** Virtual library organization folder (metadata only — not an on-disk directory). */
+export type LibraryFolder = {
+  id: string
+  name: string
+  createdAt: number
+  /** Stable sidebar order (lower first). */
+  sortOrder?: number
+}
+
 export type RecordingMeta = {
   id: string
   title: string
@@ -30,6 +39,11 @@ export type RecordingMeta = {
   sizeBytes: number
   thumbnail?: Blob
   transcript?: TranscriptData
+  /**
+   * Virtual library folder id (`folders.json` / chrome.storage).
+   * `null` / omitted = Unfiled.
+   */
+  folderId?: string | null
   /** Google Drive file id when uploaded to the shared library folder. */
   driveFileId?: string
   driveWebViewLink?: string

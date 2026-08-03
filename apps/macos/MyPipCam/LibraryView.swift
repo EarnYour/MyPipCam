@@ -104,6 +104,12 @@ private struct LibraryRootView: View {
     }
 }
 
+private enum LibraryBrowseFilter: Hashable {
+    case all
+    case unfiled
+    case folder(String)
+}
+
 struct LibraryView: View {
     @ObservedObject var store: LibraryFolderStore
     @ObservedObject var settings: BubbleSettings
@@ -113,9 +119,22 @@ struct LibraryView: View {
     @State private var renameDraft = ""
     @State private var isRenaming = false
     @State private var confirmDelete = false
+    @State private var browseFilter: LibraryBrowseFilter = .all
+
+    private var filteredRecordings: [FolderRecording] {
+        switch browseFilter {
+        case .all:
+            return store.recordings
+        case .unfiled:
+            return store.recordings.filter { $0.orgFolderId == nil }
+        case .folder(let id):
+            return store.recordings.filter { $0.orgFolderId == id }
+        }
+    }
 
     private var selected: FolderRecording? {
-        store.recordings.first { $0.id == selection }
+        filteredRecordings.first { $0.id == selection }
+            ?? store.recordings.first { $0.id == selection }
     }
 
     var body: some View {
@@ -129,14 +148,19 @@ struct LibraryView: View {
         .onAppear {
             store.refresh()
             if selection == nil {
-                selection = store.recordings.first?.id
+                selection = filteredRecordings.first?.id
             }
         }
-        .onChange(of: store.recordings) { _, items in
-            if let selection, items.contains(where: { $0.id == selection }) {
-                return
+        .onChange(of: store.recordings) { _, _ in
+            reconcileSelection()
+        }
+        .onChange(of: browseFilter) { _, _ in
+            reconcileSelection()
+        }
+        .onChange(of: store.orgFolders) { _, folders in
+            if case .folder(let id) = browseFilter, !folders.contains(where: { $0.id == id }) {
+                browseFilter = .all
             }
-            self.selection = items.first?.id
         }
         .alert("Rename Recording", isPresented: $isRenaming) {
             TextField("Title", text: $renameDraft)
@@ -208,31 +232,60 @@ struct LibraryView: View {
                 .padding(.bottom, 8)
             }
 
+            Picker("Folder", selection: $browseFilter) {
+                Text("All (\(store.recordings.count))").tag(LibraryBrowseFilter.all)
+                Text("Unfiled (\(store.recordings.filter { $0.orgFolderId == nil }.count))")
+                    .tag(LibraryBrowseFilter.unfiled)
+                ForEach(store.orgFolders) { folder in
+                    let count = store.recordings.filter { $0.orgFolderId == folder.id }.count
+                    Text("\(folder.name) (\(count))").tag(LibraryBrowseFilter.folder(folder.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+
             Divider()
 
-            if store.recordings.isEmpty {
+            if filteredRecordings.isEmpty {
                 VStack(spacing: 10) {
                     Spacer()
                     Image(systemName: "film.stack")
                         .font(.system(size: 28, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("No recordings yet")
+                    Text(store.recordings.isEmpty ? "No recordings yet" : "Nothing in this folder")
                         .font(.callout.weight(.medium))
-                    Text("Record from the bubble menu or in Chrome, then refresh.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
+                    Text(
+                        store.recordings.isEmpty
+                            ? "Record from the bubble menu or in Chrome, then refresh."
+                            : "Organize folders in the Chrome Library; macOS reads the same folders.json."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(store.recordings, selection: $selection) { item in
-                    RecordingRow(item: item)
+                List(filteredRecordings, selection: $selection) { item in
+                    RecordingRow(item: item, folderName: orgFolderName(for: item))
                         .tag(item.id)
                         .contextMenu {
                             Button("Play") { play(item) }
                             Button("Rename…") { beginRename(item) }
+                            Menu("Move to Folder") {
+                                Button("Unfiled") {
+                                    move(item, to: nil)
+                                }
+                                .disabled(item.orgFolderId == nil)
+                                ForEach(store.orgFolders) { folder in
+                                    Button(folder.name) {
+                                        move(item, to: folder.id)
+                                    }
+                                    .disabled(item.orgFolderId == folder.id)
+                                }
+                            }
                             Button("Reveal in Finder") {
                                 store.revealRecordingInFinder(id: item.id)
                             }
@@ -347,6 +400,26 @@ struct LibraryView: View {
         isRenaming = true
     }
 
+    private func reconcileSelection() {
+        if let selection, filteredRecordings.contains(where: { $0.id == selection }) {
+            return
+        }
+        self.selection = filteredRecordings.first?.id
+    }
+
+    private func orgFolderName(for item: FolderRecording) -> String? {
+        guard let id = item.orgFolderId else { return nil }
+        return store.orgFolders.first(where: { $0.id == id })?.name
+    }
+
+    private func move(_ item: FolderRecording, to orgFolderId: String?) {
+        do {
+            try store.moveRecording(id: item.id, toOrgFolderId: orgFolderId)
+        } catch {
+            presentAlert(title: "Move Failed", message: error.localizedDescription)
+        }
+    }
+
     private var isMoviesRootLibrary: Bool {
         let path = (store.displayPath as NSString).standardizingPath
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
@@ -389,16 +462,20 @@ struct LibraryView: View {
 
 private struct RecordingRow: View {
     let item: FolderRecording
+    var folderName: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.title)
                 .font(.body.weight(.medium))
                 .lineLimit(1)
-            Text("\(item.formattedDate) · \(item.formattedDuration)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Text(
+                folderName.map { "\($0) · \(item.formattedDate) · \(item.formattedDuration)" }
+                    ?? "\(item.formattedDate) · \(item.formattedDuration)"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
         .padding(.vertical, 2)
     }

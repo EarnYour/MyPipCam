@@ -4,16 +4,19 @@
  * Layout (must match the macOS app):
  *   <LibraryRoot>/
  *     .mypipcam-library
+ *     folders.json
  *     recordings/<uuid>/{meta.json, video.webm|mp4, thumb.jpg?, transcript.json?}
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { isSafeRecordingId } from './security'
-import type { RecordingMeta, RecordingRecord, TranscriptData } from './types'
+import type { LibraryFolder, RecordingMeta, RecordingRecord, TranscriptData } from './types'
 
 export const LIBRARY_MARKER = '.mypipcam-library'
 export const LIBRARY_MARKER_VERSION = 1
 export const RECORDINGS_DIR = 'recordings'
+/** Virtual folder definitions shared with the macOS app. */
+export const FOLDERS_FILE = 'folders.json'
 
 const HANDLE_DB = 'mypipcam-fs'
 const HANDLE_DB_VERSION = 1
@@ -30,6 +33,8 @@ type DiskMeta = {
   durationMs: number
   mimeType: string
   sizeBytes: number
+  /** Virtual library folder id; omit / null = Unfiled. */
+  folderId?: string | null
   driveFileId?: string
   driveWebViewLink?: string
   driveShared?: boolean
@@ -39,6 +44,11 @@ type DiskMeta = {
   shareViewCount?: number
   shareLastViewedAt?: string | null
   shareExpiresAt?: string | null
+}
+
+export type DiskFoldersFile = {
+  version: number
+  folders: LibraryFolder[]
 }
 
 interface HandleDB extends DBSchema {
@@ -67,6 +77,13 @@ function videoFileName(mimeType: string): 'video.mp4' | 'video.webm' {
   return mimeType.includes('mp4') ? 'video.mp4' : 'video.webm'
 }
 
+function normalizeFolderId(value: unknown): string | null | undefined {
+  if (value === null) return null
+  if (value === undefined) return undefined
+  if (typeof value === 'string' && isSafeRecordingId(value)) return value
+  return null
+}
+
 function toDiskMeta(rec: RecordingMeta | RecordingRecord): DiskMeta {
   const meta: DiskMeta = {
     id: rec.id,
@@ -76,6 +93,8 @@ function toDiskMeta(rec: RecordingMeta | RecordingRecord): DiskMeta {
     mimeType: rec.mimeType,
     sizeBytes: rec.sizeBytes,
   }
+  const folderId = normalizeFolderId(rec.folderId)
+  if (folderId !== undefined) meta.folderId = folderId
   if (rec.driveFileId) meta.driveFileId = rec.driveFileId
   if (rec.driveWebViewLink) meta.driveWebViewLink = rec.driveWebViewLink
   if (rec.driveShared != null) meta.driveShared = rec.driveShared
@@ -147,6 +166,39 @@ async function ensureLibraryStructure(root: FileSystemDirectoryHandle): Promise<
     JSON.stringify({ version: LIBRARY_MARKER_VERSION }, null, 2) + '\n',
   )
   await root.getDirectoryHandle(RECORDINGS_DIR, { create: true })
+  try {
+    await root.getFileHandle(FOLDERS_FILE)
+  } catch {
+    await writeTextFile(
+      root,
+      FOLDERS_FILE,
+      JSON.stringify({ version: 1, folders: [] }, null, 2) + '\n',
+    )
+  }
+}
+
+export async function readFoldersFile(
+  root: FileSystemDirectoryHandle,
+): Promise<DiskFoldersFile | undefined> {
+  return readJsonFile<DiskFoldersFile>(root, FOLDERS_FILE)
+}
+
+export async function writeFoldersFile(
+  root: FileSystemDirectoryHandle,
+  payload: DiskFoldersFile,
+): Promise<void> {
+  await writeTextFile(
+    root,
+    FOLDERS_FILE,
+    JSON.stringify(
+      {
+        version: payload.version || 1,
+        folders: Array.isArray(payload.folders) ? payload.folders : [],
+      },
+      null,
+      2,
+    ) + '\n',
+  )
 }
 
 /** Best-effort: ask Chrome not to evict the handle IndexedDB under storage pressure. */
@@ -382,6 +434,7 @@ async function readRecordingFromDir(
   const thumbnail = await readBlobFile(dir, 'thumb.jpg')
   const transcript = await readJsonFile<TranscriptData>(dir, 'transcript.json')
 
+  const folderId = normalizeFolderId(meta.folderId)
   return {
     id: meta.id,
     title: typeof meta.title === 'string' ? meta.title.slice(0, 200) : 'Recording',
@@ -392,6 +445,7 @@ async function readRecordingFromDir(
     thumbnail,
     transcript,
     blob: video,
+    folderId: folderId === undefined ? null : folderId,
     driveFileId: meta.driveFileId,
     driveWebViewLink: meta.driveWebViewLink,
     driveShared: meta.driveShared,
@@ -449,6 +503,29 @@ export async function updateDriveMetaInFolder(
   await writeTextFile(dir, 'meta.json', JSON.stringify(next, null, 2) + '\n')
 }
 
+/** Set or clear the virtual folder assignment in meta.json (does not move files). */
+export async function updateFolderIdInFolder(
+  id: string,
+  folderId: string | null,
+  root?: FileSystemDirectoryHandle,
+): Promise<void> {
+  if (!isSafeRecordingId(id)) throw new Error('Invalid recording id')
+  if (folderId !== null && !isSafeRecordingId(folderId)) {
+    throw new Error('Invalid folder id')
+  }
+  const permitted =
+    root ?? (await ensureLibraryPermission(undefined, { request: false }))
+  if (!permitted) throw new Error('Library folder permission not granted')
+
+  const recordings = await permitted.getDirectoryHandle(RECORDINGS_DIR, { create: true })
+  const dir = await recordings.getDirectoryHandle(id)
+  const meta = await readJsonFile<DiskMeta>(dir, 'meta.json')
+  if (!meta?.id) throw new Error('Recording not found')
+
+  const next: DiskMeta = { ...meta, folderId }
+  await writeTextFile(dir, 'meta.json', JSON.stringify(next, null, 2) + '\n')
+}
+
 async function directoryHasVideo(dir: FileSystemDirectoryHandle): Promise<boolean> {
   try {
     await dir.getFileHandle('video.webm')
@@ -487,6 +564,7 @@ export async function listFolderRecordings(
 
     const thumbnail = await readBlobFile(dir, 'thumb.jpg')
     const transcript = await readJsonFile<TranscriptData>(dir, 'transcript.json')
+    const folderId = normalizeFolderId(meta.folderId)
     items.push({
       id: meta.id,
       title: typeof meta.title === 'string' ? meta.title.slice(0, 200) : 'Recording',
@@ -496,6 +574,7 @@ export async function listFolderRecordings(
       sizeBytes: meta.sizeBytes || 0,
       thumbnail,
       transcript,
+      folderId: folderId === undefined ? null : folderId,
       driveFileId: meta.driveFileId,
       driveWebViewLink: meta.driveWebViewLink,
       driveShared: meta.driveShared,

@@ -10,7 +10,11 @@ import {
   grantLibraryAccess,
   pickLibraryFolder,
 } from '../shared/libraryFs'
-import { flushDriveUploads, migrateIdbToFolder } from '../shared/db'
+import {
+  flushDriveUploads,
+  migrateIdbToFolder,
+  syncFoldersAfterFolderPick,
+} from '../shared/db'
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -262,6 +266,7 @@ export function SettingsPanel({
     setFolderMsg(null)
     try {
       const handle = await pickLibraryFolder()
+      await syncFoldersAfterFolderPick(handle)
       await refreshFolder()
 
       const shouldMigrate = window.confirm(

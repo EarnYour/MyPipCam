@@ -2,6 +2,14 @@ import AppKit
 import Combine
 import Foundation
 
+/// Virtual organization folder from `<LibraryRoot>/folders.json` (Chrome Library).
+struct LibraryOrgFolder: Identifiable, Hashable {
+    let id: String
+    var name: String
+    let createdAt: TimeInterval
+    var sortOrder: Int?
+}
+
 /// On-disk recording entry under `<LibraryRoot>/recordings/<uuid>/`.
 struct FolderRecording: Identifiable, Hashable {
     let id: String
@@ -10,6 +18,8 @@ struct FolderRecording: Identifiable, Hashable {
     let durationMs: Double
     let mimeType: String
     let sizeBytes: Int64
+    /// Virtual folder id from meta.json; nil = Unfiled.
+    var orgFolderId: String?
     let folderURL: URL
     let videoURL: URL
     let thumbURL: URL?
@@ -62,6 +72,7 @@ enum LibraryFolderError: LocalizedError {
 /// ```
 /// <LibraryRoot>/
 ///   .mypipcam-library
+///   folders.json
 ///   recordings/<uuid>/{meta.json, video.webm|mp4, …}
 /// ```
 @MainActor
@@ -69,12 +80,14 @@ final class LibraryFolderStore: ObservableObject {
     static let shared = LibraryFolderStore()
 
     static let markerFileName = ".mypipcam-library"
+    static let foldersFileName = "folders.json"
     static let recordingsDirName = "recordings"
     static let markerVersion = 1
     static let suggestedFolderName = "MyPipCam"
 
     @Published private(set) var displayPath: String = ""
     @Published private(set) var recordings: [FolderRecording] = []
+    @Published private(set) var orgFolders: [LibraryOrgFolder] = []
     @Published private(set) var lastError: String?
 
     private let defaults = UserDefaults.standard
@@ -245,17 +258,54 @@ final class LibraryFolderStore: ObservableObject {
 
     func refresh() {
         do {
-            recordings = try withScopedAccess { root in
-                try scanRecordings(in: root)
+            let scanned = try withScopedAccess { root -> (recordings: [FolderRecording], folders: [LibraryOrgFolder]) in
+                let folders = (try? readOrgFolders(in: root)) ?? []
+                let recordings = try scanRecordings(in: root)
+                return (recordings, folders)
             }
+            recordings = scanned.recordings
+            orgFolders = scanned.folders
             lastError = nil
         } catch LibraryFolderError.noFolderSelected {
             recordings = []
+            orgFolders = []
             lastError = nil
         } catch {
             recordings = []
+            orgFolders = []
             lastError = error.localizedDescription
         }
+    }
+
+    /// Assign a recording to a virtual folder (`nil` = Unfiled). Does not move files.
+    func moveRecording(id: String, toOrgFolderId orgFolderId: String?) throws {
+        guard Self.isSafeRecordingID(id) else {
+            throw LibraryFolderError.recordingNotFound(id)
+        }
+        if let orgFolderId {
+            guard Self.isSafeRecordingID(orgFolderId) else {
+                throw LibraryFolderError.writeFailed("Invalid folder id.")
+            }
+            guard orgFolders.contains(where: { $0.id == orgFolderId }) else {
+                throw LibraryFolderError.writeFailed("Folder not found.")
+            }
+        }
+
+        try withScopedAccess { root in
+            let folder = try Self.recordingFolder(root: root, id: id)
+            let metaURL = folder.appendingPathComponent("meta.json")
+            guard FileManager.default.fileExists(atPath: metaURL.path) else {
+                throw LibraryFolderError.recordingNotFound(id)
+            }
+            var meta = try readMeta(at: metaURL)
+            if let orgFolderId {
+                meta["folderId"] = orgFolderId
+            } else {
+                meta["folderId"] = NSNull()
+            }
+            try writeMeta(meta, to: metaURL)
+        }
+        refresh()
     }
 
     func renameRecording(id: String, title: String) throws {
@@ -393,6 +443,49 @@ final class LibraryFolderStore: ObservableObject {
                 throw LibraryFolderError.invalidLibrary
             }
         }
+
+        let foldersURL = root.appendingPathComponent(Self.foldersFileName)
+        if !fm.fileExists(atPath: foldersURL.path) {
+            let payload: [String: Any] = ["version": 1, "folders": []]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+            try data.write(to: foldersURL, options: .atomic)
+        }
+    }
+
+    private func readOrgFolders(in root: URL) throws -> [LibraryOrgFolder] {
+        let url = root.appendingPathComponent(Self.foldersFileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = json["folders"] as? [[String: Any]]
+        else { return [] }
+
+        var folders: [LibraryOrgFolder] = []
+        var seen = Set<String>()
+        for entry in raw {
+            guard let id = entry["id"] as? String, Self.isSafeRecordingID(id), !seen.contains(id)
+            else { continue }
+            let name = ((entry["name"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let createdAt = Self.number(entry["createdAt"]) ?? 0
+            let sortOrder = Self.number(entry["sortOrder"]).map { Int($0) }
+            seen.insert(id)
+            folders.append(
+                LibraryOrgFolder(
+                    id: id,
+                    name: String(name.prefix(80)),
+                    createdAt: createdAt,
+                    sortOrder: sortOrder
+                )
+            )
+        }
+        return folders.sorted {
+            let ao = $0.sortOrder ?? Int($0.createdAt)
+            let bo = $1.sortOrder ?? Int($1.createdAt)
+            if ao != bo { return ao < bo }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     private func scanRecordings(in root: URL) throws -> [FolderRecording] {
@@ -426,6 +519,9 @@ final class LibraryFolderStore: ObservableObject {
             let durationMs = Self.number(meta["durationMs"]) ?? 0
             let mimeType = (meta["mimeType"] as? String) ?? "video/webm"
             let sizeBytes = Int64(Self.number(meta["sizeBytes"]) ?? 0)
+            let orgFolderId = (meta["folderId"] as? String).flatMap {
+                Self.isSafeRecordingID($0) ? $0 : nil
+            }
 
             let thumb = dir.appendingPathComponent("thumb.jpg")
             let transcript = dir.appendingPathComponent("transcript.json")
@@ -438,6 +534,7 @@ final class LibraryFolderStore: ObservableObject {
                     durationMs: durationMs,
                     mimeType: mimeType,
                     sizeBytes: sizeBytes,
+                    orgFolderId: orgFolderId,
                     folderURL: dir,
                     videoURL: video,
                     thumbURL: fm.fileExists(atPath: thumb.path) ? thumb : nil,

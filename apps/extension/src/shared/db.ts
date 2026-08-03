@@ -1,6 +1,13 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import type { RecordingMeta, RecordingRecord, TranscriptData } from './types'
+import type { LibraryFolder, RecordingMeta, RecordingRecord, TranscriptData } from './types'
 import { defaultTitle } from './types'
+import {
+  createLibraryFolder,
+  deleteLibraryFolder,
+  listLibraryFolders,
+  renameLibraryFolder,
+  seedFoldersFileFromStorage,
+} from './libraryFolders'
 import { isOAuthClientConfigured } from './driveConfig'
 import {
   addPendingDriveUploadId,
@@ -31,10 +38,19 @@ import {
   renameInFolder,
   updateBlobInFolder,
   updateDriveMetaInFolder,
+  updateFolderIdInFolder,
   updateTranscriptInFolder,
   writeRecordingToFolder,
   type LibraryFolderAccess,
 } from './libraryFs'
+
+export {
+  createLibraryFolder,
+  deleteLibraryFolder,
+  listLibraryFolders,
+  renameLibraryFolder,
+  seedFoldersFileFromStorage,
+}
 
 export { grantLibraryAccess, getLibraryFolderAccess }
 
@@ -430,6 +446,8 @@ export async function flushDriveUploads(opts?: { interactive?: boolean }): Promi
 
 export type LibraryListResult = {
   items: RecordingMeta[]
+  /** Virtual organization folders (sidebar). */
+  folders: LibraryFolder[]
   folder: LibraryFolderAccess
   /** True when disk listing succeeded under a granted handle. */
   folderListed: boolean
@@ -481,8 +499,10 @@ export async function listLibrary(): Promise<LibraryListResult> {
   }
 
   const { items, driveError } = await mergeWithDriveLibrary(local)
+  const folders = await listLibraryFolders(root)
   return {
     items,
+    folders,
     folder,
     folderListed: usedFolder,
     driveError,
@@ -599,6 +619,73 @@ export async function renameRecording(id: string, title: string): Promise<void> 
   const rec = await getIdb(id)
   if (!rec) throw new Error('Recording not found')
   await putIdb({ ...rec, title: title.trim() || rec.title })
+}
+
+/**
+ * Assign a recording to a virtual folder (`null` = Unfiled).
+ * Does not move files on disk — only updates `folderId` in meta / IDB.
+ */
+export async function moveRecordingToFolder(
+  id: string,
+  folderId: string | null,
+): Promise<void> {
+  if (folderId !== null) {
+    const folders = await listLibraryFolders()
+    if (!folders.some((f) => f.id === folderId)) {
+      throw new Error('Folder not found')
+    }
+  }
+
+  const root = await folderRootQuiet()
+  if (root) {
+    try {
+      await updateFolderIdInFolder(id, folderId, root)
+      const idb = await getIdb(id)
+      if (idb) await putIdb({ ...idb, folderId })
+      return
+    } catch {
+      /* fall through to IDB */
+    }
+  }
+
+  const rec = await getIdb(id)
+  if (!rec) throw new Error('Recording not found')
+  await putIdb({ ...rec, folderId })
+}
+
+/**
+ * Remove a virtual folder and move its clips to Unfiled (never deletes videos).
+ */
+export async function deleteLibraryFolderAndUnfile(id: string): Promise<void> {
+  const root = await folderRootQuiet()
+  let locals: RecordingMeta[] = []
+  if (root) {
+    try {
+      locals = await listFolderRecordings(root)
+    } catch {
+      /* fall through to IDB */
+    }
+  }
+  if (locals.length === 0) {
+    const db = await getDb()
+    const all = await db.getAllFromIndex('recordings', 'by-created')
+    locals = all.map(({ blob: _blob, ...meta }) => meta)
+  }
+  for (const item of locals.filter((i) => i.folderId === id)) {
+    try {
+      await moveRecordingToFolder(item.id, null)
+    } catch {
+      /* best-effort; folder definition still removed below */
+    }
+  }
+  await deleteLibraryFolder(id, root)
+}
+
+/** After the user picks a disk library root, sync virtual folders onto disk. */
+export async function syncFoldersAfterFolderPick(
+  root: FileSystemDirectoryHandle,
+): Promise<void> {
+  await seedFoldersFileFromStorage(root)
 }
 
 export async function deleteRecording(id: string): Promise<void> {
