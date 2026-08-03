@@ -66,131 +66,41 @@ const H = POPUP_HOLD_FRAMES; // ~4.2s
 const P = PUSHOVER_HOLD_FRAMES; // ~5.2s
 
 /**
- * Cut A — tighter open (speech-first clips), longer glass holds,
- * bullet callouts, and push-over split layouts on key product beats.
+ * Cut A — product-first open (skip go-live talking head + Windows build
+ * digression), longer glass holds, bullet callouts, push-over splits.
+ *
+ * Dropped ~94s from the prior composition: intro + clips 01/02 + install
+ * title + first ~32s of 06 (Windows build VO). Brand intro returns, then
+ * PiP controls from mid-06.
  */
 export const beats: Beat[] = [
   { kind: "intro", seconds: 3.5 },
   {
     kind: "clip",
-    file: "01-hook-talking-head.mp4",
-    // Re-extracted from source 4:23; trim trailing silence after ~25s
-    seconds: 25,
+    file: "06-install-github-pip.mp4",
+    // Skip Windows-build digression (first ~32s of clip / ~0:64–1:34 of old reel)
+    startFrom: 32 * FPS,
+    seconds: 18,
     popups: [
       {
         from: 8,
         durationInFrames: H,
-        title: "Replace Loom for free",
-        subtitle: "Chrome + macOS · camera PiP",
+        title: "Shape · Size · Mic",
+        subtitle: "Floating PiP you control",
         bullets: [
-          "No Loom subscription",
-          "Tab + Cam in one take",
-          "Free forever · open source",
+          "Circle or square",
+          "Resize on the fly",
+          "Pick camera & mic",
         ],
-        accentWord: "Loom",
         variant: "orange",
-        position: "top-left",
-      },
-      {
-        from: 150,
-        durationInFrames: H,
-        title: "Free forever",
-        subtitle: "Keep files on your Mac",
-        bullets: ["No seat tax", "Local-first library", "Drive only if you want"],
-        accentWord: "Free",
-        variant: "mint",
-        position: "top-left",
+        position: "top-right",
       },
     ],
     lowerThird: {
       from: 6,
-      durationInFrames: 120,
-      line1: "MyPipCam",
-      line2: "Free Loom-style recorder",
-      accent: "orange",
-    },
-  },
-  {
-    kind: "clip",
-    file: "02-problem-talking-head.mp4",
-    seconds: 34,
-    popups: [
-      {
-        from: 12,
-        durationInFrames: H,
-        title: "No Loom bill",
-        subtitle: "Quit the monthly recorder tax",
-        bullets: ["No per-seat pricing", "No cloud lock-in", "Export stays yours"],
-        accentWord: "Loom",
-        variant: "mint",
-        position: "top-left",
-      },
-    ],
-    pushovers: [
-      {
-        from: 160,
-        durationInFrames: P,
-        side: "left",
-        title: "Why MyPipCam",
-        subtitle: "Built to replace paid Loom-style tools",
-        bullets: [
-          "Record tab + camera PiP",
-          "Local library on your disk",
-          "Optional Google Drive",
-          "Built-in trim & export",
-        ],
-        variant: "orange",
-      },
-    ],
-    lowerThird: {
-      from: 8,
       durationInFrames: 110,
-      line1: "Why I built this",
-      line2: "Free forever · No subscription",
-      accent: "mint",
-    },
-  },
-  {
-    kind: "title",
-    seconds: 2,
-    eyebrow: "Step 1",
-    title: "Install in under a minute",
-    subtitle: "GitHub Releases → Load unpacked",
-  },
-  {
-    kind: "clip",
-    file: "06-install-github-pip.mp4",
-    seconds: 50,
-    popups: [
-      {
-        from: 12,
-        durationInFrames: H,
-        title: "Free · Open source",
-        subtitle: "Install from GitHub Releases",
-        bullets: [
-          "Download the zip",
-          "chrome://extensions → Load unpacked",
-          "Pin MyPipCam",
-        ],
-        accentWord: "Free",
-        variant: "orange",
-        position: "top-right",
-      },
-      {
-        from: 200,
-        durationInFrames: H,
-        title: "Pin it",
-        subtitle: "Then record any https tab",
-        bullets: ["One click to start", "Tab only or Tab + Cam", "Works on Chrome"],
-        variant: "mint",
-        position: "top-right",
-      },
-    ],
-    lowerThird: {
-      from: 10,
-      durationInFrames: 120,
-      line1: "Chrome extension",
-      line2: "Install free from GitHub",
+      line1: "macOS camera bubble",
+      line2: "Shape · size · always on top",
       accent: "orange",
     },
   },

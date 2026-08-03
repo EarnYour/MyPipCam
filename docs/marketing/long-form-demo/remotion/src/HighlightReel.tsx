@@ -7,7 +7,7 @@ import { IntroCard } from "./IntroCard";
 import { beats, secondsToFrames } from "./timeline";
 
 /**
- * Cut A highlight: brand intro → clips (speech-first) → end card.
+ * Cut A highlight: brand intro → product clips (no go-live / Windows open) → end card.
  * Glass popups, bullet callouts, and push-over splits per EDIT_PLAN.
  */
 export const HighlightReel: React.FC = () => {

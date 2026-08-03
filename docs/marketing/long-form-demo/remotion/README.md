@@ -19,7 +19,7 @@ npm start
 ## Render
 
 ```bash
-# Full highlight (~6.5–7 min of clips + cards) → H.264
+# Full highlight → H.264
 npm run render:highlight
 ```
 
@@ -32,8 +32,8 @@ npm run render:overlays
 
 ### Notes
 
-- Duration ≈ **6m12s** after trimming the silent cold open; glass holds ~4–5s with push-over splits on Problem / Record / Editor.
+- Duration ≈ **4m40s** after cutting go-live talking head (clips 01/02) and the Windows-build digression at the start of clip 06; glass holds ~4–5s with push-over splits on Record / Editor.
 - Motion curves: Chronixel Style Vault (Night Drive HUD / Dark Dashboard glass) + `nmsn` Remotion easing + [`OVERLAY_DESIGN.md`](../OVERLAY_DESIGN.md).
 - Remotion company license applies for commercial use — confirm before monetized YouTube ads if required.
 - Do not point Remotion at the 4.8 GB source MOV; only use `clips/`.
-- Hook/problem clips start at source **4:23 / 5:18** (see `scripts/extract-clips.sh`) — not 0:00.
+- Clip 06 uses `startFrom: 32×FPS` so the reel never includes the Windows-build VO.
