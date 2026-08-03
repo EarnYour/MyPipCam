@@ -9,7 +9,7 @@ enum ExtensionLibraryOpener {
     static let libraryPath = "src/library/index.html"
     static let extensionDisplayName = "MyPipCam"
     static let releasesURL = URL(string: "https://github.com/EarnYour/MyPipCam/releases")!
-    static let extensionReleaseTag = "v1.1.3"
+    static let extensionReleaseTag = "v1.1.8"
 
     private static let firstOpenTipKey = "hasShownLibraryExtensionTip"
     private static let extensionIdDefaultsKey = "chromeExtensionId"
