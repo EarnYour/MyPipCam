@@ -1,0 +1,11 @@
+# Local intermediates (regenerate with scene detect / preview grabs)
+previews/
+ffmpeg_scene.log
+scene_raw.txt
+out/
+
+# Remotion
+remotion/node_modules/
+remotion/out/
+remotion/public/
+remotion/.remotion/

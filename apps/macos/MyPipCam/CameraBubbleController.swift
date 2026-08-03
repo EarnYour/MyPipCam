@@ -11,6 +11,7 @@ final class CameraBubbleController: NSObject {
     private let loginItem: LoginItemManager
     private var scrollMonitor: Any?
     private var sizeCancellable: AnyCancellable?
+    private var moveObserver: NSObjectProtocol?
     private var lastContentSize: CGSize = .zero
     private let padding: CGFloat = CameraBubbleView.shadowPadding
 
@@ -58,8 +59,9 @@ final class CameraBubbleController: NSObject {
         self.panel = panel
 
         applySize(animate: false)
-        positionDefault(panel)
+        restoreOrDefaultPosition(panel)
         panel.orderFrontRegardless()
+        installMoveObserver(for: panel)
 
         RecordToCloudCoordinator.shared.bind(
             camera: camera,
@@ -78,6 +80,30 @@ final class CameraBubbleController: NSObject {
             }
 
         installScrollResizeMonitor()
+    }
+
+    private func restoreOrDefaultPosition(_ panel: NSPanel) {
+        if let origin = settings.savedBubbleOrigin {
+            panel.setFrameOrigin(origin)
+            ensureOnScreen(panel)
+            return
+        }
+        positionDefault(panel)
+    }
+
+    private func installMoveObserver(for panel: NSPanel) {
+        if let moveObserver {
+            NotificationCenter.default.removeObserver(moveObserver)
+        }
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, let panel = self.panel else { return }
+            // Persist after drag / programmatic moves that leave the bubble visible.
+            self.settings.savedBubbleOrigin = panel.frame.origin
+        }
     }
 
     private func applySize(animate: Bool) {
@@ -112,6 +138,7 @@ final class CameraBubbleController: NSObject {
         lastContentSize = content
         panel.setFrame(frame, display: true, animate: animate)
         panel.contentView?.frame = NSRect(origin: .zero, size: frame.size)
+        settings.savedBubbleOrigin = panel.frame.origin
     }
 
     private func positionDefault(_ panel: NSPanel) {
@@ -165,6 +192,9 @@ final class CameraBubbleController: NSObject {
 
     /// Hide the bubble without quitting (menu bar icon stays).
     func hideBubble() {
+        if let panel {
+            settings.savedBubbleOrigin = panel.frame.origin
+        }
         panel?.orderOut(nil)
     }
 
@@ -244,6 +274,7 @@ final class CameraBubbleController: NSObject {
         frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
         frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
         panel.setFrame(frame, display: true)
+        settings.savedBubbleOrigin = panel.frame.origin
     }
 
     func quit() {
@@ -258,12 +289,19 @@ final class CameraBubbleController: NSObject {
     }
 
     private func finishQuit() {
+        if let panel {
+            settings.savedBubbleOrigin = panel.frame.origin
+        }
         camera.stopSession()
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
             scrollMonitor = nil
         }
         sizeCancellable?.cancel()
+        if let moveObserver {
+            NotificationCenter.default.removeObserver(moveObserver)
+            self.moveObserver = nil
+        }
         panel?.close()
         NSApp.terminate(nil)
     }

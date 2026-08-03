@@ -162,6 +162,33 @@ final class BubbleSettings: ObservableObject {
     }
 
     static let libraryFolderBookmarkKey = "libraryFolderBookmark"
+    static let bubbleOriginXKey = "bubbleOriginX"
+    static let bubbleOriginYKey = "bubbleOriginY"
+    static let hasSavedBubbleOriginKey = "hasSavedBubbleOrigin"
+
+    /// Last on-screen bubble origin (bottom-left, AppKit coords). Survives relaunch/reboot.
+    var savedBubbleOrigin: NSPoint? {
+        get {
+            let defaults = UserDefaults.standard
+            guard defaults.bool(forKey: Self.hasSavedBubbleOriginKey) else { return nil }
+            return NSPoint(
+                x: defaults.double(forKey: Self.bubbleOriginXKey),
+                y: defaults.double(forKey: Self.bubbleOriginYKey)
+            )
+        }
+        set {
+            let defaults = UserDefaults.standard
+            if let newValue {
+                defaults.set(newValue.x, forKey: Self.bubbleOriginXKey)
+                defaults.set(newValue.y, forKey: Self.bubbleOriginYKey)
+                defaults.set(true, forKey: Self.hasSavedBubbleOriginKey)
+            } else {
+                defaults.removeObject(forKey: Self.bubbleOriginXKey)
+                defaults.removeObject(forKey: Self.bubbleOriginYKey)
+                defaults.set(false, forKey: Self.hasSavedBubbleOriginKey)
+            }
+        }
+    }
 
     /// Extension ID for library URLs: override → auto-detect → packed-key default.
     var resolvedChromeExtensionId: String {

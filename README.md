@@ -222,7 +222,8 @@ npm run build
 Shortcut: **⌘⇧U** (Mac) / **Ctrl+Shift+U** (Windows/Linux) — start or stop.
 
 **Stable extension ID** (fixed via manifest `key`): `akpchobfndfddajiihkkdpnihihdicjc`  
-Library page: `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
+Library page (same path the popup uses): `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
+**Open in Chrome…** (macOS) opens the HTTPS bridge `https://mypipcam.earnyour.com/open-library?ext=…` so the extension opens Library via `chrome.tabs` — direct `chrome-extension://` navigation is often blocked by ad blockers (`ERR_BLOCKED_BY_CLIENT`). 
 (The macOS app **Open Recording Library** menu opens this URL.)
 
 If you loaded an unpacked build *before* the manifest `key` was added, your ID will differ. In the macOS menu choose **Set Extension ID…**, paste the ID from `chrome://extensions` (Developer mode), then **Save & Open Library**. The app also auto-detects an installed “MyPipCam” extension under Chrome/Edge/Brave/Arc profiles when no override is set.
@@ -267,8 +268,8 @@ A Loom-style floating camera bubble for macOS. Point it at your webcam (or OBS V
 - **Record…** — dots menu / menu bar: pick camera, mic, Screen or Window, then ScreenCaptureKit-record; saves MP4 into the shared library folder (`recordings/<uuid>/`). Tab capture stays in the Chrome extension. Google Drive upload still runs through the extension when Connect Google + auto-upload are enabled.
 - **Open Recording Library** — opens the native library window when a shared folder is set (prompts to choose otherwise)
 - **Choose Recording Library…** / **Reveal Library in Finder** — pick or show the on-disk folder shared with Chrome
-- **Open in Chrome…** — secondary path for editor / transcription / Drive sync in the extension
-- **Set Extension ID…** — paste ID from `chrome://extensions` if Open in Chrome hits a blank page
+- **Open in Chrome…** — secondary path for editor / transcription / Drive sync (via `mypipcam.earnyour.com/open-library` bridge)
+- **Set Extension ID…** — paste ID from `chrome://extensions` if the bridge cannot reach the extension
 - **Install Chrome Extension…** — opens `chrome://extensions` + reveals `apps/extension/dist` with load steps
 
 ### Setup (clean install with App Icon)

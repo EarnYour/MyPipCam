@@ -18,8 +18,18 @@ export const DEFAULT_DRIVE_SETTINGS: DriveSettings = {
 
 /** Folder ID lives in sync so the same Google Chrome profile set shares the library. */
 export async function loadDriveSettings(): Promise<DriveSettings> {
-  const result = await chrome.storage.sync.get(KEY)
-  return { ...DEFAULT_DRIVE_SETTINGS, ...(result[KEY] as Partial<DriveSettings> | undefined) }
+  const [syncResult, localResult] = await Promise.all([
+    chrome.storage.sync.get(KEY),
+    chrome.storage.local.get(KEY),
+  ])
+  const syncPartial = syncResult[KEY] as Partial<DriveSettings> | undefined
+  const localPartial = localResult[KEY] as Partial<DriveSettings> | undefined
+  const stored = syncPartial ?? localPartial
+  const next = { ...DEFAULT_DRIVE_SETTINGS, ...stored }
+  if (!syncPartial && localPartial) {
+    void chrome.storage.sync.set({ [KEY]: next }).catch(() => undefined)
+  }
+  return next
 }
 
 export async function saveDriveSettings(
@@ -32,12 +42,15 @@ export async function saveDriveSettings(
     folderName: patch.folderName === undefined ? current.folderName : patch.folderName,
     folderId: patch.folderId === undefined ? current.folderId : patch.folderId,
   }
-  await chrome.storage.sync.set({ [KEY]: next })
+  await Promise.all([
+    chrome.storage.sync.set({ [KEY]: next }),
+    chrome.storage.local.set({ [KEY]: next }),
+  ])
   return next
 }
 
 export async function clearDriveSettings(): Promise<void> {
-  await chrome.storage.sync.remove(KEY)
+  await Promise.all([chrome.storage.sync.remove(KEY), chrome.storage.local.remove(KEY)])
 }
 
 export function driveFolderLabel(settings: DriveSettings): string {

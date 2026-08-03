@@ -27,7 +27,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>MyPipCam needs camera access to show your webcam in a floating bubble and include it while recording.</string>
+	<string>MyPipCam needs camera access to show your webcam or OBS Virtual Camera in a floating bubble and include it while recording.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MyPipCam needs microphone access to include your voice when recording screen or window captures to your library.</string>
 	<key>NSScreenCaptureUsageDescription</key>

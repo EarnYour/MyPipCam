@@ -6,10 +6,13 @@ import Darwin
 enum ExtensionLibraryOpener {
     /// Stable ID from the public `key` in `apps/extension/manifest.config.ts`.
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
+    /// Must match popup/`openLibraryTab` and `apps/extension/dist` (CRX keeps `src/…`).
     static let libraryPath = "src/library/index.html"
+    /// HTTPS bridge asks the extension to open Library via chrome.tabs (avoids ad-block ERR_BLOCKED_BY_CLIENT).
+    static let bridgeOpenPath = "https://mypipcam.earnyour.com/open-library"
     static let extensionDisplayName = "MyPipCam"
     static let releasesURL = URL(string: "https://github.com/EarnYour/MyPipCam/releases")!
-    static let extensionReleaseTag = "v1.1.8"
+    static let extensionReleaseTag = "v1.1.10"
 
     private static let firstOpenTipKey = "hasShownLibraryExtensionTip"
     private static let extensionIdDefaultsKey = "chromeExtensionId"
@@ -25,6 +28,19 @@ enum ExtensionLibraryOpener {
             urlString += "?id=\(recordingID)"
         }
         return URL(string: urlString)
+    }
+
+    /// Primary open target: product-site bridge → extension `OPEN_LIBRARY` message.
+    static func bridgeLibraryURL(extensionID: String, recordingID: String? = nil) -> URL? {
+        let id = sanitizedExtensionID(extensionID)
+        guard isValidExtensionID(id) else { return nil }
+        var components = URLComponents(string: bridgeOpenPath)
+        var items: [URLQueryItem] = [URLQueryItem(name: "ext", value: id)]
+        if let recordingID, isSafeRecordingID(recordingID) {
+            items.append(URLQueryItem(name: "id", value: recordingID))
+        }
+        components?.queryItems = items
+        return components?.url
     }
 
     /// Resolves which extension ID to use, in order:
@@ -62,19 +78,25 @@ enum ExtensionLibraryOpener {
         }
 
         let id = resolveExtensionID(preferred: extensionID)
-        guard let url = libraryURL(extensionID: id, recordingID: recordingID) else {
+        guard let bridgeURL = bridgeLibraryURL(extensionID: id, recordingID: recordingID) else {
             promptForExtensionID(reason: .invalidOrMissing, thenOpen: true, recordingID: recordingID)
             return
         }
+        let directURL = libraryURL(extensionID: id, recordingID: recordingID)
 
+        // Sandboxed apps often cannot *read* Chrome Preferences (macOS EPERM), even with
+        // home-relative temporary exceptions. Prefer metadata probes; when profiles are
+        // unreadable, open the HTTPS bridge without a false “Not Detected” scare.
+        let profileAccess = chromiumProfileAccess()
         let extensionPresent = extensionLikelyPresent(id: id)
-        if !extensionPresent {
+
+        if !extensionPresent, profileAccess == .readable {
             let alert = NSAlert()
             alert.messageText = "MyPipCam Extension Not Detected"
             alert.informativeText = """
             Chrome doesn’t appear to have the MyPipCam extension loaded (checked your Chromium profiles).
 
-            You can still try opening the library URL — it works when the extension is installed under ID:
+            You can still try opening the library bridge — it works when the extension is installed under ID:
             \(id)
 
             Or install/reload it first (Load unpacked → apps/extension/dist, or GitHub Releases \(extensionReleaseTag)).
@@ -85,7 +107,7 @@ enum ExtensionLibraryOpener {
             alert.addButton(withTitle: "Cancel")
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {
-                showMissingExtensionHelp(openedURL: url, openFailed: false)
+                showMissingExtensionHelp(openedURL: bridgeURL, directURL: directURL, openFailed: false)
                 return
             }
             if response != .alertFirstButtonReturn {
@@ -93,17 +115,23 @@ enum ExtensionLibraryOpener {
             }
         }
 
-        openInChromiumBrowser(url) { success, detail in
+        openInChromiumBrowser(bridgeURL) { success, detail in
             Task { @MainActor in
                 if success {
                     if !UserDefaults.standard.bool(forKey: firstOpenTipKey) {
                         UserDefaults.standard.set(true, forKey: firstOpenTipKey)
-                        showFirstOpenTip(openedURL: url)
+                        showFirstOpenTip(openedURL: bridgeURL, directURL: directURL)
                     }
-                } else if !extensionPresent {
-                    showMissingExtensionHelp(openedURL: url, openFailed: true, detail: detail)
+                } else if extensionPresent {
+                    showOpenFailedAlert(openedURL: bridgeURL, directURL: directURL, detail: detail)
                 } else {
-                    showOpenFailedAlert(openedURL: url, detail: detail)
+                    // Missing on a readable scan, or inconclusive under sandbox — guide install.
+                    showMissingExtensionHelp(
+                        openedURL: bridgeURL,
+                        directURL: directURL,
+                        openFailed: true,
+                        detail: detail
+                    )
                 }
             }
         }
@@ -202,10 +230,10 @@ enum ExtensionLibraryOpener {
         4. In both apps, choose the same folder (suggested: ~/Movies/MyPipCam)
 
         \(idLine)
-        Library path: \(libraryPath)
-        Example URL: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
+        Bridge: \(bridgeOpenPath)?ext=\(detected ?? defaultExtensionID)
+        Extension page: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
 
-        Use Open in Chrome… for the editor/transcription UI. If that page fails, use Set Extension ID… and paste the ID from chrome://extensions.
+        Use Open in Chrome… for the editor/transcription UI. If Chrome shows ERR_BLOCKED_BY_CLIENT, disable the ad blocker for the tab or open Library from the extension popup. Wrong ID → Set Extension ID….
         """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
@@ -221,6 +249,15 @@ enum ExtensionLibraryOpener {
 
     // MARK: - Detection
 
+    private enum ChromiumProfileAccess {
+        /// Listed/read Chrome (or other) profile data successfully.
+        case readable
+        /// Roots exist but sandbox/TCC blocks directory listing or Preferences reads.
+        case unreadable
+        /// No Chromium user-data roots found on disk.
+        case missing
+    }
+
     /// Scans Chromium-family profiles for a MyPipCam install (packed Extensions dirs + unpacked Preferences).
     static func detectInstalledExtensionID() -> String? {
         let found = allDetectedExtensionIDs()
@@ -230,18 +267,52 @@ enum ExtensionLibraryOpener {
         return found.first
     }
 
-    /// True when Secure Preferences / Preferences / Extensions dirs mention this ID.
+    /// True when Secure Preferences / Preferences / Extensions dirs / metadata paths mention this ID.
     static func extensionLikelyPresent(id: String) -> Bool {
         let cleaned = sanitizedExtensionID(id)
         guard isValidExtensionID(cleaned) else { return false }
         return allDetectedExtensionIDs().contains(cleaned)
             || chromeProfileMentions(extensionID: cleaned)
+            || extensionPresentViaPathProbe(id: cleaned)
+    }
+
+    /// Whether we can list/read Chromium profile files (vs. metadata-only `fileExists`).
+    private static func chromiumProfileAccess() -> ChromiumProfileAccess {
+        let fm = FileManager.default
+        var sawRoot = false
+        for root in chromiumSupportRoots() where fm.fileExists(atPath: root.path) {
+            sawRoot = true
+            if (try? fm.contentsOfDirectory(atPath: root.path)) != nil {
+                return .readable
+            }
+            // Listing blocked — confirm content read is also blocked (common on modern macOS sandbox).
+            for profile in commonProfileDirectoryNames() {
+                let prefs = root.appendingPathComponent(profile).appendingPathComponent("Secure Preferences")
+                if fm.fileExists(atPath: prefs.path) {
+                    if fm.isReadableFile(atPath: prefs.path),
+                       (try? Data(contentsOf: prefs, options: [.mappedIfSafe])) != nil {
+                        return .readable
+                    }
+                    return .unreadable
+                }
+            }
+            let localState = root.appendingPathComponent("Local State")
+            if fm.fileExists(atPath: localState.path) {
+                if fm.isReadableFile(atPath: localState.path),
+                   (try? Data(contentsOf: localState, options: [.mappedIfSafe])) != nil {
+                    return .readable
+                }
+                return .unreadable
+            }
+        }
+        return sawRoot ? .unreadable : .missing
     }
 
     private static func allDetectedExtensionIDs() -> [String] {
         var found: [String] = []
         found.append(contentsOf: detectPackedExtensionIDs())
         found.append(contentsOf: detectUnpackedExtensionIDsFromPreferences())
+        found.append(contentsOf: detectExtensionIDsViaPathProbe())
         // Stable key first when both exist.
         var ordered: [String] = []
         if found.contains(defaultExtensionID) {
@@ -257,27 +328,19 @@ enum ExtensionLibraryOpener {
         let fm = FileManager.default
         var found: [String] = []
 
-        for root in chromiumSupportRoots() {
-            guard let profiles = try? fm.contentsOfDirectory(
-                at: root,
+        for profile in chromiumProfileDirectories() {
+            let extensionsDir = profile.appendingPathComponent("Extensions")
+            guard let ids = try? fm.contentsOfDirectory(
+                at: extensionsDir,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
             ) else { continue }
 
-            for profile in profiles {
-                let extensionsDir = profile.appendingPathComponent("Extensions")
-                guard let ids = try? fm.contentsOfDirectory(
-                    at: extensionsDir,
-                    includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles]
-                ) else { continue }
-
-                for idDir in ids {
-                    let candidateID = idDir.lastPathComponent.lowercased()
-                    guard isValidExtensionID(candidateID) else { continue }
-                    if extensionDirectoryMatches(idDir) {
-                        found.append(candidateID)
-                    }
+            for idDir in ids {
+                let candidateID = idDir.lastPathComponent.lowercased()
+                guard isValidExtensionID(candidateID) else { continue }
+                if extensionDirectoryMatches(idDir) {
+                    found.append(candidateID)
                 }
             }
         }
@@ -289,30 +352,22 @@ enum ExtensionLibraryOpener {
         let fm = FileManager.default
         var found: [String] = []
 
-        for root in chromiumSupportRoots() {
-            guard let profiles = try? fm.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+        for profile in chromiumProfileDirectories() {
+            for name in ["Secure Preferences", "Preferences"] {
+                let prefsURL = profile.appendingPathComponent(name)
+                guard fm.isReadableFile(atPath: prefsURL.path),
+                      let data = try? Data(contentsOf: prefsURL),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let extensions = json["extensions"] as? [String: Any],
+                      let settings = extensions["settings"] as? [String: Any]
+                else { continue }
 
-            for profile in profiles {
-                for name in ["Secure Preferences", "Preferences"] {
-                    let prefsURL = profile.appendingPathComponent(name)
-                    guard fm.isReadableFile(atPath: prefsURL.path),
-                          let data = try? Data(contentsOf: prefsURL),
-                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let extensions = json["extensions"] as? [String: Any],
-                          let settings = extensions["settings"] as? [String: Any]
-                    else { continue }
-
-                    for (eid, raw) in settings {
-                        let candidateID = eid.lowercased()
-                        guard isValidExtensionID(candidateID) else { continue }
-                        guard let info = raw as? [String: Any] else { continue }
-                        if preferencesEntryMatchesMyPipCam(info) {
-                            found.append(candidateID)
-                        }
+                for (eid, raw) in settings {
+                    let candidateID = eid.lowercased()
+                    guard isValidExtensionID(candidateID) else { continue }
+                    guard let info = raw as? [String: Any] else { continue }
+                    if preferencesEntryMatchesMyPipCam(info, extensionID: candidateID) {
+                        found.append(candidateID)
                     }
                 }
             }
@@ -320,7 +375,18 @@ enum ExtensionLibraryOpener {
         return found
     }
 
-    private static func preferencesEntryMatchesMyPipCam(_ info: [String: Any]) -> Bool {
+    private static func preferencesEntryMatchesMyPipCam(_ info: [String: Any], extensionID: String) -> Bool {
+        // Chrome often omits embedded `manifest` for unpacked (location 4) installs.
+        if extensionID == defaultExtensionID {
+            let disabled = !((info["disable_reasons"] as? [Any]) ?? []).isEmpty
+                || ((info["disable_reasons"] as? [String: Any])?.isEmpty == false)
+            if !disabled {
+                // Stable-ID entry present and not disabled counts even without a name field.
+                if info["path"] != nil || info["location"] != nil || info["manifest"] != nil {
+                    return true
+                }
+            }
+        }
         if let manifest = info["manifest"] as? [String: Any],
            let name = manifest["name"] as? String,
            name.caseInsensitiveCompare(extensionDisplayName) == .orderedSame {
@@ -328,7 +394,7 @@ enum ExtensionLibraryOpener {
         }
         if let path = info["path"] as? String {
             let lowered = path.lowercased()
-            if lowered.contains("mypipcam") && lowered.contains("extension") {
+            if lowered.contains("mypipcam") && (lowered.contains("extension") || lowered.hasSuffix("/dist") || lowered.contains("/dist/")) {
                 return true
             }
             // Path points at a dist folder that still has our manifest.
@@ -345,29 +411,110 @@ enum ExtensionLibraryOpener {
 
     private static func chromeProfileMentions(extensionID: String) -> Bool {
         let fm = FileManager.default
-        for root in chromiumSupportRoots() {
-            guard let profiles = try? fm.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+        for profile in chromiumProfileDirectories() {
+            let localSettings = profile
+                .appendingPathComponent("Local Extension Settings")
+                .appendingPathComponent(extensionID)
+            if fm.fileExists(atPath: localSettings.path) { return true }
 
-            for profile in profiles {
-                let localSettings = profile
-                    .appendingPathComponent("Local Extension Settings")
-                    .appendingPathComponent(extensionID)
-                if fm.fileExists(atPath: localSettings.path) { return true }
+            for name in ["Secure Preferences", "Preferences"] {
+                let prefsURL = profile.appendingPathComponent(name)
+                guard fm.isReadableFile(atPath: prefsURL.path),
+                      let data = try? Data(contentsOf: prefsURL),
+                      let text = String(data: data, encoding: .utf8)
+                else { continue }
+                if text.contains(extensionID) { return true }
+            }
+        }
+        return false
+    }
 
-                for name in ["Secure Preferences", "Preferences"] {
-                    let prefsURL = profile.appendingPathComponent(name)
-                    guard let data = try? Data(contentsOf: prefsURL),
-                          let text = String(data: data, encoding: .utf8)
-                    else { continue }
-                    if text.contains(extensionID) { return true }
+    /// Sandbox often allows `fileExists` on known paths while blocking `contentsOfDirectory` /
+    /// `Data(contentsOf:)` for Chrome Preferences. Probe common profile names for this ID.
+    private static func extensionPresentViaPathProbe(id: String) -> Bool {
+        let fm = FileManager.default
+        for root in chromiumSupportRoots() where fm.fileExists(atPath: root.path) {
+            for profileName in commonProfileDirectoryNames() {
+                let profile = root.appendingPathComponent(profileName)
+                if !fm.fileExists(atPath: profile.path) { continue }
+                if extensionArtifactsExist(in: profile, extensionID: id) {
+                    return true
                 }
             }
         }
         return false
+    }
+
+    /// When prefs aren’t readable, still surface the stable ID if metadata dirs exist.
+    private static func detectExtensionIDsViaPathProbe() -> [String] {
+        var found: [String] = []
+        if extensionPresentViaPathProbe(id: defaultExtensionID) {
+            found.append(defaultExtensionID)
+        }
+        if let stored = UserDefaults.standard.string(forKey: extensionIdDefaultsKey) {
+            let cleaned = sanitizedExtensionID(stored)
+            if isValidExtensionID(cleaned),
+               cleaned != defaultExtensionID,
+               extensionPresentViaPathProbe(id: cleaned) {
+                found.append(cleaned)
+            }
+        }
+        return found
+    }
+
+    private static func extensionArtifactsExist(in profile: URL, extensionID: String) -> Bool {
+        let fm = FileManager.default
+        let candidates = [
+            profile.appendingPathComponent("Local Extension Settings").appendingPathComponent(extensionID),
+            profile.appendingPathComponent("Sync Extension Settings").appendingPathComponent(extensionID),
+            profile.appendingPathComponent("Extensions").appendingPathComponent(extensionID),
+            profile.appendingPathComponent("IndexedDB")
+                .appendingPathComponent("chrome-extension_\(extensionID)_0.indexeddb.leveldb"),
+            profile.appendingPathComponent("Storage")
+                .appendingPathComponent("ext-\(extensionID)"),
+        ]
+        return candidates.contains { fm.fileExists(atPath: $0.path) }
+    }
+
+    /// Profile dirs from a successful listing, or common names when listing is denied.
+    private static func chromiumProfileDirectories() -> [URL] {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        for root in chromiumSupportRoots() {
+            if let kids = try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for kid in kids {
+                    var isDir: ObjCBool = false
+                    guard fm.fileExists(atPath: kid.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                    let name = kid.lastPathComponent
+                    // Skip cache/system folders at the Chrome root.
+                    if name.hasSuffix("Cache") || name == "ShaderCache" || name == "GrShaderCache"
+                        || name == "GraphiteDawnCache" || name == "Crashpad" { continue }
+                    dirs.append(kid)
+                }
+                continue
+            }
+            // Listing denied: probe well-known profile folder names.
+            for name in commonProfileDirectoryNames() {
+                let profile = root.appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: profile.path, isDirectory: &isDir), isDir.boolValue {
+                    dirs.append(profile)
+                }
+            }
+        }
+        return dirs
+    }
+
+    private static func commonProfileDirectoryNames() -> [String] {
+        var names = ["Default", "Guest Profile", "System Profile"]
+        for i in 1...20 {
+            names.append("Profile \(i)")
+        }
+        return names
     }
 
     /// Real user home (not the App Sandbox container). Required for Chrome prefs detection
@@ -385,6 +532,8 @@ enum ExtensionLibraryOpener {
             support.appendingPathComponent("Google/Chrome"),
             support.appendingPathComponent("Google/Chrome Canary"),
             support.appendingPathComponent("Google/Chrome Beta"),
+            support.appendingPathComponent("Google/Chrome for Testing"),
+            support.appendingPathComponent("Google/ChromeForTesting"),
             support.appendingPathComponent("Chromium"),
             support.appendingPathComponent("BraveSoftware/Brave-Browser"),
             support.appendingPathComponent("Microsoft Edge"),
@@ -399,7 +548,11 @@ enum ExtensionLibraryOpener {
             at: idDir,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return false }
+        ) else {
+            // Can’t list versions (sandbox) — treat directory presence as a weak match only for
+            // the stable ID; packed CRX trees are under Extensions/<id>/<version>/.
+            return idDir.lastPathComponent.lowercased() == defaultExtensionID
+        }
 
         for version in versions {
             let manifestURL = version.appendingPathComponent("manifest.json")
@@ -620,26 +773,42 @@ enum ExtensionLibraryOpener {
     }
 
     @MainActor
-    private static func showFirstOpenTip(openedURL: URL) {
+    private static func showFirstOpenTip(openedURL: URL, directURL: URL?) {
         let alert = NSAlert()
         alert.messageText = "Opened Recording Library"
-        alert.informativeText = """
-        MyPipCam opened:
+        var text = """
+        MyPipCam opened the HTTPS bridge (so Chrome opens Library from inside the extension):
 
         \(openedURL.absoluteString)
 
-        If Chrome shows a blank page or “extension not found”, your install may use a different extension ID (common for older unpacked loads). Use Set Extension ID… and paste the ID from chrome://extensions.
+        If the bridge says it couldn’t reach the extension, reload MyPipCam on chrome://extensions (ID should be \(defaultExtensionID)).
+        If you ever open the raw chrome-extension:// URL and see ERR_BLOCKED_BY_CLIENT, an ad blocker is blocking it — use the bridge, disable the blocker for that tab, or click Library in the extension popup.
         """
+        if let directURL {
+            text += "\n\nDirect extension URL (fallback):\n\(directURL.absoluteString)"
+        }
+        alert.informativeText = text
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
-        if alert.runModal() == .alertSecondButtonReturn {
+        if let directURL {
+            alert.addButton(withTitle: "Open Direct URL…")
+        }
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
+        } else if response == .alertThirdButtonReturn, let directURL {
+            openInChromiumBrowser(directURL) { _, _ in }
         }
     }
 
     @MainActor
-    private static func showMissingExtensionHelp(openedURL: URL, openFailed: Bool, detail: String? = nil) {
+    private static func showMissingExtensionHelp(
+        openedURL: URL,
+        directURL: URL?,
+        openFailed: Bool,
+        detail: String? = nil
+    ) {
         openChromeExtensionsPage()
         revealExtensionDistInFinder()
 
@@ -657,9 +826,12 @@ enum ExtensionLibraryOpener {
         4. Confirm the ID under MyPipCam is \(defaultExtensionID) (or use Set Extension ID…)
         5. Choose the same library folder as this Mac app (suggested: ~/Movies/MyPipCam)
 
-        Target URL:
+        Bridge URL:
         \(openedURL.absoluteString)
         """
+        if let directURL {
+            text += "\n\nDirect extension URL:\n\(directURL.absoluteString)"
+        }
         if let detail, !detail.isEmpty {
             text += "\n\nDetails: \(detail)"
         }
@@ -668,9 +840,9 @@ enum ExtensionLibraryOpener {
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
         alert.addButton(withTitle: "Open Releases…")
-        alert.addButton(withTitle: "Copy URL")
+        alert.addButton(withTitle: "Copy Bridge URL")
         let response = alert.runModal()
-        // Buttons: OK (1000), Set Extension ID… (1001), Open Releases… (1002), Copy URL (1003)
+        // Buttons: OK (1000), Set Extension ID… (1001), Open Releases… (1002), Copy (1003)
         switch response {
         case .alertSecondButtonReturn:
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
@@ -685,10 +857,10 @@ enum ExtensionLibraryOpener {
     }
 
     @MainActor
-    private static func showOpenFailedAlert(openedURL: URL, detail: String?) {
+    private static func showOpenFailedAlert(openedURL: URL, directURL: URL?, detail: String?) {
         let alert = NSAlert()
         alert.messageText = "Couldn’t Open Chrome Library"
-        alert.informativeText = """
+        var text = """
         macOS couldn’t hand this URL to Chrome:
 
         \(openedURL.absoluteString)
@@ -696,18 +868,27 @@ enum ExtensionLibraryOpener {
         \(detail ?? "Unknown error")
 
         Try: quit and reopen Google Chrome, then use Open in Chrome… again.
-        If Chrome shows “extension not found”, use Set Extension ID… or Install Chrome Extension….
+        If Chrome shows ERR_BLOCKED_BY_CLIENT on a chrome-extension:// page, disable the ad blocker or open Library from the extension popup.
         """
+        if let directURL {
+            text += "\n\nDirect fallback:\n\(directURL.absoluteString)"
+        }
+        alert.informativeText = text
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
-        alert.addButton(withTitle: "Copy URL")
+        alert.addButton(withTitle: "Copy Bridge URL")
+        if directURL != nil {
+            alert.addButton(withTitle: "Open Direct URL…")
+        }
         let response = alert.runModal()
         if response == .alertSecondButtonReturn {
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
         } else if response == .alertThirdButtonReturn {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(openedURL.absoluteString, forType: .string)
+        } else if response == NSApplication.ModalResponse(rawValue: 1003), let directURL {
+            openInChromiumBrowser(directURL) { _, _ in }
         }
     }
 

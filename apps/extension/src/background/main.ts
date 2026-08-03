@@ -1628,6 +1628,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 })
 
+const OPEN_LIBRARY_BRIDGE_ORIGIN = 'https://mypipcam.earnyour.com'
+
+/**
+ * macOS “Open in Chrome…” lands on mypipcam.earnyour.com/open-library, which
+ * messages us so we open Library with chrome.tabs.create (popup path). Direct
+ * chrome-extension:// opens are often ERR_BLOCKED_BY_CLIENT under ad blockers.
+ */
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  try {
+    let origin = ''
+    if (sender.url) {
+      try {
+        origin = new URL(sender.url).origin
+      } catch {
+        origin = ''
+      }
+    }
+    if (origin !== OPEN_LIBRARY_BRIDGE_ORIGIN) {
+      replySafe(sendResponse, { ok: false, error: 'forbidden-origin' })
+      return false
+    }
+    if (message?.type !== 'OPEN_LIBRARY') {
+      replySafe(sendResponse, { ok: false, error: 'unknown-type' })
+      return false
+    }
+
+    const rawId = typeof message.id === 'string' ? message.id.trim() : ''
+    if (rawId && !isSafeRecordingId(rawId)) {
+      replySafe(sendResponse, { ok: false, error: 'invalid-id' })
+      return false
+    }
+
+    void (async () => {
+      try {
+        await openLibraryTab(rawId || undefined)
+        replySafe(sendResponse, { ok: true })
+      } catch (err) {
+        replySafe(sendResponse, {
+          ok: false,
+          error: errMessage(err, 'Could not open library'),
+        })
+      }
+    })()
+    return true
+  } catch (err) {
+    console.error('[MyPipCam] onMessageExternal crashed:', err)
+    replySafe(sendResponse, {
+      ok: false,
+      error: errMessage(err, 'External handler crashed'),
+    })
+    return false
+  }
+})
+
 function dispatchExtensionMessage(
   message: Record<string, any>,
   sender: chrome.runtime.MessageSender,

@@ -13,8 +13,9 @@ struct RecordToCloudSetupView: View {
     @AppStorage("cloudCaptureTarget") private var captureTargetRaw: String = CloudCaptureTarget.screen.rawValue
     @AppStorage("cloudCaptureDisplayID") private var savedDisplayID: Int = 0
     @AppStorage("cloudCaptureWindowID") private var savedWindowID: Int = 0
-    @AppStorage("cloudIncludeSystemAudio") private var includeSystemAudio = true
-    @AppStorage("cloudIncludeMicrophone") private var includeMicrophone = true
+    // Default video-only so mic/system-audio TCC never blocks first capture.
+    @AppStorage("cloudIncludeSystemAudio") private var includeSystemAudio = false
+    @AppStorage("cloudIncludeMicrophone") private var includeMicrophone = false
 
     @State private var selectedDisplayID: CGDirectDisplayID = 0
     @State private var selectedWindowID: CGWindowID = 0
@@ -90,25 +91,40 @@ struct RecordToCloudSetupView: View {
     private var screenRecordingPermissionBanner: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(
-                recorder.signingIdentityChanged && !recorder.needsScreenRecordingPermission
+                ScreenRecordingPermission.shared.status == .grantedPendingRelaunch
+                    ? "Quit & Relaunch required"
+                    : recorder.signingIdentityChanged && !recorder.needsScreenRecordingPermission
                     ? "App was reinstalled — confirm Screen Recording"
                     : "Screen Recording permission needed"
             )
             .font(.system(size: 13, weight: .semibold))
             Text(
-                recorder.needsScreenRecordingPermission
-                    ? "macOS declined capture for this copy of MyPipCam (even if the Settings toggle looks on). Toggle MyPipCam off → on, quit the app, then reopen."
-                    : "Developer-signed rebuilds often need Screen Recording re-granted. Open Settings, toggle MyPipCam off → on, quit, then reopen."
+                ScreenRecordingPermission.shared.status == .grantedPendingRelaunch
+                    ? ScreenCloudRecorderError.relaunchHelpText
+                    : recorder.needsScreenRecordingPermission
+                    ? "On this macOS, Screen Recording often has no Allow sheet. Enable MyPipCam under Screen & System Audio Recording, then Quit & Relaunch before Record will work."
+                    : "Developer-signed rebuilds need Screen Recording re-enabled in Settings, then a full Quit & Relaunch."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            if let diag = recorder.lastFailureDiagnostic {
+                Text(diag)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
             HStack(spacing: 10) {
-                Button("Open Screen Recording Settings…") {
+                Button("Quit & Relaunch") {
+                    ScreenRecordingPermission.shared.relaunch()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Open Settings…") {
                     ScreenCloudRecorder.openScreenRecordingSettings()
                 }
                 Button("Recheck") {
                     Task {
+                        ScreenRecordingPermission.shared.refresh()
                         _ = recorder.ensureScreenCaptureAccess()
                         await recorder.refreshShareableContent()
                     }
@@ -310,12 +326,11 @@ struct RecordToCloudSetupView: View {
 
     private func start() async {
         localError = nil
-        if captureTarget == .window && selectedWindowID == 0 {
+        // Do not block Start when the display list is empty — that used to look like a
+        // silent no-op. Always hand off to the coordinator so SCK runs and every failure
+        // surfaces as a modal alert with domain/code/description.
+        if captureTarget == .window && selectedWindowID == 0 && !recorder.windows.isEmpty {
             localError = "Select a window to capture."
-            return
-        }
-        if captureTarget == .screen && selectedDisplayID == 0 {
-            localError = "Select a display to capture."
             return
         }
 
@@ -324,11 +339,14 @@ struct RecordToCloudSetupView: View {
         isStarting = true
         defer { isStarting = false }
 
+        let displayID: CGDirectDisplayID? = selectedDisplayID == 0 ? nil : selectedDisplayID
+        let windowID: CGWindowID? = selectedWindowID == 0 ? nil : selectedWindowID
+
         await onStart(
             RecordToCloudCoordinator.StartConfig(
                 target: captureTarget,
-                displayID: selectedDisplayID,
-                windowID: selectedWindowID,
+                displayID: displayID,
+                windowID: windowID,
                 includeSystemAudio: includeSystemAudio,
                 includeMicrophone: includeMicrophone
             )

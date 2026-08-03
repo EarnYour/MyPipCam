@@ -6,13 +6,19 @@ export default defineManifest({
   name: 'MyPipCam',
   description:
     'Record this Chrome tab with a live draggable camera PiP (Loom-style). Local library and editor.',
-  version: '1.1.8',
+  version: '1.1.10',
   // PUBLIC key only → stable extension ID across unpacked reloads.
   // ID: akpchobfndfddajiihkkdpnihihdicjc
   // Matching PRIVATE key must never be committed (apps/extension/keys/*.pem).
   // Forks/distributors: generate your own keypair (`openssl genrsa` / Chrome pack)
   // and replace this field, or omit `key` and accept a new extension ID.
   key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvt5e+6w3dk+PBuZiSG2Wr/TvaPOlrIVMlYRmYUzsJSupxWtXf2J+wEpXNxS8Tp7dGovM2jFsKNcroQGKIrJpZFPhczdPoZFXXqv1tMxMjhXh8hVqwDu7lZFsohOk2Cl+9YR4SOz3khMzOr0XX6hN2Pz7oTXWeRhjl6plncvn2MprWEsGutxOdig/C+j0F3uu7bsYhGghHgjV7QDzNugTlVLhQbHw0Bq0fSxTxy1HxoYVDytgu7MXze5cTp+heQu9ClVoH+G+CLldcmuMCGM0DJb2EN707eAI2EPVLpqs1Fh7YSxOBra2Hxw8krcy09gfj48GXqd1Ps1ZmzSjReGgYQIDAQAB',
+  // Lets https://mypipcam.earnyour.com/open-library ask this extension to open
+  // Library via chrome.tabs (avoids ERR_BLOCKED_BY_CLIENT from ad blockers on
+  // direct chrome-extension:// navigation from the macOS app).
+  externally_connectable: {
+    matches: ['https://mypipcam.earnyour.com/*'],
+  },
   icons: {
     '16': 'icons/icon16.png',
     '32': 'icons/icon32.png',
