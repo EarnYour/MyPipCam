@@ -6,8 +6,10 @@ import {
   json,
   mapShare,
   readJson,
+  serverError,
   SHARE_SELECT,
 } from '../../_lib/supabase.js'
+import { rateLimit } from '../../_lib/rateLimit.js'
 
 /**
  * POST /api/shares/:id/view — record a watch-page open (counts as a view)
@@ -26,6 +28,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!rateLimit(req, res, 'share-view', 30)) return
+
     const id = String(req.query?.id || '').trim()
     if (!id || id.length < 8 || id.length > 64) {
       json(res, 400, { error: 'Invalid share id' })
@@ -49,7 +53,7 @@ export default async function handler(req, res) {
       .maybeSingle()
 
     if (findErr) {
-      json(res, 500, { error: findErr.message })
+      serverError(res, 'share lookup failed', findErr)
       return
     }
     if (!existing) {
@@ -76,18 +80,21 @@ export default async function handler(req, res) {
     })
 
     if (error) {
-      const expired = /share expired/i.test(error.message || '')
+      // The RPC raises for expired / missing / malformed ids. Anything else is
+      // a real fault and must not leak its message to the caller.
+      const msg = error.message || ''
+      const expired = /share expired/i.test(msg)
       const notFound =
-        /share not found|invalid share/i.test(error.message || '') ||
-        error.code === 'P0001'
-      json(
-        res,
-        expired ? 410 : notFound ? 404 : 500,
-        {
-          error: expired ? 'This link has expired' : error.message,
-          expired: expired || undefined,
-        },
-      )
+        /share not found|invalid share/i.test(msg) || error.code === 'P0001'
+      if (expired) {
+        json(res, 410, { error: 'This link has expired', expired: true })
+        return
+      }
+      if (notFound) {
+        json(res, 404, { error: 'Share not found' })
+        return
+      }
+      serverError(res, 'record view failed', error)
       return
     }
 
@@ -99,6 +106,10 @@ export default async function handler(req, res) {
 
     json(res, 200, { share: mapShare(row) })
   } catch (err) {
-    json(res, err.statusCode || 500, { error: err.message || 'Server error' })
+    if (err.statusCode) {
+      json(res, err.statusCode, { error: err.message })
+      return
+    }
+    serverError(res, 'view handler failed', err)
   }
 }

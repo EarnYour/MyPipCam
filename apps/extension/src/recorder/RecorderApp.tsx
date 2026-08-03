@@ -50,6 +50,7 @@ export function RecorderApp() {
   const mimeRef = useRef('video/webm')
   const startedAtRef = useRef(0)
   const timerRef = useRef<number | null>(null)
+  const sizeSliderTimerRef = useRef<number | null>(null)
   const phaseRef = useRef<Phase>('idle')
   phaseRef.current = phase
 
@@ -261,30 +262,32 @@ export function RecorderApp() {
     }
 
     const durationMs = Date.now() - startedAtRef.current
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      recorder.onstop = () => {
-        resolve(new Blob(chunksRef.current, { type: mimeRef.current }))
-      }
-      recorder.onerror = () => reject(new Error('Recorder failed'))
-      try {
-        if (recorder.state !== 'inactive') recorder.stop()
-        else resolve(new Blob(chunksRef.current, { type: mimeRef.current }))
-      } catch (e) {
-        reject(e)
-      }
-    })
-
-    const thumbnail = await captureThumbnail(bundle.canvas)
-    const bubble = bubbleApiRef.current?.getBubbleRect()
-    if (bubble) {
-      await savePipSettings({
-        bubbleX: bubble.x,
-        bubbleY: bubble.y,
-        bubbleSize: bubble.size,
-      })
-    }
-
     try {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          resolve(new Blob(chunksRef.current, { type: mimeRef.current }))
+        }
+        recorder.onerror = () => reject(new Error('Recorder failed'))
+        try {
+          if (recorder.state !== 'inactive') recorder.stop()
+          else resolve(new Blob(chunksRef.current, { type: mimeRef.current }))
+        } catch (e) {
+          reject(e)
+        }
+      })
+
+      // Thumbnail and bubble-position persistence are best-effort — neither
+      // may cost the user the recording itself.
+      const thumbnail = await captureThumbnail(bundle.canvas).catch(() => undefined)
+      const bubble = bubbleApiRef.current?.getBubbleRect()
+      if (bubble) {
+        await savePipSettings({
+          bubbleX: bubble.x,
+          bubbleY: bubble.y,
+          bubbleSize: bubble.size,
+        }).catch(() => {})
+      }
+
       const record = await saveRecording({
         blob,
         durationMs,
@@ -332,7 +335,13 @@ export function RecorderApp() {
       bubbleApiRef.current?.getBubbleRect().y ?? settings!.bubbleY,
       value,
     )
-    void patchSettings({ bubbleSize: value })
+    // Debounce: the slider fires per pixel and storage.sync caps writes at
+    // 120/minute — persist only once the user settles.
+    if (sizeSliderTimerRef.current != null) window.clearTimeout(sizeSliderTimerRef.current)
+    sizeSliderTimerRef.current = window.setTimeout(() => {
+      sizeSliderTimerRef.current = null
+      void patchSettings({ bubbleSize: value })
+    }, 250)
   }
 
   if (!settings) {

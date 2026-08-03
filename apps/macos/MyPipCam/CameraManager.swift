@@ -26,6 +26,9 @@ final class CameraManager: ObservableObject {
     private var startGeneration = 0
     private let sessionQueue = DispatchQueue(label: "com.mypipcam.session")
     private var deviceObservers: [NSObjectProtocol] = []
+    /// uniqueID of the device currently wired into `session`, so an activation
+    /// that changes nothing can skip the teardown/rebuild entirely.
+    private var configuredDeviceID: String?
     private var runtimeErrorObserver: NSObjectProtocol?
 
     init() {
@@ -72,6 +75,14 @@ final class CameraManager: ObservableObject {
         var seen = Set<String>()
         devices = discovery.devices.filter { seen.insert($0.uniqueID).inserted }
 
+        // A device that unplugged and came back keeps its uniqueID, so the
+        // "nothing changed" fast path in startSession would wrongly skip the
+        // rebuild the dead capture graph needs. Forget it while it is absent.
+        if let configured = configuredDeviceID,
+           !devices.contains(where: { $0.uniqueID == configured }) {
+            configuredDeviceID = nil
+        }
+
         if selectedDeviceID.isEmpty || !devices.contains(where: { $0.uniqueID == selectedDeviceID }) {
             selectedDeviceID = Self.preferredDefaultDeviceID(from: devices) ?? ""
         }
@@ -105,7 +116,9 @@ final class CameraManager: ObservableObject {
         }
     }
 
-    func startSession() async {
+    /// - Parameter force: rebuild the capture graph even if it already runs the
+    ///   selected device (used when the device list changes underneath us).
+    func startSession(force: Bool = false) async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         authorizationStatus = status
 
@@ -122,11 +135,26 @@ final class CameraManager: ObservableObject {
         errorMessage = nil
         refreshDevices()
 
+        // Bound once, above the fast path below: a local named `session`
+        // shadows the property for the whole function body, so referencing
+        // the bare name before this line is a use-before-declaration.
+        let session = self.session
+
+        // Tearing down and re-adding the input drops frames — the bubble goes
+        // black for a moment, which is visible to anyone capturing it (OBS).
+        // Every app activation calls in here, so no-op when nothing changed.
+        // `session.isRunning` is the authoritative check: the published
+        // `isRunning` can lag if the session stopped on its own. This sits
+        // after `refreshDevices()` so an unplugged device has already cleared
+        // `configuredDeviceID` and can't be mistaken for "nothing changed".
+        if !force, isConfigured, configuredDeviceID == selectedDeviceID, session.isRunning {
+            return
+        }
+
         startGeneration += 1
         let generation = startGeneration
         let preferredID = selectedDeviceID
         let fallbackIDs = Self.fallbackDeviceIDs(preferred: preferredID, devices: devices)
-        let session = self.session
 
         let result: StartResult = await withCheckedContinuation { continuation in
             sessionQueue.async {
@@ -145,6 +173,9 @@ final class CameraManager: ObservableObject {
             isConfigured = true
             isRunning = true
             errorMessage = nil
+            // Remember what is actually wired in, so the next activation can
+            // take the no-op fast path above instead of rebuilding the graph.
+            configuredDeviceID = deviceID
             if selectedDeviceID != deviceID {
                 suppressDeviceRestart = true
                 selectedDeviceID = deviceID
@@ -154,6 +185,7 @@ final class CameraManager: ObservableObject {
             isConfigured = false
             isRunning = false
             errorMessage = message
+            configuredDeviceID = nil
             if clearSelection, !selectedDeviceID.isEmpty {
                 // Drop a stale ID so the next retry can pick a healthy default.
                 UserDefaults.standard.removeObject(forKey: Self.selectedDeviceDefaultsKey)
@@ -195,17 +227,20 @@ final class CameraManager: ObservableObject {
                     selectedDeviceID = deviceID
                     suppressDeviceRestart = false
                 }
+                configuredDeviceID = deviceID
             case .failed(let message, _):
                 isConfigured = false
                 isRunning = false
                 errorMessage = message
+                configuredDeviceID = nil
             }
         }
     }
 
     private func restartSessionIfNeeded() async {
         guard isConfigured || isRunning || authorizationStatus == .authorized else { return }
-        await startSession()
+        // The selected device just changed, so the running graph is stale.
+        await startSession(force: true)
     }
 
     func stopSession() {
@@ -216,6 +251,7 @@ final class CameraManager: ObservableObject {
             }
             DispatchQueue.main.async {
                 self.isRunning = false
+                self.configuredDeviceID = nil
             }
         }
     }

@@ -691,7 +691,8 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoking synchronously can abort large downloads Chrome hasn't committed yet.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export function recordingFilename(rec: Pick<RecordingMeta, 'title' | 'mimeType'>): string {

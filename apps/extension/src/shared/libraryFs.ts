@@ -369,7 +369,9 @@ async function readRecordingFromDir(
 ): Promise<RecordingRecord | undefined> {
   const meta = await readJsonFile<DiskMeta>(dir, 'meta.json')
   if (!meta?.id || !isSafeRecordingId(meta.id)) return undefined
-  if (!isSafeRecordingId(fallbackId) && fallbackId !== meta.id) return undefined
+  // The folder name is the source of truth — a meta.json claiming a different
+  // id would make the entry undeletable/unrenamable (ops target the meta id).
+  if (fallbackId !== meta.id) return undefined
 
   let video = await readBlobFile(dir, 'video.webm')
   let mimeType = meta.mimeType || 'video/webm'

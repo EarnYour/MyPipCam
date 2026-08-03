@@ -10,8 +10,10 @@ import {
   normalizeExpiresInDays,
   normalizeProcessingStatus,
   readJson,
+  serverError,
   SHARE_SELECT,
 } from '../_lib/supabase.js'
+import { rateLimit } from '../_lib/rateLimit.js'
 
 /**
  * GET   /api/shares/:id — public share metadata for the watch page
@@ -26,6 +28,14 @@ export default async function handler(req, res) {
   }
 
   try {
+    // PATCH mutates the row (including pushing back expiry) and is
+    // unauthenticated, so it gets a much tighter budget than the read path.
+    const limited =
+      req.method === 'PATCH'
+        ? !rateLimit(req, res, 'share-patch', 20)
+        : !rateLimit(req, res, 'share-get', 120)
+    if (limited) return
+
     const id = String(req.query?.id || '').trim()
     if (!id || id.length < 8 || id.length > 64) {
       json(res, 400, { error: 'Invalid share id' })
@@ -42,7 +52,7 @@ export default async function handler(req, res) {
         .maybeSingle()
 
       if (error) {
-        json(res, 500, { error: error.message })
+        serverError(res, 'share fetch failed', error)
         return
       }
       if (!data) {
@@ -107,7 +117,7 @@ export default async function handler(req, res) {
         .maybeSingle()
 
       if (error) {
-        json(res, 500, { error: error.message })
+        serverError(res, 'share update failed', error)
         return
       }
       if (!data) {
@@ -121,6 +131,10 @@ export default async function handler(req, res) {
 
     json(res, 405, { error: 'Method not allowed' })
   } catch (err) {
-    json(res, err.statusCode || 500, { error: err.message || 'Server error' })
+    if (err.statusCode) {
+      json(res, err.statusCode, { error: err.message })
+      return
+    }
+    serverError(res, 'share handler failed', err)
   }
 }

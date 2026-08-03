@@ -50,6 +50,8 @@ const dynamicHits = []
 /** @type {string[]} */
 const blurHits = []
 /** @type {string[]} */
+const unresolved = []
+/** @type {string[]} */
 const loaderHits = []
 /** @type {string[]} */
 const swFiles = []
@@ -98,14 +100,34 @@ while (queue.length) {
     re.lastIndex = 0
     let m
     while ((m = re.exec(code))) {
-      const next = resolveImport(file, m[1])
-      if (next && !visited.has(next)) queue.push(next)
+      const spec = m[1]
+      // Bare specifiers are bundled away by Vite; only relative/absolute
+      // specifiers should appear, and each must resolve to a real file.
+      if (!spec.startsWith('.') && !spec.startsWith('/')) continue
+      const next = resolveImport(file, spec)
+      if (!next) {
+        unresolved.push(`${rel} -> ${spec}`)
+        continue
+      }
+      if (!visited.has(next)) queue.push(next)
     }
   }
 }
 
-if (visited.size === 0) {
-  console.error('[verify-sw] SW graph is empty')
+// The loader is a one-line re-export; if we only ever saw that file, the graph
+// walk silently missed the real SW bundle and every check below is vacuous.
+if (visited.size < 2) {
+  console.error(
+    `[verify-sw] SW graph has only ${visited.size} file(s) — the walk did not reach the SW bundle, so these checks prove nothing`,
+  )
+  process.exit(1)
+}
+
+if (unresolved.length) {
+  console.error(
+    '[verify-sw] unresolved imports in SW graph (walk incomplete):',
+    unresolved.join(', '),
+  )
   process.exit(1)
 }
 

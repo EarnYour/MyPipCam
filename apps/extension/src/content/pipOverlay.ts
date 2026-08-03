@@ -1564,6 +1564,7 @@ class TabOverlay {
     // shadow, so composedPath() still includes dock/menu nodes.
     this.root.addEventListener('pointerdown', this.onOverlayPointerDown)
     document.addEventListener('pointerdown', this.onDocPointerDown, true)
+    window.addEventListener('resize', this.onWindowResize)
 
     this.apply()
 
@@ -2610,7 +2611,28 @@ class TabOverlay {
     this.bubble.classList.toggle('is-square', this.state.shape === 'square')
   }
 
+  // Bubble position is stored normalized (0..1) and applied in viewport pixels,
+  // so a window resize must re-apply or the bubble drifts off-screen.
+  private onWindowResize = () => {
+    this.apply()
+  }
+
+  private persistTimer: number | null = null
+
+  /**
+   * Trailing debounce: wheel-resize fires dozens of events per second, and the
+   * live path ends in a chrome.storage.sync write capped at 120 writes/minute —
+   * bursts would make all settings writes fail for the next minute.
+   */
   private persist() {
+    if (this.persistTimer != null) window.clearTimeout(this.persistTimer)
+    this.persistTimer = window.setTimeout(() => {
+      this.persistTimer = null
+      this.persistNow()
+    }, 250)
+  }
+
+  private persistNow() {
     if (this.state.mode === 'live') {
       try {
         void chrome.runtime.sendMessage({
@@ -2798,6 +2820,7 @@ class TabOverlay {
     this.dock.removeEventListener('pointerdown', this.onDockPointerDown)
     this.root.removeEventListener('pointerdown', this.onOverlayPointerDown)
     document.removeEventListener('pointerdown', this.onDocPointerDown, true)
+    window.removeEventListener('resize', this.onWindowResize)
     window.removeEventListener('message', this.onPipMessage)
     void chrome.runtime.sendMessage({
       type: 'REVOKE_PIP_CHANNEL',
@@ -2865,7 +2888,12 @@ window[HANDLER_KEY] = (message, _sender, sendResponse) => {
         throw new Error('Recording overlay failed to attach to the page')
       }
       // One frame lets layout settle after mount before the visibility probe.
-      requestAnimationFrame(() => {
+      // rAF never fires while the tab is hidden, so race it with a timer —
+      // otherwise the background's sendMessage await would hang forever.
+      let responded = false
+      const finishVisibleCheck = () => {
+        if (responded) return
+        responded = true
         try {
           if (!overlay) throw new Error('Recording overlay disappeared after mount')
           const visibility = overlay.getVisibility()
@@ -2891,7 +2919,9 @@ window[HANDLER_KEY] = (message, _sender, sendResponse) => {
           console.error('[MyPipCam][start] PIP_OVERLAY_START visible-check failed:', reason, err)
           sendResponse({ ok: false, reason })
         }
-      })
+      }
+      requestAnimationFrame(finishVisibleCheck)
+      window.setTimeout(finishVisibleCheck, 300)
     } catch (err) {
       try {
         overlay?.dispose()

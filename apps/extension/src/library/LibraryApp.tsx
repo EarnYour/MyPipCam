@@ -389,6 +389,12 @@ export function LibraryApp() {
         Object.values(prev).forEach((u) => URL.revokeObjectURL(u))
         return urls
       })
+    } catch (err) {
+      // Without this the rejection is unhandled and the library silently shows
+      // "No recordings yet", which reads as data loss.
+      setBannerMsg(
+        err instanceof Error ? err.message : 'Could not load the library. Try reloading.',
+      )
     } finally {
       setLoading(false)
     }

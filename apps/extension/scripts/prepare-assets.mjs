@@ -1,9 +1,28 @@
 import { deflateSync } from 'node:zlib'
-import { mkdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  mkdirSync,
+  writeFileSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// postinstall runs with --tolerant so `npm install` still succeeds offline;
+// dev/build run without it and must fail loudly on a missing or corrupt asset
+// rather than shipping a build whose blur/export silently breaks at runtime.
+const tolerant = process.argv.includes('--tolerant')
+const problems = []
+
+function assetProblem(message) {
+  problems.push(message)
+  console.warn(tolerant ? `${message} (tolerated)` : message)
+}
 const iconsDir = join(root, 'public', 'icons')
 const ffmpegDir = join(root, 'public', 'ffmpeg')
 const mediapipeWasmDir = join(root, 'public', 'mediapipe', 'wasm')
@@ -178,7 +197,9 @@ for (const dir of coreCandidates) {
 }
 
 if (!copied) {
-  console.warn('ffmpeg core not found yet — run again after npm install')
+  assetProblem(
+    'ffmpeg core not found — run npm install (@ffmpeg/core), then npm run prepare-assets',
+  )
 }
 
 /** MediaPipe Image Segmenter WASM (SIMD + nosimd). ~21MB total — loaded only when blur is on. */
@@ -202,30 +223,55 @@ if (existsSync(mediapipeWasmSrc)) {
 if (mediapipeCopied === mediapipeWasmFiles.length) {
   console.log(`Copied MediaPipe vision WASM (${mediapipeCopied} files)`)
 } else {
-  console.warn(
+  assetProblem(
     'MediaPipe WASM incomplete — run npm install (@mediapipe/tasks-vision), then npm run prepare-assets',
   )
 }
 
 const selfieModel = join(mediapipeModelsDir, 'selfie_segmenter.tflite')
+
+// Pinned to model revision 1, not "latest": the build fetches this over the
+// network into the shipped extension, so an upstream change must not silently
+// alter what we publish. Update URL and hash together after verifying a new
+// revision. sha256 of float16/1/selfie_segmenter.tflite (249537 bytes).
 const SELFIE_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite'
+  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite'
+const SELFIE_MODEL_SHA256 =
+  '191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b'
+
+function sha256(buf) {
+  return createHash('sha256').update(buf).digest('hex')
+}
 
 async function ensureSelfieModel() {
   if (existsSync(selfieModel)) {
-    console.log('MediaPipe selfie_segmenter.tflite present')
-    return
+    const actual = sha256(readFileSync(selfieModel))
+    if (actual === SELFIE_MODEL_SHA256) {
+      console.log('MediaPipe selfie_segmenter.tflite present (checksum ok)')
+      return
+    }
+    console.warn(
+      `selfie_segmenter.tflite checksum mismatch (${actual}) — re-downloading pinned revision`,
+    )
+    rmSync(selfieModel, { force: true })
   }
   try {
     const res = await fetch(SELFIE_MODEL_URL)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const buf = Buffer.from(await res.arrayBuffer())
+    const actual = sha256(buf)
+    if (actual !== SELFIE_MODEL_SHA256) {
+      throw new Error(
+        `checksum mismatch: expected ${SELFIE_MODEL_SHA256}, got ${actual}`,
+      )
+    }
     writeFileSync(selfieModel, buf)
-    console.log('Downloaded selfie_segmenter.tflite')
+    console.log('Downloaded selfie_segmenter.tflite (checksum verified)')
   } catch (err) {
-    console.warn(
-      'Could not download selfie_segmenter.tflite — background blur will fail until the model is present:',
-      err,
+    assetProblem(
+      `Could not fetch a verified selfie_segmenter.tflite — background blur will not work: ${
+        err instanceof Error ? err.message : err
+      }`,
     )
   }
 }
@@ -233,3 +279,11 @@ async function ensureSelfieModel() {
 await ensureSelfieModel()
 
 console.log('Icons written to public/icons (RGBA transparent)')
+
+if (problems.length && !tolerant) {
+  console.error(
+    `\nprepare-assets failed — ${problems.length} asset problem(s):\n` +
+      problems.map((p) => `  - ${p}`).join('\n'),
+  )
+  process.exit(1)
+}

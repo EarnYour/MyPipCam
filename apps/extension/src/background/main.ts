@@ -30,6 +30,12 @@ import {
 } from '../shared/security'
 import { normalizeBorderWidth, type RecordMode } from '../shared/types'
 
+// Content scripts (pipOverlay guide mode) write pipOverlayLive to session
+// storage; without this, those writes reject and the recorder never sees them.
+void chrome.storage.session
+  .setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
+  .catch(() => {})
+
 /** Short-lived tokens allowing the WAR PiP iframe to start the camera. */
 const PIP_TOKEN_TTL_MS = 10 * 60 * 1000
 const PIP_TOKEN_PREFIX = 'pipCh:'
@@ -701,7 +707,10 @@ function restrictedPageReason(url: string | undefined): string {
   return "Can't record this page. Open a normal website tab (https://…) and try again."
 }
 
-async function resolveTargetTab(explicitTabId?: number): Promise<
+async function resolveTargetTab(
+  explicitTabId?: number,
+  opts?: { fallbackToRecentTab?: boolean },
+): Promise<
   | { ok: true; tab: chrome.tabs.Tab }
   | { ok: false; reason: string }
 > {
@@ -720,6 +729,19 @@ async function resolveTargetTab(explicitTabId?: number): Promise<
 
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (active?.id && isInjectableUrl(active.url)) return { ok: true, tab: active }
+
+  // The advanced recorder calls from its own extension tab, so the active tab
+  // is never injectable there — target the most recently used http(s) tab in
+  // the window instead. Main record-start must NOT do this: capture targets
+  // the active tab, and silently recording a different tab would be wrong.
+  if (opts?.fallbackToRecentTab) {
+    const tabs = await chrome.tabs.query({ currentWindow: true })
+    const recent = tabs
+      .filter((t) => t.id != null && t.id !== active?.id && isInjectableUrl(t.url))
+      .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0]
+    if (recent) return { ok: true, tab: recent }
+  }
+
   if (active?.url) return { ok: false, reason: restrictedPageReason(active.url) }
 
   return {
@@ -1501,9 +1523,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     hudTabId = null
     // Fallback HUD tab closed — page dock (if any) remains the primary UI.
   }
-  if (loomSession?.tabId === tabId) {
-    void discardLoomRecording()
-  }
+  // Hydrate first: after an MV3 SW restart the in-memory session is gone
+  // while offscreen capture for the closed tab may still be live, which left
+  // the badge on REC and the offscreen document running with no way to stop.
+  void (async () => {
+    const session = (await hydrateLoomSession()) ?? loomSession
+    if (session?.tabId === tabId) {
+      await discardLoomRecording()
+    }
+  })()
 })
 
 /**
@@ -1697,10 +1725,14 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'REVOKE_PIP_CHANNEL') {
+    // Same gate as REGISTER: only the content script that minted a token may
+    // revoke it — a WAR iframe must not be able to kill another tab's channel.
+    if (!isContentScriptSender(sender) || !isPipChannelToken(message.token)) {
+      sendResponse({ ok: false, reason: 'invalid-pip-channel' })
+      return false
+    }
     void (async () => {
-      if (isPipChannelToken(message.token)) {
-        await revokePipChannelToken(message.token)
-      }
+      await revokePipChannelToken(message.token)
       sendResponse({ ok: true })
     })()
     return true
@@ -2173,6 +2205,10 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'LOOM_BUBBLE_SHAPE') {
+    if (!isContentScriptSender(sender)) {
+      sendResponse({ ok: false, reason: 'untrusted-sender' })
+      return false
+    }
     const bubbleShape = message.bubbleShape === 'square' ? 'square' : 'circle'
     void (async () => {
       await savePipSettings({ bubbleShape })
@@ -2193,6 +2229,10 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'LOOM_BUBBLE_EFFECT') {
+    if (!isContentScriptSender(sender)) {
+      sendResponse({ ok: false, reason: 'untrusted-sender' })
+      return false
+    }
     const backgroundEffect = message.backgroundEffect === 'blur' ? 'blur' : 'none'
     void (async () => {
       await savePipSettings({ backgroundEffect })
@@ -2213,6 +2253,10 @@ function dispatchExtensionMessage(
   }
 
   if (message?.type === 'LOOM_BUBBLE_FILTER') {
+    if (!isContentScriptSender(sender)) {
+      sendResponse({ ok: false, reason: 'untrusted-sender' })
+      return false
+    }
     const cameraFilter = normalizeCameraFilter(message.cameraFilter)
     void (async () => {
       await savePipSettings({ cameraFilter })
@@ -2276,7 +2320,9 @@ function dispatchExtensionMessage(
     void (async () => {
       let toastTabId: number | undefined
       try {
-        const resolved = await resolveTargetTab(message.tabId)
+        const resolved = await resolveTargetTab(message.tabId, {
+          fallbackToRecentTab: true,
+        })
         if (!resolved.ok || !resolved.tab.id) {
           sendResponse({ ok: false, reason: resolved.ok ? 'no-tab' : resolved.reason })
           return

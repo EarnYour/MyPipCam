@@ -160,10 +160,21 @@ export async function clearDriveAuthDirect(): Promise<void> {
   if (!identityApiAvailable()) {
     throw new DriveAuthError(missingIdentityMessage(), 'identity_unavailable')
   }
-  const token = await getAccessTokenDirect(false).catch(() => null)
+  // getAuthToken(interactive:false) can hang in some Chrome/identity states —
+  // never let Disconnect hang on it.
+  const token = await withTimeout(
+    getAccessTokenDirect(false).catch(() => null),
+    5000,
+    null,
+  )
   if (token) {
     try {
-      await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${encodeURIComponent(token)}`)
+      // POST body keeps the token out of URLs (proxy/history logs).
+      await fetch('https://oauth2.googleapis.com/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `token=${encodeURIComponent(token)}`,
+      })
     } catch {
       /* best-effort revoke */
     }

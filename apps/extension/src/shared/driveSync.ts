@@ -301,19 +301,19 @@ async function uploadRecordingToDriveOnce(
   record: RecordingRecord,
   interactive: boolean,
 ): Promise<DriveUploadResult> {
+  // Already uploaded — skip the ensureLibraryFolder round-trips entirely.
+  if (record.driveFileId) {
+    return {
+      driveFileId: record.driveFileId,
+      driveWebViewLink: record.driveWebViewLink,
+      driveShared: Boolean(record.driveShared),
+    }
+  }
+
   const settings = await loadDriveSettings()
   const folder = await ensureLibraryFolder(settings.folderId, interactive)
   if (folder.id !== settings.folderId) {
     await saveDriveSettings({ folderId: folder.id, folderName: folder.name })
-  }
-
-  if (record.driveFileId) {
-    const link = record.driveWebViewLink
-    return {
-      driveFileId: record.driveFileId,
-      driveWebViewLink: link,
-      driveShared: Boolean(record.driveShared),
-    }
   }
 
   if (!record.blob || record.blob.size < 1) {

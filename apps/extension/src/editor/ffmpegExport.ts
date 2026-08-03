@@ -98,65 +98,53 @@ export async function exportEditedVideo(
   onLog?: (msg: string) => void,
 ): Promise<Blob> {
   const ffmpeg = await getFFmpeg(onLog)
-  ffmpeg.on('progress', ({ progress }) => onProgress?.(Math.min(1, Math.max(0, progress))))
+  // Named so it can be removed in `finally` — the ffmpeg instance is a
+  // singleton, so an anonymous listener per export accumulates forever and
+  // every later export fires every earlier export's progress callback.
+  const progressHandler = ({ progress }: { progress: number }) =>
+    onProgress?.(Math.min(1, Math.max(0, progress)))
+  ffmpeg.on('progress', progressHandler)
 
   const inName = 'input.webm'
   const outName = 'output.webm'
-  await safeDelete(ffmpeg, inName)
-  await safeDelete(ffmpeg, outName)
-  await ffmpeg.writeFile(inName, await fetchFile(input))
 
-  const segments = planToKeepSegments(plan)
-  if (segments.length === 0) {
+  try {
+    // Stale files from an earlier failed export would otherwise poison this one.
     await safeDelete(ffmpeg, inName)
-    throw new Error('Nothing left to export — adjust trim, silence, or filler cuts.')
-  }
-
-  // Guard absurd plans (all cuts / float noise).
-  const totalKeep = segments.reduce((sum, s) => sum + (s.end - s.start), 0)
-  if (totalKeep < 0.05) {
-    await safeDelete(ffmpeg, inName)
-    throw new Error('Output would be under 0.05s — loosen your cuts.')
-  }
-
-  const noise = plan.noiseReduce ? ',afftdn=nf=-25' : ''
-
-  const run = async (args: string[]) => {
     await safeDelete(ffmpeg, outName)
-    await ffmpeg.exec(args)
-  }
+    await ffmpeg.writeFile(inName, await fetchFile(input))
 
-  onLog?.(`Exporting ${segments.length} segment(s)…`)
+    const segments = planToKeepSegments(plan)
+    if (segments.length === 0) {
+      throw new Error('Nothing left to export — adjust trim, silence, or filler cuts.')
+    }
 
-  if (segments.length === 1 && !plan.noiseReduce) {
-    const seg = segments[0]!
-    // Input-seek for speed, then accurate -to as absolute timestamp.
-    try {
-      await run([
-        '-ss',
-        String(seg.start),
-        '-to',
-        String(seg.end),
-        '-i',
-        inName,
-        '-c:v',
-        'libvpx',
-        '-b:v',
-        '2M',
-        '-c:a',
-        'libvorbis',
-        outName,
-      ])
-    } catch {
-      // Retry with decode-then-seek (more accurate) + video-only fallback.
+    // Guard absurd plans (all cuts / float noise).
+    const totalKeep = segments.reduce((sum, s) => sum + (s.end - s.start), 0)
+    if (totalKeep < 0.05) {
+      throw new Error('Output would be under 0.05s — loosen your cuts.')
+    }
+
+    const noise = plan.noiseReduce ? ',afftdn=nf=-25' : ''
+
+    const run = async (args: string[]) => {
+      await safeDelete(ffmpeg, outName)
+      await ffmpeg.exec(args)
+    }
+
+    onLog?.(`Exporting ${segments.length} segment(s)…`)
+
+    if (segments.length === 1 && !plan.noiseReduce) {
+      const seg = segments[0]!
+      // Input-seek for speed, then accurate -to as absolute timestamp.
       try {
         await run([
-          '-i',
-          inName,
           '-ss',
           String(seg.start),
           '-to',
           String(seg.end),
+          '-i',
+          inName,
           '-c:v',
           'libvpx',
           '-b:v',
@@ -166,52 +154,75 @@ export async function exportEditedVideo(
           outName,
         ])
       } catch {
-        await run([
-          '-i',
-          inName,
-          '-ss',
-          String(seg.start),
-          '-to',
-          String(seg.end),
-          '-c:v',
-          'libvpx',
-          '-b:v',
-          '2M',
-          '-an',
-          outName,
-        ])
+        // Retry with decode-then-seek (more accurate) + video-only fallback.
+        try {
+          await run([
+            '-i',
+            inName,
+            '-ss',
+            String(seg.start),
+            '-to',
+            String(seg.end),
+            '-c:v',
+            'libvpx',
+            '-b:v',
+            '2M',
+            '-c:a',
+            'libvorbis',
+            outName,
+          ])
+        } catch {
+          await run([
+            '-i',
+            inName,
+            '-ss',
+            String(seg.start),
+            '-to',
+            String(seg.end),
+            '-c:v',
+            'libvpx',
+            '-b:v',
+            '2M',
+            '-an',
+            outName,
+          ])
+        }
       }
-    }
-  } else {
-    const tryChain = async (withAudio: boolean, noiseExtra: string) => {
-      await run(buildConcatArgs(inName, outName, segments, withAudio, noiseExtra))
-    }
-    try {
-      await tryChain(true, noise)
-    } catch {
+    } else {
+      const tryChain = async (withAudio: boolean, noiseExtra: string) => {
+        await run(buildConcatArgs(inName, outName, segments, withAudio, noiseExtra))
+      }
       try {
-        // Retry without noise reduction if afftdn is unavailable in this ffmpeg build
-        onLog?.('Retrying export without noise reduction…')
-        await tryChain(true, '')
+        await tryChain(true, noise)
       } catch {
-        onLog?.('Retrying export without audio…')
-        await tryChain(false, '')
+        try {
+          // Retry without noise reduction if afftdn is unavailable in this ffmpeg build
+          onLog?.('Retrying export without noise reduction…')
+          await tryChain(true, '')
+        } catch {
+          onLog?.('Retrying export without audio…')
+          await tryChain(false, '')
+        }
       }
     }
-  }
 
-  const data = await ffmpeg.readFile(outName)
-  await safeDelete(ffmpeg, inName)
-  await safeDelete(ffmpeg, outName)
-
-  const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data))
-  if (bytes.byteLength < 32) {
-    throw new Error('Export produced an empty file. Try a simpler trim or disable noise reduction.')
+    const data = await ffmpeg.readFile(outName)
+    const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data))
+    if (bytes.byteLength < 32) {
+      throw new Error(
+        'Export produced an empty file. Try a simpler trim or disable noise reduction.',
+      )
+    }
+    // Copy into a fresh ArrayBuffer-backed Uint8Array for Blob Part compatibility
+    const copy = new Uint8Array(bytes.byteLength)
+    copy.set(bytes)
+    return new Blob([copy], { type: 'video/webm' })
+  } finally {
+    // Runs on the throw paths too, so a failed export leaves no MEMFS residue.
+    ffmpeg.off('progress', progressHandler)
+    await safeDelete(ffmpeg, inName)
+    await safeDelete(ffmpeg, outName)
   }
-  // Copy into a fresh ArrayBuffer-backed Uint8Array for Blob Part compatibility
-  const copy = new Uint8Array(bytes.byteLength)
-  copy.set(bytes)
-  return new Blob([copy], { type: 'video/webm' })
 }
 
 function buildConcatArgs(

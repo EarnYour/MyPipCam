@@ -216,16 +216,27 @@ export async function listLibraryFiles(
     'trashed = false',
     `appProperties has { key='mypipcamId' }`,
   ].join(' and ')
-  const params = new URLSearchParams({
-    q,
-    spaces: 'drive',
-    fields:
-      'files(id,name,mimeType,webViewLink,webContentLink,size,createdTime,appProperties)',
-    pageSize: '200',
-  })
-  const res = await authFetch(`${DRIVE_API}/files?${params}`, {}, interactive)
-  const data = await parseJson<{ files?: DriveFileMeta[] }>(res)
-  return data.files ?? []
+
+  const all: DriveFileMeta[] = []
+  let pageToken: string | undefined
+  // Follow nextPageToken so libraries with >200 recordings are not truncated
+  // (a truncated list makes older cloud recordings look deleted on other devices).
+  do {
+    const params = new URLSearchParams({
+      q,
+      spaces: 'drive',
+      fields:
+        'nextPageToken,files(id,name,mimeType,webViewLink,webContentLink,size,createdTime,appProperties)',
+      pageSize: '200',
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+    const res = await authFetch(`${DRIVE_API}/files?${params}`, {}, interactive)
+    const data = await parseJson<{ files?: DriveFileMeta[]; nextPageToken?: string }>(res)
+    all.push(...(data.files ?? []))
+    pageToken = data.nextPageToken
+  } while (pageToken && all.length < 5000)
+
+  return all
 }
 
 function safeDriveFileName(title: string, mimeType: string): string {

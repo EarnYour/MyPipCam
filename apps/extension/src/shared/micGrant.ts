@@ -15,11 +15,25 @@ export type MicGrantResult = {
 
 export const MIC_GRANT_PAGE = 'src/permissions/mic.html'
 
+/**
+ * The grant page writes its result moments before the popup reads it. Anything
+ * older is stale: the user may since have changed mic permission in Chrome's
+ * site settings, and a live permissions probe must win over an old snapshot.
+ */
+const MIC_GRANT_TTL_MS = 10 * 60 * 1000
+
+function isFreshGrantResult(value: unknown): value is MicGrantResult {
+  if (!value || typeof value !== 'object') return false
+  const result = value as MicGrantResult
+  if (typeof result.status !== 'string') return false
+  return typeof result.at === 'number' && Date.now() - result.at < MIC_GRANT_TTL_MS
+}
+
 export async function readMicGrantResult(): Promise<MicGrantResult | null> {
   try {
     const session = await chrome.storage.session.get(MIC_GRANT_STORAGE_KEY)
-    const fromSession = session[MIC_GRANT_STORAGE_KEY] as MicGrantResult | undefined
-    if (fromSession && typeof fromSession === 'object' && typeof fromSession.status === 'string') {
+    const fromSession = session[MIC_GRANT_STORAGE_KEY]
+    if (isFreshGrantResult(fromSession)) {
       return fromSession
     }
   } catch {
@@ -27,8 +41,8 @@ export async function readMicGrantResult(): Promise<MicGrantResult | null> {
   }
   try {
     const local = await chrome.storage.local.get(MIC_GRANT_STORAGE_KEY)
-    const fromLocal = local[MIC_GRANT_STORAGE_KEY] as MicGrantResult | undefined
-    if (fromLocal && typeof fromLocal === 'object' && typeof fromLocal.status === 'string') {
+    const fromLocal = local[MIC_GRANT_STORAGE_KEY]
+    if (isFreshGrantResult(fromLocal)) {
       return fromLocal
     }
   } catch {

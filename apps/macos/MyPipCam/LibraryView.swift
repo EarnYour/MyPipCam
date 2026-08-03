@@ -113,6 +113,8 @@ struct LibraryView: View {
     @State private var renameDraft = ""
     @State private var isRenaming = false
     @State private var confirmDelete = false
+    @State private var isPreparingPlayback = false
+    @State private var prepareTask: Task<Void, Never>?
 
     private var selected: FolderRecording? {
         store.recordings.first { $0.id == selection }
@@ -136,7 +138,21 @@ struct LibraryView: View {
             if let selection, items.contains(where: { $0.id == selection }) {
                 return
             }
+            // The selected clip is gone (deleted or library rescanned) — the
+            // player would otherwise keep playing a temp copy of it.
+            stopPlayback()
             self.selection = items.first?.id
+        }
+        .onChange(of: selection) { _, _ in
+            // play() sets the selection itself; don't tear down the player it
+            // is in the middle of preparing. A switch to another clip is
+            // handled by the staleness check inside play().
+            guard !isPreparingPlayback else { return }
+            stopPlayback()
+        }
+        .onDisappear {
+            // Closing the Library window must not leave audio playing.
+            stopPlayback()
         }
         .alert("Rename Recording", isPresented: $isRenaming) {
             TextField("Title", text: $renameDraft)
@@ -232,6 +248,7 @@ struct LibraryView: View {
                         .tag(item.id)
                         .contextMenu {
                             Button("Play") { play(item) }
+                                .disabled(isPreparingPlayback)
                             Button("Rename…") { beginRename(item) }
                             Button("Reveal in Finder") {
                                 store.revealRecordingInFinder(id: item.id)
@@ -293,9 +310,10 @@ struct LibraryView: View {
                                 .font(.title3.weight(.semibold))
                             Text("\(item.formattedDate) · \(item.formattedDuration)")
                                 .foregroundStyle(.secondary)
-                            Button("Play") { play(item) }
+                            Button(isPreparingPlayback ? "Preparing…" : "Play") { play(item) }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
+                                .disabled(isPreparingPlayback)
                         }
                         .padding()
                     }
@@ -303,6 +321,7 @@ struct LibraryView: View {
 
                 HStack(spacing: 12) {
                     Button("Play") { play(item) }
+                        .disabled(isPreparingPlayback)
                     Button("Rename…") { beginRename(item) }
                     Button("Reveal in Finder") {
                         store.revealRecordingInFinder(id: item.id)
@@ -326,18 +345,38 @@ struct LibraryView: View {
     }
 
     private func play(_ item: FolderRecording) {
+        // The context menu can fire on a row that isn't selected, and the
+        // staleness check below compares against the selection.
+        selection = item.id
         stopPlayback()
-        do {
-            let url = try store.scopedVideoURL(for: item.id)
-            let avPlayer = AVPlayer(url: url)
-            player = avPlayer
-            avPlayer.play()
-        } catch {
-            presentAlert(title: "Playback Failed", message: error.localizedDescription)
+        isPreparingPlayback = true
+        prepareTask = Task {
+            // Only the live task owns the flag. A superseded one still resumes
+            // when its copy finishes (cancelling doesn't abort the copy), and
+            // clearing the flag there would unlock the UI mid-prepare.
+            defer { if !Task.isCancelled { isPreparingPlayback = false } }
+            do {
+                let url = try await store.scopedVideoURL(for: item.id)
+                // The user may have switched clips — or closed the window —
+                // while the copy was running.
+                guard !Task.isCancelled, selected?.id == item.id else { return }
+                let avPlayer = AVPlayer(url: url)
+                player = avPlayer
+                avPlayer.play()
+            } catch {
+                guard !Task.isCancelled else { return }
+                presentAlert(title: "Playback Failed", message: error.localizedDescription)
+            }
         }
     }
 
     private func stopPlayback() {
+        // Cancel any in-flight prepare too: the window is retained after close
+        // (isReleasedWhenClosed = false), so a task that finished afterwards
+        // would start audio for a window nobody can see.
+        prepareTask?.cancel()
+        prepareTask = nil
+        isPreparingPlayback = false
         player?.pause()
         player = nil
     }

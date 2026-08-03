@@ -337,6 +337,12 @@ async function syncFromBackground() {
       startedAt?: number | null
     } | null
     if (!res?.recording) {
+      if (countdownTimer != null) {
+        window.clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+      phase = 'idle'
+      countEl.classList.add('is-hidden')
       statusEl.textContent = 'No active capture'
       return
     }
@@ -587,6 +593,8 @@ chrome.runtime.onMessage.addListener((message) => {
 })
 
 console.log('[MyPipCam][start] recording HUD opened', { driveCountdown })
+// Only a HUD opened with ?drive=1 owns the countdown, so committing it here
+// can't double-fire against a session the page overlay is already driving.
 if (driveCountdown) {
   beginLocalCountdown()
 } else {

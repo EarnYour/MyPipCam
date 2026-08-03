@@ -46,6 +46,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
+        // Manual isEnabled control (refreshLibraryMenuState) — AppKit's
+        // auto-enablement would re-enable items whose target responds.
+        menu.autoenablesItems = false
 
         let showHideItem = NSMenuItem(
             title: "Show Bubble",

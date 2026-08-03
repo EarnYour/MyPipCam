@@ -30,6 +30,42 @@
     return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
   }
 
+  // Share data comes from the API but is ultimately caller-supplied; only
+  // render links that are genuinely Google Drive URLs.
+  function safeDriveLink(link) {
+    if (typeof link !== 'string') return null
+    try {
+      const url = new URL(link)
+      if (
+        url.protocol === 'https:' &&
+        (url.hostname === 'drive.google.com' || url.hostname === 'docs.google.com')
+      ) {
+        return url.href
+      }
+    } catch {
+      /* fall through */
+    }
+    return null
+  }
+
+  /** Build "<lead><a>Open in Google Drive</a>." without ever parsing HTML. */
+  function setDriveHint(lead, link, fallbackText) {
+    const href = safeDriveLink(link)
+    hint.textContent = ''
+    if (!href) {
+      hint.textContent = lead + (fallbackText || '')
+      return
+    }
+    hint.appendChild(document.createTextNode(lead))
+    const a = document.createElement('a')
+    a.href = href
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.textContent = 'Open in Google Drive'
+    hint.appendChild(a)
+    hint.appendChild(document.createTextNode('.'))
+  }
+
   function showError(title, body, opts) {
     stopPolling()
     statusEl.textContent = opts?.status || 'Unavailable'
@@ -44,8 +80,12 @@
     if (hint) {
       if (opts?.expired) {
         hint.hidden = false
-        hint.innerHTML =
-          'Ask the owner to renew the link from MyPipCam Library, or <a href="/">record with MyPipCam</a>.'
+        hint.textContent = 'Ask the owner to renew the link from MyPipCam Library, or '
+        const a = document.createElement('a')
+        a.href = '/'
+        a.textContent = 'record with MyPipCam'
+        hint.appendChild(a)
+        hint.appendChild(document.createTextNode('.'))
       } else {
         hint.hidden = true
         hint.textContent = ''
@@ -92,12 +132,9 @@
         'Google does not publish a progress percent. This page checks again automatically — hang tight.'
     }
     statusEl.textContent = 'Processing…'
-    if (share?.driveWebViewLink && hint) {
+    if (share?.driveWebViewLink && hint && safeDriveLink(share.driveWebViewLink)) {
       hint.hidden = false
-      hint.innerHTML =
-        'You can also try <a href="' +
-        share.driveWebViewLink +
-        '" target="_blank" rel="noopener">Open in Google Drive</a>.'
+      setDriveHint('You can also try ', share.driveWebViewLink)
     }
   }
 
@@ -120,13 +157,11 @@
     if (!processing) {
       statusEl.textContent = 'Shared recording'
       hint.hidden = false
-      hint.innerHTML =
-        'If the video does not appear, your browser may block the Drive embed. ' +
-        (share.driveWebViewLink
-          ? '<a href="' +
-            share.driveWebViewLink +
-            '" target="_blank" rel="noopener">Open in Google Drive</a>.'
-          : 'Open the link again later, or ask the owner to re-share.')
+      setDriveHint(
+        'If the video does not appear, your browser may block the Drive embed. ',
+        share.driveWebViewLink,
+        'Open the link again later, or ask the owner to re-share.',
+      )
     }
   }
 
@@ -208,6 +243,10 @@
           'MyPipCam share links expire after 30 days. Ask the owner to renew it from their Library.',
           { expired: true, status: 'Expired' },
         )
+        return
+      }
+      if (err && err.status === 429) {
+        showError('Too many requests', 'Please wait a moment and reload this page.')
         return
       }
       showError(

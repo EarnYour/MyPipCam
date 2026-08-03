@@ -34,6 +34,14 @@ type BatchSharesResponse = {
 async function parseJson<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string }
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = Number(res.headers.get('Retry-After')) || 60
+      throw new Error(
+        `Too many share requests — try again in ${retryAfter} second${
+          retryAfter === 1 ? '' : 's'
+        }.`,
+      )
+    }
     throw new Error(
       (data && typeof data === 'object' && 'error' in data && data.error) ||
         `Share API error (${res.status})`,

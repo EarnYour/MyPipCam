@@ -968,6 +968,8 @@ async function blobToThumbnail(blob: Blob): Promise<Blob | undefined> {
     await new Promise<void>((resolve, reject) => {
       video.onloadeddata = () => resolve()
       video.onerror = () => reject(new Error('thumb load failed'))
+      // A blob that never fires either event must not block saving the recording.
+      window.setTimeout(() => reject(new Error('thumb load timeout')), 5000)
     })
     video.currentTime = Math.min(0.5, (video.duration || 1) * 0.1)
     await new Promise<void>((resolve) => {

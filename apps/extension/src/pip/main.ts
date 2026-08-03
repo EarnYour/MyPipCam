@@ -125,9 +125,13 @@ async function applyEffect(next: BackgroundEffect) {
   }
 }
 
+// Guards concurrent startCamera calls (boot + early MPC_PIP_MIRROR): a stale
+// call must not overwrite `stream` and orphan a live camera track.
+let cameraGeneration = 0
 let cameraBootstrapped = false
 
 async function startCamera(deviceId: string | null) {
+  const generation = ++cameraGeneration
   const params = new URLSearchParams(location.search)
   const id = deviceId ?? params.get('deviceId')
   // Seed mirror/effect/filter from the URL once. Later MPC_PIP_* messages own
@@ -139,12 +143,25 @@ async function startCamera(deviceId: string | null) {
     cameraBootstrapped = true
   }
 
+  const adopt = async (next: MediaStream): Promise<boolean> => {
+    if (generation !== cameraGeneration) {
+      for (const track of next.getTracks()) track.stop()
+      return false
+    }
+    stream = next
+    video.srcObject = stream
+    await video.play().catch(() => undefined)
+    await applyEffect(effect)
+    postToParent({ type: 'MPC_PIP_CAMERA', ok: true })
+    return true
+  }
+
   try {
     if (stream) {
       for (const track of stream.getTracks()) track.stop()
       stream = null
     }
-    stream = await navigator.mediaDevices.getUserMedia({
+    const next = await navigator.mediaDevices.getUserMedia({
       video: {
         ...(id ? { deviceId: { exact: id } } : {}),
         width: { ideal: 640 },
@@ -153,15 +170,13 @@ async function startCamera(deviceId: string | null) {
       },
       audio: false,
     })
-    video.srcObject = stream
-    await video.play().catch(() => undefined)
-    await applyEffect(effect)
-    postToParent({ type: 'MPC_PIP_CAMERA', ok: true })
+    await adopt(next)
   } catch (err) {
+    if (generation !== cameraGeneration) return
     // Fallback without exact device if chosen cam fails
     if (id) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const next = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 640 },
             height: { ideal: 640 },
@@ -169,15 +184,13 @@ async function startCamera(deviceId: string | null) {
           },
           audio: false,
         })
-        video.srcObject = stream
-        await video.play().catch(() => undefined)
-        await applyEffect(effect)
-        postToParent({ type: 'MPC_PIP_CAMERA', ok: true })
+        await adopt(next)
         return
       } catch {
         /* fall through */
       }
     }
+    if (generation !== cameraGeneration) return
     const msg = err instanceof Error ? err.message : 'Camera unavailable'
     showFallback('Allow camera for MyPipCam')
     postToParent({ type: 'MPC_PIP_CAMERA', ok: false, reason: msg })
