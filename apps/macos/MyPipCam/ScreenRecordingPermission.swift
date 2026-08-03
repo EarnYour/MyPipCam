@@ -89,8 +89,8 @@ final class ScreenRecordingPermission: ObservableObject {
                 if let error {
                     self?.relaunchError = error
                     NSLog(
-                        "[MyPipCam] Screen Recording relaunch failed: %{public}@",
-                        error.localizedDescription
+                        "%@",
+                        "[MyPipCam] Screen Recording relaunch failed: \(error.localizedDescription)"
                     )
                     return
                 }

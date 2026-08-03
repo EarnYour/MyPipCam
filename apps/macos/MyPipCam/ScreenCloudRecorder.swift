@@ -456,7 +456,7 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     private func rememberFailure(_ error: Error) {
         let summary = ScreenCloudRecorderError.diagnosticSummary(error)
         lastFailureDiagnostic = summary
-        NSLog("[MyPipCam capture] FAIL %{public}@", summary)
+        NSLog("%@", "[MyPipCam capture] FAIL \(summary)")
     }
 
     /// Menu-bar (LSUIElement) apps often never get a system Allow sheet unless briefly regular + frontmost.
@@ -568,12 +568,12 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 let url = folder.appendingPathComponent("screencapture-probe.txt")
                 try? text.write(to: url, atomically: true, encoding: .utf8)
-                NSLog("[MyPipCam probe] wrote %{public}@", url.path)
+                NSLog("%@", "[MyPipCam probe] wrote \(url.path)")
             }
             // Also dump to sandbox tmp for agents that cannot read the container AS folder.
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("mypipcam-screencapture-probe.txt")
             try? text.write(to: tmp, atomically: true, encoding: .utf8)
-            NSLog("[MyPipCam probe] tmp=%{public}@", tmp.path)
+            NSLog("%@", "[MyPipCam probe] tmp=\(tmp.path)")
         }
 
         let pre1 = CGPreflightScreenCaptureAccess()
@@ -593,11 +593,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             "result=WAITING_SHAREABLE_CONTENT"
         ])
         NSLog(
-            "[MyPipCam probe] path=%{public}@ v=%{public}@ preflight before=%{public}@ afterRequest=%{public}@",
-            bundlePath,
-            "\(version)(\(build))",
-            "\(pre1)",
-            "\(pre2)"
+            "%@",
+            "[MyPipCam probe] path=\(bundlePath) v=\(version)(\(build)) preflight before=\(pre1) afterRequest=\(pre2)"
         )
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -611,9 +608,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 "windows=\(content.windows.count)"
             ])
             NSLog(
-                "[MyPipCam probe] SCShareableContent OK displays=%d windows=%d",
-                content.displays.count,
-                content.windows.count
+                "%@",
+                "[MyPipCam probe] SCShareableContent OK displays=\(content.displays.count) windows=\(content.windows.count)"
             )
         } catch {
             let ns = error as NSError
@@ -628,10 +624,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 "desc=\(ns.localizedDescription)"
             ])
             NSLog(
-                "[MyPipCam probe] SCShareableContent FAILED domain=%{public}@ code=%d desc=%{public}@",
-                ns.domain,
-                ns.code,
-                ns.localizedDescription
+                "%@",
+                "[MyPipCam probe] SCShareableContent FAILED domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)"
             )
             if let data = "[MyPipCam probe] FAIL domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)\n"
                 .data(using: .utf8) {
@@ -791,10 +785,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             )
         }
         NSLog(
-            "[MyPipCam] stop OK path=%{public}@ bytes=%d durationMs=%.0f",
-            finalizedURL.path,
-            size,
-            durationMs
+            "%@",
+            "[MyPipCam] stop OK path=\(finalizedURL.path) bytes=\(size) durationMs=\(Int(durationMs.rounded()))"
         )
         return (finalizedURL, durationMs)
     }
@@ -873,10 +865,7 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 // Required to flush/finalize the MP4 — stopCapture alone often leaves no file.
                 try stream.removeRecordingOutput(output)
             } catch {
-                NSLog(
-                    "[MyPipCam] removeRecordingOutput: %{public}@",
-                    error.localizedDescription
-                )
+                NSLog("%@", "[MyPipCam] removeRecordingOutput: \(error.localizedDescription)")
             }
             Task { @MainActor in
                 try? await stream.stopCapture()
@@ -996,8 +985,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             await cancelPartialStart()
             if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
             NSLog(
-                "[MyPipCam] AVAssetWriter start failed (%@) — trying video-only / SCRecordingOutput",
-                String(describing: error)
+                "%@",
+                "[MyPipCam] AVAssetWriter start failed (\(error)) — trying video-only / SCRecordingOutput"
             )
         }
 
@@ -1082,8 +1071,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         rememberFailure(error)
         let mapped = ScreenCloudRecorderError.mapCaptureError(error)
         NSLog(
-            "[MyPipCam] stream stopped while recording: %{public}@",
-            ScreenCloudRecorderError.diagnosticSummary(error)
+            "%@",
+            "[MyPipCam] stream stopped while recording: \(ScreenCloudRecorderError.diagnosticSummary(error))"
         )
 
         let hadAudio = (restartParams?.microphoneDeviceID != nil)
@@ -1105,8 +1094,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             } catch {
                 rememberFailure(error)
                 NSLog(
-                    "[MyPipCam] video-only recovery failed: %{public}@",
-                    ScreenCloudRecorderError.diagnosticSummary(error)
+                    "%@",
+                    "[MyPipCam] video-only recovery failed: \(ScreenCloudRecorderError.diagnosticSummary(error))"
                 )
             }
         }
@@ -1234,7 +1223,7 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         self.recordingOutput = output
         self.usesRecordingOutput = true
         self.writerSession = nil
-        NSLog("[MyPipCam] SCRecordingOutput started → %{public}@", outputURL.path)
+        NSLog("%@", "[MyPipCam] SCRecordingOutput started → \(outputURL.path)")
     }
 
     private func startWithAssetWriter(
@@ -1284,12 +1273,11 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         try await stream.startCapture()
         self.stream = stream
         self.recordingOutput = nil
+        // Never pass Swift Int to NSLog %d — 64-bit Int misaligns following %@ and SIGSEGVs.
+        let audioLabel = (useSystemAudio || useMic) ? "yes" : "no"
         NSLog(
-            "[MyPipCam] AVAssetWriter capture started → %{public}@ (%dx%d audio=%@)",
-            outputURL.path,
-            width,
-            height,
-            (useSystemAudio || useMic) ? "yes" : "no"
+            "%@",
+            "[MyPipCam] AVAssetWriter capture started → \(outputURL.path) (\(width)x\(height) audio=\(audioLabel))"
         )
 
         if let microphoneDeviceID, useMic {

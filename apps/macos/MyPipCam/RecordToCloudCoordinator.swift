@@ -188,10 +188,7 @@ final class RecordToCloudCoordinator: ObservableObject {
             let mapped = ScreenCloudRecorderError.mapCaptureError(error)
             let diag = recorder.lastFailureDiagnostic
                 ?? ScreenCloudRecorderError.diagnosticSummary(error)
-            NSLog(
-                "[MyPipCam] startRecording failed %{public}@",
-                diag
-            )
+            NSLog("%@", "[MyPipCam] startRecording failed \(diag)")
             if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
                 presentScreenRecordingHelp(diagnostic: diag, underlying: error)
             } else {
