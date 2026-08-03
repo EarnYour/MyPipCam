@@ -1,0 +1,109 @@
+:root {
+  --orange: #ff5e29;
+  --mint: #7ddf9a;
+  --cream: #fafaf7;
+  --ink: #111312;
+  --glass-bg: rgba(250, 250, 247, 0.14);
+  --glass-border: rgba(250, 250, 247, 0.38);
+  --glow-orange: 0 0 40px rgba(255, 94, 41, 0.55);
+  --glow-mint: 0 0 36px rgba(125, 223, 154, 0.45);
+  --blur: 18px;
+  --radius: 20px;
+  --font-display: "Syne", system-ui, sans-serif;
+  --font-body: "Figtree", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: #0a0c0b;
+  color: var(--cream);
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--glow-orange), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  color: var(--cream);
+  padding: 18px 24px;
+  max-width: 420px;
+}
+
+.glass-card.mint {
+  box-shadow: var(--glow-mint), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  border-color: rgba(125, 223, 154, 0.45);
+}
+
+.glass-card h2 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.glass-card p {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 1rem;
+}
+
+.glass-card .accent {
+  color: var(--orange);
+  text-shadow: 0 0 18px rgba(255, 94, 41, 0.65);
+}
+
+.lower-third {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 18px;
+  border-left: 3px solid var(--orange);
+}
+
+.lower-third .line1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.lower-third .line2 {
+  font-size: 0.9rem;
+  color: var(--mint);
+}
+
+.end-card {
+  max-width: 720px;
+  text-align: center;
+  padding: 40px 48px;
+}
+
+.end-card .urls {
+  margin-top: 18px;
+  font-size: 1.25rem;
+  color: var(--mint);
+  text-shadow: 0 0 16px rgba(125, 223, 154, 0.4);
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.pop {
+  animation: popIn 0.45s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
