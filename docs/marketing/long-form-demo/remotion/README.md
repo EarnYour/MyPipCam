@@ -32,6 +32,8 @@ npm run render:overlays
 
 ### Notes
 
-- Duration tracks actual clip lengths (~6m20s media + intro/titles/end ≈ 6m40s). Stretch to 8–12 min needs more extracts from the source MOV.
+- Duration ≈ **6m12s** after trimming the silent cold open; glass holds ~4–5s with push-over splits on Problem / Record / Editor.
+- Motion curves: Chronixel Style Vault (Night Drive HUD / Dark Dashboard glass) + `nmsn` Remotion easing + [`OVERLAY_DESIGN.md`](../OVERLAY_DESIGN.md).
 - Remotion company license applies for commercial use — confirm before monetized YouTube ads if required.
 - Do not point Remotion at the 4.8 GB source MOV; only use `clips/`.
+- Hook/problem clips start at source **4:23 / 5:18** (see `scripts/extract-clips.sh`) — not 0:00.
