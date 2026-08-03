@@ -8,6 +8,12 @@ import {
 } from "remotion";
 import { brand } from "./brand";
 import { fontBody, fontDisplay } from "./fonts";
+import {
+  EASE_IN_EXPO,
+  EASE_OUT_EXPO,
+  glassSpring,
+  snappySpring,
+} from "./motion";
 
 export type GlassVariant = "orange" | "mint";
 export type GlassPosition = "top-left" | "top-right" | "center-left";
@@ -15,34 +21,51 @@ export type GlassPosition = "top-left" | "top-right" | "center-left";
 export const GlassCard: React.FC<{
   title: string;
   subtitle?: string;
+  bullets?: string[];
   variant?: GlassVariant;
   accentWord?: string;
   position?: GlassPosition;
-  /** Frames for fade-out start (relative to sequence). Default ~ hold until near end. */
+  /** Frames at full opacity before fade-out begins. */
   holdFrames?: number;
 }> = ({
   title,
   subtitle,
+  bullets,
   variant = "orange",
   accentWord,
   position = "top-left",
-  holdFrames = 55,
+  holdFrames = 100,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const enter = spring({
     frame,
     fps,
-    config: { damping: 14, stiffness: 120 },
+    config: glassSpring,
+    durationInFrames: 24,
   });
-  const fadeOutStart = holdFrames;
-  const fadeOutEnd = holdFrames + 18;
+
+  const fadeOutStart = Math.min(
+    holdFrames,
+    Math.max(36, durationInFrames - 24)
+  );
+  const fadeOutEnd = Math.min(durationInFrames, fadeOutStart + 22);
   const opacity = interpolate(
     frame,
-    [0, 8, fadeOutStart, fadeOutEnd],
+    [0, 12, fadeOutStart, fadeOutEnd],
     [0, 1, 1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: EASE_OUT_EXPO,
+    }
   );
+  const exitNudge = interpolate(frame, [fadeOutStart, fadeOutEnd], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_IN_EXPO,
+  });
+
   const glow =
     variant === "mint"
       ? "0 0 36px rgba(125, 223, 154, 0.45)"
@@ -51,6 +74,7 @@ export const GlassCard: React.FC<{
     variant === "mint"
       ? "rgba(125, 223, 154, 0.45)"
       : "rgba(250, 250, 247, 0.38)";
+  const accent = variant === "mint" ? brand.mint : brand.orange;
 
   const parts = accentWord
     ? title.split(new RegExp(`(${accentWord})`, "i"))
@@ -73,8 +97,8 @@ export const GlassCard: React.FC<{
     >
       <div
         style={{
-          transform: `scale(${0.92 + enter * 0.08}) translateY(${
-            (1 - enter) * 12
+          transform: `scale(${0.94 + enter * 0.06}) translateY(${
+            (1 - enter) * 14 + exitNudge * -8
           }px)`,
           background: "rgba(250, 250, 247, 0.14)",
           border: `1px solid ${border}`,
@@ -83,19 +107,31 @@ export const GlassCard: React.FC<{
           backdropFilter: "blur(18px) saturate(1.4)",
           WebkitBackdropFilter: "blur(18px) saturate(1.4)",
           color: brand.cream,
-          padding: "20px 28px",
-          maxWidth: 540,
+          padding: "22px 28px",
+          maxWidth: bullets?.length ? 560 : 540,
           fontFamily: fontBody,
         }}
       >
         <div
           style={{
+            height: 3,
+            width: 110,
+            borderRadius: 2,
+            background: `linear-gradient(90deg, ${accent}, transparent)`,
+            boxShadow: `0 0 12px ${accent}99`,
+            marginBottom: 12,
+            transform: `scaleX(${enter})`,
+            transformOrigin: "left center",
+          }}
+        />
+        <div
+          style={{
             fontFamily: fontDisplay,
             fontWeight: 800,
-            fontSize: 40,
+            fontSize: bullets?.length ? 34 : 40,
             letterSpacing: "-0.02em",
             lineHeight: 1.15,
-            marginBottom: subtitle ? 8 : 0,
+            marginBottom: subtitle || bullets?.length ? 8 : 0,
           }}
         >
           {parts.map((p, i) =>
@@ -115,9 +151,64 @@ export const GlassCard: React.FC<{
           )}
         </div>
         {subtitle ? (
-          <div style={{ fontSize: 22, opacity: 0.9, lineHeight: 1.35 }}>
+          <div
+            style={{
+              fontSize: 20,
+              opacity: 0.9,
+              lineHeight: 1.35,
+              marginBottom: bullets?.length ? 12 : 0,
+            }}
+          >
             {subtitle}
           </div>
+        ) : null}
+        {bullets?.length ? (
+          <ul
+            style={{
+              listStyle: "none",
+              margin: 0,
+              padding: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {bullets.map((bullet, i) => {
+              const t = spring({
+                frame: frame - 10 - i * 4,
+                fps,
+                config: snappySpring,
+                durationInFrames: 18,
+              });
+              return (
+                <li
+                  key={bullet}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "flex-start",
+                    opacity: t,
+                    transform: `translateX(${(1 - t) * 12}px)`,
+                    fontSize: 18,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: 99,
+                      marginTop: 7,
+                      flexShrink: 0,
+                      background: accent,
+                      boxShadow: `0 0 8px ${accent}aa`,
+                    }}
+                  />
+                  <span>{bullet}</span>
+                </li>
+              );
+            })}
+          </ul>
         ) : null}
       </div>
     </AbsoluteFill>

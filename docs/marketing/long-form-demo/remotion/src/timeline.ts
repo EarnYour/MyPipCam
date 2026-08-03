@@ -1,14 +1,30 @@
 import { FPS } from "./brand";
 import type { GlassPosition, GlassVariant } from "./GlassCard";
+import {
+  POPUP_HOLD_FRAMES,
+  PUSHOVER_HOLD_FRAMES,
+} from "./motion";
+import type { PushSide } from "./PushOver";
 
 export type PopupSpec = {
   from: number;
   durationInFrames: number;
   title: string;
   subtitle?: string;
+  bullets?: string[];
   accentWord?: string;
   variant: GlassVariant;
   position?: GlassPosition;
+};
+
+export type PushOverSpec = {
+  from: number;
+  durationInFrames: number;
+  side: PushSide;
+  title: string;
+  subtitle?: string;
+  bullets: string[];
+  variant: GlassVariant;
 };
 
 export type LowerThirdSpec = {
@@ -22,9 +38,12 @@ export type LowerThirdSpec = {
 export type ClipBeat = {
   kind: "clip";
   file: string;
-  /** Seconds — matches extracted clip lengths */
+  /** Seconds shown in the composition (trim end if shorter than file). */
   seconds: number;
+  /** Skip this many composition frames into the clip (≈ seconds × FPS). */
+  startFrom?: number;
   popups: PopupSpec[];
+  pushovers?: PushOverSpec[];
   lowerThird?: LowerThirdSpec;
 };
 
@@ -43,39 +62,49 @@ export type CardBeat = {
 
 export type Beat = ClipBeat | TitleBeat | CardBeat;
 
+const H = POPUP_HOLD_FRAMES; // ~4.2s
+const P = PUSHOVER_HOLD_FRAMES; // ~5.2s
+
 /**
- * Cut A narrative order using all extracted clips (01–09).
- * Total clip media ≈ 6m20s; cards push the highlight ~6.5–7 min.
+ * Cut A — tighter open (speech-first clips), longer glass holds,
+ * bullet callouts, and push-over split layouts on key product beats.
  */
 export const beats: Beat[] = [
-  { kind: "intro", seconds: 4 },
+  { kind: "intro", seconds: 3.5 },
   {
     kind: "clip",
     file: "01-hook-talking-head.mp4",
-    seconds: 45,
+    // Re-extracted from source 4:23; trim trailing silence after ~25s
+    seconds: 25,
     popups: [
       {
-        from: 12,
-        durationInFrames: 72,
+        from: 8,
+        durationInFrames: H,
         title: "Replace Loom for free",
         subtitle: "Chrome + macOS · camera PiP",
+        bullets: [
+          "No Loom subscription",
+          "Tab + Cam in one take",
+          "Free forever · open source",
+        ],
         accentWord: "Loom",
         variant: "orange",
         position: "top-left",
       },
       {
-        from: 95,
-        durationInFrames: 60,
+        from: 150,
+        durationInFrames: H,
         title: "Free forever",
-        subtitle: "No Loom bill. No seat tax.",
+        subtitle: "Keep files on your Mac",
+        bullets: ["No seat tax", "Local-first library", "Drive only if you want"],
         accentWord: "Free",
         variant: "mint",
         position: "top-left",
       },
     ],
     lowerThird: {
-      from: 8,
-      durationInFrames: 90,
+      from: 6,
+      durationInFrames: 120,
       line1: "MyPipCam",
       line2: "Free Loom-style recorder",
       accent: "orange",
@@ -84,27 +113,38 @@ export const beats: Beat[] = [
   {
     kind: "clip",
     file: "02-problem-talking-head.mp4",
-    seconds: 40,
+    seconds: 34,
     popups: [
       {
-        from: 18,
-        durationInFrames: 70,
+        from: 12,
+        durationInFrames: H,
         title: "No Loom bill",
-        subtitle: "Local-first. Free forever.",
+        subtitle: "Quit the monthly recorder tax",
+        bullets: ["No per-seat pricing", "No cloud lock-in", "Export stays yours"],
         accentWord: "Loom",
         variant: "mint",
+        position: "top-left",
       },
+    ],
+    pushovers: [
       {
-        from: 75,
-        durationInFrames: 55,
-        title: "No seat tax",
-        subtitle: "Keep files on your Mac",
+        from: 160,
+        durationInFrames: P,
+        side: "left",
+        title: "Why MyPipCam",
+        subtitle: "Built to replace paid Loom-style tools",
+        bullets: [
+          "Record tab + camera PiP",
+          "Local library on your disk",
+          "Optional Google Drive",
+          "Built-in trim & export",
+        ],
         variant: "orange",
       },
     ],
     lowerThird: {
-      from: 10,
-      durationInFrames: 85,
+      from: 8,
+      durationInFrames: 110,
       line1: "Why I built this",
       line2: "Free forever · No subscription",
       accent: "mint",
@@ -112,7 +152,7 @@ export const beats: Beat[] = [
   },
   {
     kind: "title",
-    seconds: 1.6,
+    seconds: 2,
     eyebrow: "Step 1",
     title: "Install in under a minute",
     subtitle: "GitHub Releases → Load unpacked",
@@ -123,26 +163,32 @@ export const beats: Beat[] = [
     seconds: 50,
     popups: [
       {
-        from: 14,
-        durationInFrames: 70,
+        from: 12,
+        durationInFrames: H,
         title: "Free · Open source",
-        subtitle: "Download zip → Load unpacked",
+        subtitle: "Install from GitHub Releases",
+        bullets: [
+          "Download the zip",
+          "chrome://extensions → Load unpacked",
+          "Pin MyPipCam",
+        ],
         accentWord: "Free",
         variant: "orange",
         position: "top-right",
       },
       {
-        from: 95,
-        durationInFrames: 65,
+        from: 200,
+        durationInFrames: H,
         title: "Pin it",
         subtitle: "Then record any https tab",
+        bullets: ["One click to start", "Tab only or Tab + Cam", "Works on Chrome"],
         variant: "mint",
         position: "top-right",
       },
     ],
     lowerThird: {
-      from: 12,
-      durationInFrames: 90,
+      from: 10,
+      durationInFrames: 120,
       line1: "Chrome extension",
       line2: "Install free from GitHub",
       accent: "orange",
@@ -150,7 +196,7 @@ export const beats: Beat[] = [
   },
   {
     kind: "title",
-    seconds: 1.5,
+    seconds: 1.8,
     eyebrow: "Record",
     title: "Tab + Cam PiP",
     subtitle: "Record this Chrome tab with your face",
@@ -161,25 +207,34 @@ export const beats: Beat[] = [
     seconds: 45,
     popups: [
       {
-        from: 14,
-        durationInFrames: 70,
+        from: 12,
+        durationInFrames: H,
         title: "Live camera PiP",
-        subtitle: "Tab + Cam in one take",
+        subtitle: "Face + tab in one recording",
+        bullets: ["Picture-in-picture overlay", "Share when ready", "Local first"],
         variant: "mint",
         position: "top-right",
       },
+    ],
+    pushovers: [
       {
-        from: 90,
-        durationInFrames: 60,
-        title: "Share when ready",
-        subtitle: "Local first — Drive optional",
+        from: 200,
+        durationInFrames: P,
+        side: "left",
+        title: "Recording stack",
+        subtitle: "Everything you need after you hit stop",
+        bullets: [
+          "Tab + Cam PiP capture",
+          "Library detail + playback",
+          "Share link when you want it",
+          "No SaaS seat required",
+        ],
         variant: "orange",
-        position: "top-right",
       },
     ],
     lowerThird: {
-      from: 10,
-      durationInFrames: 85,
+      from: 8,
+      durationInFrames: 110,
       line1: "Record this tab",
       line2: "Chrome extension · Tab + camera PiP",
       accent: "mint",
@@ -191,17 +246,31 @@ export const beats: Beat[] = [
     seconds: 40,
     popups: [
       {
-        from: 16,
-        durationInFrames: 70,
-        title: "Drag it anywhere",
-        subtitle: "Shape · Size · Always on top",
+        from: 14,
+        durationInFrames: H,
+        title: "macOS camera bubble",
+        subtitle: "Always on top for desktop & OBS",
+        bullets: [
+          "Drag it anywhere",
+          "Shape · Size · Record…",
+          "Leave Chrome? Still covered",
+        ],
         variant: "orange",
+        position: "top-left",
+      },
+      {
+        from: 200,
+        durationInFrames: H - 10,
+        title: "Desktop path",
+        subtitle: "Floating PiP while you demo apps",
+        bullets: ["Always-on-top window", "Works beside OBS", "Same library folder"],
+        variant: "mint",
         position: "top-left",
       },
     ],
     lowerThird: {
-      from: 12,
-      durationInFrames: 90,
+      from: 10,
+      durationInFrames: 120,
       line1: "macOS camera bubble",
       line2: "Always-on-top for OBS / desktop",
       accent: "orange",
@@ -209,10 +278,10 @@ export const beats: Beat[] = [
   },
   {
     kind: "title",
-    seconds: 1.5,
+    seconds: 1.8,
     eyebrow: "Library",
     title: "Your recordings, your disk",
-    subtitle: "Local first · Drive optional",
+    subtitle: "Local first · Drive optional · folders",
   },
   {
     kind: "clip",
@@ -220,25 +289,39 @@ export const beats: Beat[] = [
     seconds: 40,
     popups: [
       {
-        from: 16,
-        durationInFrames: 70,
+        from: 12,
+        durationInFrames: H,
         title: "Local first · Drive optional",
         subtitle: "Connect Google only if you want",
+        bullets: [
+          "Files stay on your Mac",
+          "Optional Drive sync",
+          "Shared folder with the Mac app",
+        ],
         variant: "mint",
+        position: "top-right",
+      },
+      {
+        from: 210,
+        durationInFrames: H - 6,
+        title: "Organize with folders",
+        subtitle: "Keep demos tidy without a SaaS vault",
+        bullets: ["Library folders", "Settings you control", "No subscription"],
+        variant: "orange",
         position: "top-right",
       },
     ],
     lowerThird: {
-      from: 10,
-      durationInFrames: 85,
+      from: 8,
+      durationInFrames: 110,
       line1: "Local library",
-      line2: "Optional Google Drive",
+      line2: "Optional Google Drive · folders",
       accent: "mint",
     },
   },
   {
     kind: "title",
-    seconds: 1.5,
+    seconds: 1.8,
     eyebrow: "Editor",
     title: "Trim without SaaS",
     subtitle: "Cut · silence · export locally",
@@ -249,18 +332,35 @@ export const beats: Beat[] = [
     seconds: 45,
     popups: [
       {
-        from: 18,
-        durationInFrames: 70,
-        title: "Export locally",
-        subtitle: "Cut · silence · download",
-        accentWord: "Export",
+        from: 14,
+        durationInFrames: H,
+        title: "Built-in editor",
+        subtitle: "No another monthly bill",
+        bullets: ["Cut & keep ranges", "Silence-friendly trims", "Export locally"],
+        accentWord: "editor",
         variant: "orange",
         position: "top-right",
       },
     ],
+    pushovers: [
+      {
+        from: 210,
+        durationInFrames: P,
+        side: "right",
+        title: "Edit → export",
+        subtitle: "Finish the take without uploading first",
+        bullets: [
+          "Timeline cut / keep",
+          "Download when you’re done",
+          "Files never leave your machine",
+          "Replace Loom’s paid editor",
+        ],
+        variant: "mint",
+      },
+    ],
     lowerThird: {
-      from: 12,
-      durationInFrames: 90,
+      from: 10,
+      durationInFrames: 120,
       line1: "Built-in editor",
       line2: "Trim · cut · export",
       accent: "orange",
@@ -268,7 +368,7 @@ export const beats: Beat[] = [
   },
   {
     kind: "title",
-    seconds: 1.5,
+    seconds: 1.8,
     eyebrow: "Desktop",
     title: "Leave Chrome? Still covered",
     subtitle: "Desktop path + floating PiP",
@@ -276,20 +376,27 @@ export const beats: Beat[] = [
   {
     kind: "clip",
     file: "03-screen-enters.mp4",
-    seconds: 35,
+    // Skip possible OBS hall-of-mirrors open
+    startFrom: 45,
+    seconds: 30,
     popups: [
       {
-        from: 14,
-        durationInFrames: 70,
+        from: 10,
+        durationInFrames: H,
         title: "Still covered",
-        subtitle: "Desktop + PiP when you leave Chrome",
+        subtitle: "Desktop + PiP when you leave the browser",
+        bullets: [
+          "Full desktop capture path",
+          "macOS bubble stays on top",
+          "Same free toolkit",
+        ],
         variant: "mint",
         position: "top-left",
       },
     ],
     lowerThird: {
-      from: 10,
-      durationInFrames: 85,
+      from: 8,
+      durationInFrames: 110,
       line1: "Desktop + PiP",
       line2: "macOS app for the whole screen",
       accent: "mint",
@@ -301,26 +408,36 @@ export const beats: Beat[] = [
     seconds: 40,
     popups: [
       {
-        from: 14,
-        durationInFrames: 65,
+        from: 10,
+        durationInFrames: H,
         title: "Files on your Mac",
         subtitle: "No subscription. Files stay yours.",
+        bullets: [
+          "Library grid of your takes",
+          "Drive badges when connected",
+          "Free forever",
+        ],
         variant: "mint",
         position: "top-right",
       },
       {
-        from: 85,
-        durationInFrames: 70,
+        from: 200,
+        durationInFrames: H,
         title: "Install → mypipcam.earnyour.com",
-        subtitle: "Free forever",
+        subtitle: "Chrome extension + Mac app",
+        bullets: [
+          "Grab GitHub Releases",
+          "Load unpacked in Chrome",
+          "Replace Loom for free",
+        ],
         accentWord: "Install",
         variant: "orange",
         position: "top-right",
       },
     ],
     lowerThird: {
-      from: 8,
-      durationInFrames: 90,
+      from: 6,
+      durationInFrames: 120,
       line1: "Install free",
       line2: "mypipcam.earnyour.com",
       accent: "orange",

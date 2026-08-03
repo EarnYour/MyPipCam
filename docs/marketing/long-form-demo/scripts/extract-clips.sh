@@ -22,8 +22,9 @@ extract() {
     "$CLIPDIR/$name.mp4"
 }
 
-extract "01-hook-talking-head" "0" "45"
-extract "02-problem-talking-head" "300" "40"
+# Hook/problem: skip ~4:20 of silent sit-down open; speech starts ~263s
+extract "01-hook-talking-head" "263" "32"
+extract "02-problem-talking-head" "318" "36"
 extract "03-screen-enters" "1430" "35"
 extract "04-library-detail" "1480" "45"
 extract "05-macos-pip-menu" "1655" "40"

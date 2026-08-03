@@ -8,6 +8,7 @@ import {
 } from "remotion";
 import { brand } from "./brand";
 import { fontBody, fontDisplay } from "./fonts";
+import { EASE_IN_EXPO, EASE_OUT_EXPO, snappySpring } from "./motion";
 
 export const LowerThird: React.FC<{
   line1: string;
@@ -15,15 +16,28 @@ export const LowerThird: React.FC<{
   accent?: "orange" | "mint";
 }> = ({ line1, line2, accent = "orange" }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const enter = spring({
     frame,
     fps,
-    config: { damping: 16, stiffness: 140 },
+    config: snappySpring,
+    durationInFrames: 22,
   });
-  const opacity = interpolate(frame, [0, 10, 70, 90], [0, 1, 1, 0], {
+  const fadeOutStart = Math.max(40, durationInFrames - 24);
+  const opacity = interpolate(
+    frame,
+    [0, 12, fadeOutStart, durationInFrames],
+    [0, 1, 1, 0],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: EASE_OUT_EXPO,
+    }
+  );
+  const exit = interpolate(frame, [fadeOutStart, durationInFrames], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: EASE_IN_EXPO,
   });
   const bar =
     accent === "mint"
@@ -41,7 +55,7 @@ export const LowerThird: React.FC<{
     >
       <div
         style={{
-          transform: `translateX(${(1 - enter) * -28}px)`,
+          transform: `translateX(${(1 - enter) * -32 + exit * -20}px)`,
           background: "rgba(17, 19, 18, 0.55)",
           border: "1px solid rgba(250, 250, 247, 0.28)",
           borderRadius: 16,
