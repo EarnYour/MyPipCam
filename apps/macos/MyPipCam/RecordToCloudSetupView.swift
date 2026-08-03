@@ -240,8 +240,15 @@ struct RecordToCloudSetupView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Audio")
             Toggle("Include microphone", isOn: $includeMicrophone)
+                .onChange(of: includeMicrophone) { _, on in
+                    // Single AAC track — both sources interleaved = scrambled audio.
+                    if on { includeSystemAudio = false }
+                }
             Toggle("Include system audio", isOn: $includeSystemAudio)
-            Text("On macOS 15+, mic and system audio can mix. On macOS 14, mic is preferred when both are on.")
+                .onChange(of: includeSystemAudio) { _, on in
+                    if on { includeMicrophone = false }
+                }
+            Text("Choose microphone or system audio (not both). Mixing both into one track corrupts the recording.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }

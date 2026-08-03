@@ -266,23 +266,35 @@ private struct RestartableCapture {
 /// AVAssetWriter owned on the capture sample queue — never hop samples to MainActor
 /// (that raced `finishWriting` and deleted the MP4 before any frame was appended).
 private final class CaptureWriterSession: @unchecked Sendable {
+    /// AAC encode target sample rate — SCK mic/system and forced AVCapture PCM use 48 kHz.
+    static let audioSampleRate: Double = 48_000
+
     let outputURL: URL
     private let queue: DispatchQueue
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
     private let audioInput: AVAssetWriterInput?
+    /// AAC channel count (1 = mic, 2 = system). Must match capture ASBD or audio scrambles.
+    private let audioChannelCount: Int
     private var sessionStarted = false
+    private var sessionStartPTS = CMTime.invalid
+    /// First AVCapture (foreign-clock) audio PTS — used to rebase onto the SCK video timeline.
+    private var foreignAudioOriginPTS = CMTime.invalid
+    private var didLogAudioFormat = false
     private(set) var videoFrameCount = 0
+    private(set) var audioSampleCount = 0
 
     init(
         outputURL: URL,
         width: Int,
         height: Int,
         includeAudio: Bool,
+        audioChannelCount: Int,
         queue: DispatchQueue
     ) throws {
         self.outputURL = outputURL
         self.queue = queue
+        self.audioChannelCount = max(1, min(2, audioChannelCount))
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let videoSettings: [String: Any] = [
@@ -303,11 +315,13 @@ private final class CaptureWriterSession: @unchecked Sendable {
 
         var audio: AVAssetWriterInput?
         if includeAudio {
+            // Channel count must match the capture source: SCK microphone is mono;
+            // system audio is stereo. Mismatch (mono→stereo AAC) scrambles / drops audio.
             let audioSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVNumberOfChannelsKey: 2,
-                AVSampleRateKey: 48_000,
-                AVEncoderBitRateKey: 160_000
+                AVNumberOfChannelsKey: self.audioChannelCount,
+                AVSampleRateKey: Self.audioSampleRate,
+                AVEncoderBitRateKey: self.audioChannelCount == 1 ? 96_000 : 160_000
             ]
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             input.expectsMediaDataInRealTime = true
@@ -329,7 +343,9 @@ private final class CaptureWriterSession: @unchecked Sendable {
     }
 
     /// Must be called on `queue` (SCStream sample handler queue).
-    func append(_ sampleBuffer: CMSampleBuffer, isVideo: Bool) {
+    /// - Parameter retimeToSession: set for AVCapture mic buffers whose PTS uses host time,
+    ///   not the ScreenCaptureKit timeline started by the first video frame.
+    func append(_ sampleBuffer: CMSampleBuffer, isVideo: Bool, retimeToSession: Bool = false) {
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
         if isVideo {
             // Skip idle/blank/suspended SCK frames — only `.complete` is writable.
@@ -339,6 +355,7 @@ private final class CaptureWriterSession: @unchecked Sendable {
             guard isVideo else { return }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             writer.startSession(atSourceTime: pts)
+            sessionStartPTS = pts
             sessionStarted = true
         }
         if isVideo {
@@ -348,8 +365,78 @@ private final class CaptureWriterSession: @unchecked Sendable {
             }
         } else {
             guard let audioInput, audioInput.isReadyForMoreMediaData else { return }
-            _ = audioInput.append(sampleBuffer)
+            Self.logAudioFormatOnce(sampleBuffer, flag: &didLogAudioFormat)
+            let buffer: CMSampleBuffer
+            if retimeToSession {
+                guard let retimed = Self.retimeAudioBuffer(
+                    sampleBuffer,
+                    sessionStart: sessionStartPTS,
+                    origin: &foreignAudioOriginPTS
+                ) else { return }
+                buffer = retimed
+            } else {
+                buffer = sampleBuffer
+            }
+            if audioInput.append(buffer) {
+                audioSampleCount += 1
+            }
         }
+    }
+
+    private static func logAudioFormatOnce(_ sampleBuffer: CMSampleBuffer, flag: inout Bool) {
+        guard !flag else { return }
+        flag = true
+        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee
+        else {
+            NSLog("%@", "[MyPipCam] audio buffer: no ASBD")
+            return
+        }
+        NSLog(
+            "%@",
+            String(
+                format:
+                    "[MyPipCam] audio in: %.0f Hz ch=%u bits=%u flags=0x%x → AAC %.0f Hz ch=%d",
+                asbd.mSampleRate,
+                asbd.mChannelsPerFrame,
+                asbd.mBitsPerChannel,
+                asbd.mFormatFlags,
+                audioSampleRate,
+                // logged via session — channel count is on the instance; use ASBD hint here
+                Int(asbd.mChannelsPerFrame)
+            )
+        )
+    }
+
+    /// Map foreign-clock audio onto the writer session timeline (first sample → session start).
+    private static func retimeAudioBuffer(
+        _ sampleBuffer: CMSampleBuffer,
+        sessionStart: CMTime,
+        origin: inout CMTime
+    ) -> CMSampleBuffer? {
+        guard sessionStart.isValid, sessionStart.isNumeric else { return nil }
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard pts.isValid, pts.isNumeric else { return nil }
+        if !origin.isValid {
+            origin = pts
+        }
+        let relative = CMTimeSubtract(pts, origin)
+        let newPTS = CMTimeAdd(sessionStart, relative)
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            presentationTimeStamp: newPTS,
+            decodeTimeStamp: .invalid
+        )
+        var retimed: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &retimed
+        )
+        guard status == noErr, let retimed else { return nil }
+        return retimed
     }
 
     private static func isCompleteScreenFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
@@ -1241,6 +1328,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         includeSystemAudio: Bool
     ) async throws {
         let useMic = microphoneDeviceID != nil
+        // One AAC track cannot take interleaved system + mic buffers — that scrambles audio.
+        // Prefer mic when both are requested; system audio alone when mic is off.
         let useSystemAudio = includeSystemAudio && !useMic
 
         let config = SCStreamConfiguration()
@@ -1252,6 +1341,18 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.pixelFormat = kCVPixelFormatType_32BGRA
 
+        // Prefer ScreenCaptureKit mic (same clock as screen frames) on macOS 15+.
+        // AVCaptureAudioDataOutput uses host time and historically scrambled AAC when
+        // sample rate / channel layout did not match the writer.
+        var useSCKMicrophone = false
+        if useMic, #available(macOS 15.0, *) {
+            config.captureMicrophone = true
+            if let microphoneDeviceID, !microphoneDeviceID.isEmpty {
+                config.microphoneCaptureDeviceID = microphoneDeviceID
+            }
+            useSCKMicrophone = true
+        }
+
         // Remove stale file so AVAssetWriter can create a fresh one.
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
@@ -1261,11 +1362,14 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             withIntermediateDirectories: true
         )
 
+        // SCK/AVCapture mic is mono; system audio is stereo. Match AAC channels to source.
+        let audioChannels = useMic ? 1 : 2
         let session = try CaptureWriterSession(
             outputURL: outputURL,
             width: width,
             height: height,
             includeAudio: useSystemAudio || useMic,
+            audioChannelCount: audioChannels,
             queue: sampleQueue
         )
         writerSession = session
@@ -1276,17 +1380,25 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         if useSystemAudio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
         }
+        if useSCKMicrophone, #available(macOS 15.0, *) {
+            try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: sampleQueue)
+        }
         try await stream.startCapture()
         self.stream = stream
         self.recordingOutput = nil
         // Never pass Swift Int to NSLog %d — 64-bit Int misaligns following %@ and SIGSEGVs.
-        let audioLabel = (useSystemAudio || useMic) ? "yes" : "no"
+        let audioLabel: String = {
+            if useSCKMicrophone { return "sck-mic" }
+            if useMic { return "avcapture-mic" }
+            if useSystemAudio { return "system" }
+            return "no"
+        }()
         NSLog(
             "%@",
             "[MyPipCam] AVAssetWriter capture started → \(outputURL.path) (\(width)x\(height) audio=\(audioLabel))"
         )
 
-        if let microphoneDeviceID, useMic {
+        if useMic, !useSCKMicrophone, let microphoneDeviceID {
             try startMicSession(deviceID: microphoneDeviceID)
         }
     }
@@ -1304,6 +1416,16 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         }
         session.addInput(input)
         let output = AVCaptureAudioDataOutput()
+        // Force 48 kHz mono PCM to match mic AAC track (SCK mic is also mono).
+        output.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: CaptureWriterSession.audioSampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
         output.setSampleBufferDelegate(self, queue: sampleQueue)
         guard session.canAddOutput(output) else {
             session.commitConfiguration()
@@ -1343,7 +1465,8 @@ extension ScreenCloudRecorder: SCStreamOutput {
         case .screen:
             session.append(sampleBuffer, isVideo: true)
         case .audio, .microphone:
-            session.append(sampleBuffer, isVideo: false)
+            // SCK audio shares the screen timeline — do not retime.
+            session.append(sampleBuffer, isVideo: false, retimeToSession: false)
         @unknown default:
             break
         }
@@ -1356,7 +1479,8 @@ extension ScreenCloudRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        writerSession?.append(sampleBuffer, isVideo: false)
+        // Host-time PTS must be remapped onto the SCK session start.
+        writerSession?.append(sampleBuffer, isVideo: false, retimeToSession: true)
     }
 }
 

@@ -261,7 +261,7 @@ A Loom-style floating camera bubble for macOS. Point it at your webcam (or OBS V
 - Border color presets + soft Loom-like drop shadow
 - Mirror toggle
 - Menu bar icon to show/quit (no Dock icon)
-- **Record…** — dots menu / menu bar: pick camera, mic, Screen or Window, then ScreenCaptureKit-record; saves MP4 into the shared library folder (`recordings/<uuid>/`). Tab capture stays in the Chrome extension. Google Drive upload still runs through the extension when Connect Google + auto-upload are enabled.
+- **Record…** — dots menu / menu bar: pick camera, mic, Screen or Window, then ScreenCaptureKit-record; saves MP4 into the shared library folder (`recordings/<uuid>/`). Choose **microphone or system audio** (not both — a single AAC track cannot mix them cleanly). Tab capture stays in the Chrome extension. Google Drive upload still runs through the extension when Connect Google + auto-upload are enabled.
 - **Open Recording Library** — opens the native library window when a shared folder is set (prompts to choose otherwise)
 - **Choose Recording Library…** / **Reveal Library in Finder** — pick or show the on-disk folder shared with Chrome
 - **Open in Chrome…** — secondary path for editor / transcription / Drive sync (via `mypipcam.earnyour.com/open-library` bridge)
