@@ -19,6 +19,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let loginItem = LoginItemManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--probe-screencapture") {
+            NSApp.setActivationPolicy(.accessory)
+            Task { @MainActor in
+                await ScreenCloudRecorder.runLaunchProbe()
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         NSApp.setActivationPolicy(.accessory)
         // Detect reinstall / new code signature so Record can guide Screen Recording re-grant.
         RecordToCloudCoordinator.shared.recorder.noteLaunchIdentity()

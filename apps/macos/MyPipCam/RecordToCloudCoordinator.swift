@@ -262,12 +262,17 @@ final class RecordToCloudCoordinator: ObservableObject {
     }
 
     private func presentScreenRecordingHelp() {
+        // Kick the APIs that can surface a fresh system Allow dialog before we send the user to Settings.
+        _ = recorder.ensureScreenCaptureAccess()
+        Task { await recorder.refreshShareableContent() }
+
         let alert = NSAlert()
         alert.messageText = "Screen Recording Permission Needed"
         alert.informativeText = ScreenCloudRecorderError.permissionHelpText
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open Screen Recording Settings")
         alert.addButton(withTitle: "Quit MyPipCam")
+        alert.addButton(withTitle: "Try Again")
         alert.addButton(withTitle: "OK")
         let response = alert.runModal()
         switch response {
@@ -275,6 +280,8 @@ final class RecordToCloudCoordinator: ObservableObject {
             ScreenCloudRecorder.openScreenRecordingSettings()
         case .alertSecondButtonReturn:
             NSApp.terminate(nil)
+        case .alertThirdButtonReturn:
+            presentSetup()
         default:
             break
         }

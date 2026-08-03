@@ -97,8 +97,8 @@ struct RecordToCloudSetupView: View {
             .font(.system(size: 13, weight: .semibold))
             Text(
                 recorder.needsScreenRecordingPermission
-                    ? "macOS declined capture for this copy of MyPipCam (even if the Settings toggle looks on). Toggle MyPipCam off → on, quit the app, then reopen."
-                    : "Developer-signed rebuilds often need Screen Recording re-granted. Open Settings, toggle MyPipCam off → on, quit, then reopen."
+                    ? "macOS declined capture for this copy of MyPipCam. Quit the app, click Record again, and click Allow on the system dialog (a Settings toggle alone is often not enough)."
+                    : "Developer-signed rebuilds often need a fresh Allow. Click Record and accept the system Screen Recording dialog, or remove MyPipCam from Screen Recording settings and try again."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)

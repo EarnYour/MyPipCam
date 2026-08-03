@@ -56,13 +56,13 @@ enum ScreenCloudRecorderError: LocalizedError {
     static let permissionHelpText = """
     macOS blocked display/window capture for this copy of MyPipCam.
 
-    System Settings may still show MyPipCam as allowed after a reinstall — that grant often belongs to an older app signature.
+    A Settings toggle alone often does nothing after a reinstall — macOS needs a fresh Allow for this binary.
 
     Fix:
-    1. Open Screen Recording settings
-    2. Turn MyPipCam OFF, then ON again
-    3. Fully quit MyPipCam (menu bar icon → Quit)
-    4. Reopen the app and try Record again
+    1. Quit MyPipCam completely (menu bar icon → Quit)
+    2. Click Record again — wait for the system “Screen Recording” dialog
+    3. Click Allow (not only the Settings toggle)
+    4. If no dialog appears: System Settings → Privacy & Security → Screen Recording → remove every MyPipCam row, then reopen MyPipCam and Record again so a new prompt appears
     """
 
     var errorDescription: String? {
@@ -78,6 +78,7 @@ enum ScreenCloudRecorderError: LocalizedError {
         }
     }
 
+    /// Only true Screen Recording TCC / user-decline — not every SCStreamError in the -38xx band.
     static func isScreenCaptureTCCError(_ error: Error) -> Bool {
         if let err = error as? ScreenCloudRecorderError, case .permissionDenied = err {
             return true
@@ -92,16 +93,42 @@ enum ScreenCloudRecorderError: LocalizedError {
         if blob.contains("screen recording") && (blob.contains("denied") || blob.contains("not authorized") || blob.contains("permission")) {
             return true
         }
-        // ScreenCaptureKit commonly surfaces these under SCStreamError / NSOSStatusError.
-        if ns.domain.contains("ScreenCaptureKit") || ns.domain.contains("SCStream") {
-            // -3801 and nearby codes often mean user declined / missing screen capture TCC.
-            if (-3900 ... -3800).contains(ns.code) { return true }
+        // SCStreamErrorUserDeclined = -3801. Do NOT treat -3802…-3821 (mic, entitlements, empty lists, etc.) as TCC.
+        if ns.domain == SCStreamErrorDomain || ns.domain.contains("ScreenCaptureKit") || ns.domain.contains("SCStream") {
+            if ns.code == SCStreamError.userDeclined.rawValue { return true }
         }
         return false
     }
 
     static func mapCaptureError(_ error: Error) -> Error {
         if isScreenCaptureTCCError(error) { return ScreenCloudRecorderError.permissionDenied }
+        let ns = error as NSError
+        if ns.domain == SCStreamErrorDomain || ns.domain.contains("ScreenCaptureKit") || ns.domain.contains("SCStream") {
+            // Use raw codes so we can compile against macOS 14 SDK availability while running on 15+.
+            switch ns.code {
+            case SCStreamError.noDisplayList.rawValue, SCStreamError.noCaptureSource.rawValue:
+                return ScreenCloudRecorderError.noDisplay
+            case SCStreamError.noWindowList.rawValue:
+                return ScreenCloudRecorderError.noWindow
+            case -3820: // SCStreamErrorFailedToStartMicrophoneCapture (macOS 15+)
+                return ScreenCloudRecorderError.startFailed(
+                    "Microphone capture failed. Grant Microphone access in System Settings, or start again with microphone turned off."
+                )
+            case SCStreamError.failedToStartAudioCapture.rawValue:
+                return ScreenCloudRecorderError.startFailed(
+                    "System audio capture failed. Try again with “Include system audio” turned off."
+                )
+            case SCStreamError.missingEntitlements.rawValue:
+                return ScreenCloudRecorderError.startFailed(
+                    "Capture failed due to missing entitlements. Reinstall MyPipCam with the install script, then try again."
+                )
+            default:
+                let detail = ns.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !detail.isEmpty {
+                    return ScreenCloudRecorderError.startFailed("\(detail) (code \(ns.code))")
+                }
+            }
+        }
         return error
     }
 }
@@ -244,22 +271,89 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         }
     }
 
-    /// Triggers the system Screen Recording prompt when needed.
-    /// Note: after reinstall, `CGPreflightScreenCaptureAccess()` can return true for a stale TCC
-    /// entry while ScreenCaptureKit still declines — always follow with `refreshShareableContent()`.
+    /// Best-effort prompt trigger. On modern macOS, `CGRequestScreenCaptureAccess()` often returns
+    /// `false` immediately (opens Settings) without waiting — do **not** treat that as a hard deny.
+    /// Always follow with `SCShareableContent` / `startCapture`, which are what surface the real Allow dialog.
     @discardableResult
     func ensureScreenCaptureAccess() -> Bool {
         if CGPreflightScreenCaptureAccess() { return true }
-        let granted = CGRequestScreenCaptureAccess()
-        if !granted {
-            needsScreenRecordingPermission = true
-        }
-        return granted
+        // Fire the legacy request so Settings can list this app; ignore the boolean gate.
+        _ = CGRequestScreenCaptureAccess()
+        return CGPreflightScreenCaptureAccess()
     }
 
     /// True only after a successful SCShareableContent fetch in this session.
     var hasVerifiedScreenCaptureAccess: Bool {
         !needsScreenRecordingPermission && (!displays.isEmpty || errorMessage == nil)
+    }
+
+    /// Diagnostic entry point for `--probe-screencapture` (writes Application Support + unified log).
+    static func runLaunchProbe() async {
+        let bundlePath = Bundle.main.bundlePath
+        func writeProbe(_ lines: [String]) {
+            let text = lines.joined(separator: "\n") + "\n"
+            if let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                let folder = dir.appendingPathComponent("MyPipCam", isDirectory: true)
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent("screencapture-probe.txt")
+                try? text.write(to: url, atomically: true, encoding: .utf8)
+                NSLog("[MyPipCam probe] wrote %{public}@", url.path)
+            }
+        }
+
+        let pre1 = CGPreflightScreenCaptureAccess()
+        writeProbe([
+            "bundlePath=\(bundlePath)",
+            "preflightBefore=\(pre1)",
+            "result=REQUESTING"
+        ])
+        _ = CGRequestScreenCaptureAccess()
+        let pre2 = CGPreflightScreenCaptureAccess()
+        writeProbe([
+            "bundlePath=\(bundlePath)",
+            "preflightBefore=\(pre1)",
+            "preflightAfterRequest=\(pre2)",
+            "result=WAITING_SHAREABLE_CONTENT"
+        ])
+        NSLog(
+            "[MyPipCam probe] path=%{public}@ preflight before=%{public}@ afterRequest=%{public}@",
+            bundlePath,
+            "\(pre1)",
+            "\(pre2)"
+        )
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            writeProbe([
+                "bundlePath=\(bundlePath)",
+                "preflightBefore=\(pre1)",
+                "preflightAfterRequest=\(pre2)",
+                "result=OK",
+                "displays=\(content.displays.count)",
+                "windows=\(content.windows.count)"
+            ])
+            NSLog(
+                "[MyPipCam probe] SCShareableContent OK displays=%d windows=%d",
+                content.displays.count,
+                content.windows.count
+            )
+        } catch {
+            let ns = error as NSError
+            writeProbe([
+                "bundlePath=\(bundlePath)",
+                "preflightBefore=\(pre1)",
+                "preflightAfterRequest=\(pre2)",
+                "result=FAIL",
+                "domain=\(ns.domain)",
+                "code=\(ns.code)",
+                "desc=\(ns.localizedDescription)"
+            ])
+            NSLog(
+                "[MyPipCam probe] SCShareableContent FAILED domain=%{public}@ code=%d desc=%{public}@",
+                ns.domain,
+                ns.code,
+                ns.localizedDescription
+            )
+        }
     }
 
     static func openScreenRecordingSettings() {
@@ -293,10 +387,8 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         excludeWindowIDs: [CGWindowID]
     ) async throws -> URL {
         guard !isRecording else { throw ScreenCloudRecorderError.alreadyRecording }
-        guard ensureScreenCaptureAccess() else {
-            needsScreenRecordingPermission = true
-            throw ScreenCloudRecorderError.permissionDenied
-        }
+        // Prompt best-effort; never block start on CGRequest's boolean — SCK is authoritative.
+        _ = ensureScreenCaptureAccess()
 
         self.excludeWindowIDs = excludeWindowIDs
 
@@ -306,11 +398,14 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             needsScreenRecordingPermission = false
             signingIdentityChanged = false
         } catch {
-            if ScreenCloudRecorderError.isScreenCaptureTCCError(error) {
+            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
                 needsScreenRecordingPermission = true
+                // Second request pass after SCK decline — helps surface a fresh system prompt.
+                _ = CGRequestScreenCaptureAccess()
                 throw ScreenCloudRecorderError.permissionDenied
             }
-            throw error
+            throw mapped
         }
 
         let filter: SCContentFilter
@@ -361,31 +456,22 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         outputURL = url
 
         do {
-            if #available(macOS 15.0, *) {
-                try await startWithRecordingOutput(
-                    filter: filter,
-                    width: width,
-                    height: height,
-                    outputURL: url,
-                    microphoneDeviceID: microphoneDeviceID,
-                    includeSystemAudio: includeSystemAudio
-                )
-            } else {
-                try await startWithAssetWriter(
-                    filter: filter,
-                    width: width,
-                    height: height,
-                    outputURL: url,
-                    microphoneDeviceID: microphoneDeviceID,
-                    includeSystemAudio: includeSystemAudio
-                )
-            }
+            try await startCaptureWithFallback(
+                filter: filter,
+                width: width,
+                height: height,
+                outputURL: url,
+                microphoneDeviceID: microphoneDeviceID,
+                includeSystemAudio: includeSystemAudio
+            )
         } catch {
-            if ScreenCloudRecorderError.isScreenCaptureTCCError(error) {
+            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
                 needsScreenRecordingPermission = true
+                _ = CGRequestScreenCaptureAccess()
                 throw ScreenCloudRecorderError.permissionDenied
             }
-            throw error
+            throw mapped
         }
 
         startedAt = Date()
@@ -449,6 +535,81 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         elapsedSeconds = 0
     }
 
+    /// Prefer SCRecordingOutput on macOS 15+, but fall back to AVAssetWriter (and strip audio) on failure
+    /// so mic/system-audio errors are not misreported as Screen Recording TCC.
+    private func startCaptureWithFallback(
+        filter: SCContentFilter,
+        width: Int,
+        height: Int,
+        outputURL: URL,
+        microphoneDeviceID: String?,
+        includeSystemAudio: Bool
+    ) async throws {
+        var lastError: Error?
+
+        if #available(macOS 15.0, *) {
+            do {
+                try await startWithRecordingOutput(
+                    filter: filter,
+                    width: width,
+                    height: height,
+                    outputURL: outputURL,
+                    microphoneDeviceID: microphoneDeviceID,
+                    includeSystemAudio: includeSystemAudio
+                )
+                return
+            } catch {
+                lastError = error
+                await cancelPartialStart()
+                if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
+                NSLog(
+                    "[MyPipCam] SCRecordingOutput start failed (%@) — trying asset writer",
+                    String(describing: error)
+                )
+            }
+        }
+
+        do {
+            try await startWithAssetWriter(
+                filter: filter,
+                width: width,
+                height: height,
+                outputURL: outputURL,
+                microphoneDeviceID: microphoneDeviceID,
+                includeSystemAudio: includeSystemAudio
+            )
+            return
+        } catch {
+            lastError = error
+            await cancelPartialStart()
+            if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
+        }
+
+        // Last resort: video-only (no mic / system audio).
+        if microphoneDeviceID != nil || includeSystemAudio {
+            try await startWithAssetWriter(
+                filter: filter,
+                width: width,
+                height: height,
+                outputURL: outputURL,
+                microphoneDeviceID: nil,
+                includeSystemAudio: false
+            )
+            errorMessage = "Recording without microphone/system audio (capture audio failed)."
+            return
+        }
+
+        throw lastError ?? ScreenCloudRecorderError.startFailed("Could not start capture.")
+    }
+
+    private func cancelPartialStart() async {
+        try? await stream?.stopCapture()
+        stream = nil
+        recordingOutput = nil
+        await finishAssetWriter()
+        stopMicSession()
+    }
+
     @available(macOS 15.0, *)
     private func startWithRecordingOutput(
         filter: SCContentFilter,
@@ -458,6 +619,10 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         microphoneDeviceID: String?,
         includeSystemAudio: Bool
     ) async throws {
+        // Ensure parent directory exists and is writable (sandbox container temp).
+        let dir = outputURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
         let config = SCStreamConfiguration()
         config.width = width
         config.height = height
@@ -474,7 +639,10 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         let recordingConfig = SCRecordingOutputConfiguration()
         recordingConfig.outputURL = outputURL
         recordingConfig.outputFileType = .mp4
-        if recordingConfig.availableVideoCodecTypes.contains(.hevc) {
+        // Prefer H.264 for broader sandbox / player compatibility; HEVC can fail to finalize.
+        if recordingConfig.availableVideoCodecTypes.contains(.h264) {
+            recordingConfig.videoCodecType = .h264
+        } else if recordingConfig.availableVideoCodecTypes.contains(.hevc) {
             recordingConfig.videoCodecType = .hevc
         } else if let first = recordingConfig.availableVideoCodecTypes.first {
             recordingConfig.videoCodecType = first
@@ -645,6 +813,8 @@ extension ScreenCloudRecorder: SCStreamDelegate {
                 self.errorMessage = mapped.localizedDescription
             }
             self.isRecording = false
+            self.stream = nil
+            self.recordingOutput = nil
         }
     }
 }

@@ -65,14 +65,32 @@ EOF
 echo "==> Building Release…"
 cd "$MACOS"
 rm -rf "$DERIVED"
+
+# Keep Automatic signing on the same Development Team so TCC stays on one cert family.
+# Use the generic "Apple Development" identity (not a full CN) with CODE_SIGN_STYLE=Automatic.
+EXPECTED_TEAM="977CN6XFAH"
+EXPECTED_CN="Apple Development: Steven Martinez (69Z3369CDJ)"
+if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq "$EXPECTED_CN"; then
+  echo "warning: expected identity not in keychain: $EXPECTED_CN" >&2
+  echo "warning: xcodebuild will pick another Apple Development cert for team $EXPECTED_TEAM." >&2
+fi
+
+OLD_CDHASH=""
+if [[ -d "$APP_DST" ]]; then
+  OLD_CDHASH="$(codesign -dv --verbose=2 "$APP_DST" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
+fi
+
 xcodebuild \
   -project MyPipCam.xcodeproj \
   -scheme MyPipCam \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
   -destination 'generic/platform=macOS' \
-  DEVELOPMENT_TEAM=977CN6XFAH \
+  DEVELOPMENT_TEAM="$EXPECTED_TEAM" \
   CODE_SIGN_STYLE=Automatic \
+  CODE_SIGN_IDENTITY="Apple Development" \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+  ENABLE_HARDENED_RUNTIME=YES \
   build
 
 if [[ ! -d "$APP_SRC" ]]; then
@@ -80,21 +98,59 @@ if [[ ! -d "$APP_SRC" ]]; then
   exit 1
 fi
 
+echo "==> Verifying signature…"
+codesign --verify --deep --strict "$APP_SRC" 2>&1 || {
+  echo "error: Release app failed codesign verify" >&2
+  exit 1
+}
+codesign -dv --verbose=2 "$APP_SRC" 2>&1 | egrep 'Authority|TeamIdentifier|Identifier|CDHash' || true
+# Release must not carry get-task-allow (debugger entitlement).
+if codesign -d --entitlements - "$APP_SRC" 2>&1 | grep -q 'get-task-allow'; then
+  echo "error: Release build unexpectedly includes get-task-allow — refusing install." >&2
+  exit 1
+fi
+
+NEW_CDHASH="$(codesign -dv --verbose=2 "$APP_SRC" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
+
 echo "==> Installing to ${APP_DST} ..."
 # Quit running instance if any
 pkill -x MyPipCam 2>/dev/null || true
 sleep 0.3
 
-# Replace existing install
+# Replace existing install (ditto preserves more metadata than rm+cp)
 rm -rf "${APP_DST}"
-cp -R "${APP_SRC}" "${APP_DST}"
+ditto "${APP_SRC}" "${APP_DST}"
 
-# Refresh Launch Services / icon cache hints
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "${APP_DST}" 2>/dev/null || true
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+# Critical: xcodebuild registers the build-release .app with Launch Services. If that copy
+# wins over /Applications, Screen Recording TCC binds to the wrong binary and Settings
+# toggles appear to "do nothing". Prefer Applications; drop staging/build clones.
+"$LSREG" -u "$APP_SRC" 2>/dev/null || true
+while IFS= read -r extra; do
+  [[ -z "$extra" || "$extra" == "$APP_DST" ]] && continue
+  "$LSREG" -u "$extra" 2>/dev/null || true
+done < <(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.MyPipCam'" 2>/dev/null || true)
+"$LSREG" -f "$APP_DST" 2>/dev/null || true
 
 echo ""
+AUTH="$(codesign -dv --verbose=2 "$APP_DST" 2>&1 | awk -F= '/^Authority=/{print $2; exit}')"
+NEW_CDHASH="$(codesign -dv --verbose=2 "$APP_DST" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
 echo "Installed: ${APP_DST}"
-echo "Open with: open -a MyPipCam"
+echo "Signing: ${AUTH:-unknown} · Team ${EXPECTED_TEAM} · CDHash ${NEW_CDHASH:-unknown}"
+if [[ -n "$OLD_CDHASH" && -n "$NEW_CDHASH" && "$OLD_CDHASH" != "$NEW_CDHASH" ]]; then
+  echo ""
+  echo "NOTE: Binary fingerprint changed (typical for Apple Development rebuilds)."
+  echo "Screen Recording may need a FRESH system Allow dialog — not only the Settings toggle:"
+  echo "  1. Open MyPipCam → Record"
+  echo "  2. Click Allow on the macOS Screen Recording prompt"
+  echo "  3. If no prompt: System Settings → Privacy & Security → Screen Recording"
+  echo "     → remove every MyPipCam entry → Record again"
+  echo "  Optional reset: tccutil reset ScreenCapture com.stevenmartinez.MyPipCam"
+fi
+echo ""
+echo "Open with: open /Applications/MyPipCam.app"
+echo "Probe capture: open -W /Applications/MyPipCam.app --args --probe-screencapture"
 echo "Or find MyPipCam in Applications / Launchpad (screen icon with orange PiP dot)."
 echo ""
-open -a MyPipCam
+# Always launch the Applications install (never a build-folder clone).
+open "$APP_DST"
