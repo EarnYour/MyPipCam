@@ -32,6 +32,8 @@
 	<string>MyPipCam needs microphone access to include your voice when recording screen or window captures to your library.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>MyPipCam needs Screen Recording access to capture your display or a window (with the floating camera PiP) and save it to your MyPipCam library.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>MyPipCam asks Chrome to open the MyPipCam Library page (editor and transcription) when you choose Open in Chrome….</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

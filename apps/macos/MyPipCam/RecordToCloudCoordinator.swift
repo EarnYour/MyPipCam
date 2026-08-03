@@ -189,7 +189,8 @@ final class RecordToCloudCoordinator: ObservableObject {
                 case .alertSecondButtonReturn:
                     let override = settings.chromeExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
                     ExtensionLibraryOpener.openRecordingLibrary(
-                        extensionID: override.isEmpty ? nil : override
+                        extensionID: override.isEmpty ? nil : override,
+                        recordingID: saved.id
                     )
                 case .alertThirdButtonReturn:
                     LibraryFolderStore.shared.revealRecordingInFinder(id: saved.id)

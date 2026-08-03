@@ -12,5 +12,30 @@
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
+	<!-- Detect unpacked MyPipCam installs for “Open in Chrome…” -->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>Library/Application Support/Google/Chrome/</string>
+		<string>Library/Application Support/Google/Chrome Canary/</string>
+		<string>Library/Application Support/Google/Chrome Beta/</string>
+		<string>Library/Application Support/Chromium/</string>
+		<string>Library/Application Support/BraveSoftware/Brave-Browser/</string>
+		<string>Library/Application Support/Microsoft Edge/</string>
+		<string>Library/Application Support/Arc/</string>
+		<string>Library/Application Support/Vivaldi/</string>
+	</array>
+	<!-- Fallback: tell Chrome to open chrome-extension:// library URLs -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array>
+		<string>com.google.Chrome</string>
+		<string>com.google.Chrome.canary</string>
+		<string>company.thebrowser.Browser</string>
+		<string>com.brave.Browser</string>
+		<string>com.microsoft.edgemac</string>
+		<string>com.vivaldi.Vivaldi</string>
+		<string>org.chromium.Chromium</string>
+	</array>
 </dict>
 </plist>
