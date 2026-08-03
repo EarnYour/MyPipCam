@@ -4,11 +4,16 @@ import Darwin
 /// Opens the Chrome extension library/editor (secondary path for transcription & editing).
 /// Prefer the native Recording Library window when a shared folder is configured.
 enum ExtensionLibraryOpener {
-    /// Stable ID from the public `key` in `apps/extension/manifest.config.ts`.
+    /// Stable ID from the public `key` in `apps/extension/manifest.config.ts` (Load unpacked).
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
+    /// Live Chrome Web Store item ID (published zip without manifest `key`).
+    static let chromeWebStoreExtensionID = "meiehjfjcaahfjcdneoegjkmajbfghmm"
+    /// Known installs: unpacked first (dev), then store.
+    private static let knownExtensionIDs = [defaultExtensionID, chromeWebStoreExtensionID]
     /// Must match popup/`openLibraryTab` and `apps/extension/dist` (CRX keeps `src/…`).
     static let libraryPath = "src/library/index.html"
     /// HTTPS bridge asks the extension to open Library via chrome.tabs (avoids ad-block ERR_BLOCKED_BY_CLIENT).
+    /// Pass `ext=` = store or unpacked ID (`chromeWebStoreExtensionID` / `defaultExtensionID`).
     static let bridgeOpenPath = "https://mypipcam.earnyour.com/open-library"
     static let extensionDisplayName = "MyPipCam"
     static let releasesURL = URL(string: "https://github.com/EarnYour/MyPipCam/releases")!
@@ -45,8 +50,8 @@ enum ExtensionLibraryOpener {
 
     /// Resolves which extension ID to use, in order:
     /// 1. UserDefaults override (`chromeExtensionId`)
-    /// 2. Auto-detected install under Chromium profiles (name match / unpacked path)
-    /// 3. Stable ID from the packed manifest `key`
+    /// 2. Auto-detected install under Chromium profiles (unpacked key ID, then store ID, then name match)
+    /// 3. Stable unpacked ID from the packed manifest `key`
     static func resolveExtensionID(preferred: String? = nil) -> String {
         if let preferred {
             let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -264,6 +269,9 @@ enum ExtensionLibraryOpener {
         if found.contains(defaultExtensionID) {
             return defaultExtensionID
         }
+        if found.contains(chromeWebStoreExtensionID) {
+            return chromeWebStoreExtensionID
+        }
         return found.first
     }
 
@@ -313,12 +321,12 @@ enum ExtensionLibraryOpener {
         found.append(contentsOf: detectPackedExtensionIDs())
         found.append(contentsOf: detectUnpackedExtensionIDsFromPreferences())
         found.append(contentsOf: detectExtensionIDsViaPathProbe())
-        // Stable key first when both exist.
+        // Unpacked key ID first (dev), then store ID, then any other MyPipCam match.
         var ordered: [String] = []
-        if found.contains(defaultExtensionID) {
-            ordered.append(defaultExtensionID)
+        for known in knownExtensionIDs where found.contains(known) {
+            ordered.append(known)
         }
-        for id in found where id != defaultExtensionID && !ordered.contains(id) {
+        for id in found where !ordered.contains(id) {
             ordered.append(id)
         }
         return ordered
@@ -377,11 +385,12 @@ enum ExtensionLibraryOpener {
 
     private static func preferencesEntryMatchesMyPipCam(_ info: [String: Any], extensionID: String) -> Bool {
         // Chrome often omits embedded `manifest` for unpacked (location 4) installs.
-        if extensionID == defaultExtensionID {
+        // Treat known IDs (unpacked key + Chrome Web Store) as MyPipCam when present.
+        if knownExtensionIDs.contains(extensionID) {
             let disabled = !((info["disable_reasons"] as? [Any]) ?? []).isEmpty
                 || ((info["disable_reasons"] as? [String: Any])?.isEmpty == false)
             if !disabled {
-                // Stable-ID entry present and not disabled counts even without a name field.
+                // Known-ID entry present and not disabled counts even without a name field.
                 if info["path"] != nil || info["location"] != nil || info["manifest"] != nil {
                     return true
                 }
@@ -445,16 +454,16 @@ enum ExtensionLibraryOpener {
         return false
     }
 
-    /// When prefs aren’t readable, still surface the stable ID if metadata dirs exist.
+    /// When prefs aren’t readable, still surface known IDs if metadata dirs exist.
     private static func detectExtensionIDsViaPathProbe() -> [String] {
         var found: [String] = []
-        if extensionPresentViaPathProbe(id: defaultExtensionID) {
-            found.append(defaultExtensionID)
+        for known in knownExtensionIDs where extensionPresentViaPathProbe(id: known) {
+            found.append(known)
         }
         if let stored = UserDefaults.standard.string(forKey: extensionIdDefaultsKey) {
             let cleaned = sanitizedExtensionID(stored)
             if isValidExtensionID(cleaned),
-               cleaned != defaultExtensionID,
+               !knownExtensionIDs.contains(cleaned),
                extensionPresentViaPathProbe(id: cleaned) {
                 found.append(cleaned)
             }
@@ -550,8 +559,8 @@ enum ExtensionLibraryOpener {
             options: [.skipsHiddenFiles]
         ) else {
             // Can’t list versions (sandbox) — treat directory presence as a weak match only for
-            // the stable ID; packed CRX trees are under Extensions/<id>/<version>/.
-            return idDir.lastPathComponent.lowercased() == defaultExtensionID
+            // known IDs; packed CRX trees are under Extensions/<id>/<version>/.
+            return knownExtensionIDs.contains(idDir.lastPathComponent.lowercased())
         }
 
         for version in versions {
@@ -781,7 +790,7 @@ enum ExtensionLibraryOpener {
 
         \(openedURL.absoluteString)
 
-        If the bridge says it couldn’t reach the extension, reload MyPipCam on chrome://extensions (ID should be \(defaultExtensionID)).
+        If the bridge says it couldn’t reach the extension, reload MyPipCam on chrome://extensions (store ID \(chromeWebStoreExtensionID) or unpacked \(defaultExtensionID)).
         If you ever open the raw chrome-extension:// URL and see ERR_BLOCKED_BY_CLIENT, an ad blocker is blocking it — use the bridge, disable the blocker for that tab, or click Library in the extension popup.
         """
         if let directURL {
@@ -823,7 +832,7 @@ enum ExtensionLibraryOpener {
         2. Enable Developer mode
         3. Load unpacked → select apps/extension/dist (revealed in Finder if found)
            Or install from GitHub Releases (\(extensionReleaseTag) extension build)
-        4. Confirm the ID under MyPipCam is \(defaultExtensionID) (or use Set Extension ID…)
+        4. Confirm the ID under MyPipCam is the store ID (\(chromeWebStoreExtensionID)) or unpacked (\(defaultExtensionID)) — or use Set Extension ID…
         5. Choose the same library folder as this Mac app (suggested: ~/Movies/MyPipCam)
 
         Bridge URL:

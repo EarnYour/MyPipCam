@@ -4,9 +4,10 @@
  * Set via `VITE_GOOGLE_OAUTH_CLIENT_ID` in `apps/extension/.env.local` (gitignored).
  * See `.env.example`. Never commit a client_secret — Chrome-extension OAuth has none.
  *
- * Stable extension ID (when dist manifest includes `key`):
- *   akpchobfndfddajiihkkdpnihihdicjc
- * Use that as the Google Cloud OAuth client Item ID — not the product website.
+ * Google Cloud OAuth client Item ID must match the install under test
+ * (not the product website):
+ *   Chrome Web Store (live): meiehjfjcaahfjcdneoegjkmajbfghmm
+ *   Unpacked with manifest `key`: akpchobfndfddajiihkkdpnihihdicjc
  *
  * Consent screen URLs: https://mypipcam.earnyour.com (authorized domain: earnyour.com).
  */
@@ -34,11 +35,13 @@ export const GOOGLE_OAUTH_CLIENT_ID =
     : 'YOUR_CLIENT_ID.apps.googleusercontent.com'
 
 /**
- * Extension ID when `manifest.key` is present (packed / dist build).
- * Google Cloud → OAuth client (Chrome extension) → Item ID must equal this
- * (or whatever chrome://extensions shows if you loaded without `key`).
+ * Extension ID when `manifest.key` is present (unpacked / local dist).
+ * Store listing ID is separate — see CHROME_WEB_STORE_EXTENSION_ID.
  */
 export const STABLE_EXTENSION_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
+
+/** Live Chrome Web Store item ID (zip without `key`). OAuth Item ID for store builds. */
+export const CHROME_WEB_STORE_EXTENSION_ID = 'meiehjfjcaahfjcdneoegjkmajbfghmm'
 
 /** Preferred scope: only files/folders this app creates or the user opens with it. */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'

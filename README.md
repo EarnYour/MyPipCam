@@ -131,16 +131,12 @@ Auth still uses **`chrome.identity`** with a **Chrome extension** OAuth client. 
 4. Create credentials: **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 5. Application type: **Chrome extension** (not “Web application”).
 6. Item ID / Application ID: paste the **extension ID shown on `chrome://extensions`**
-   (Developer mode). With the packed manifest `key` that is  
-   `akpchobfndfddajiihkkdpnihihdicjc`  
-   — **not** the website hostname.  
-   If you load unpacked *without* `key` in `dist/manifest.json`, Chrome assigns a
-   different ID (e.g. `okpchcbnnbdssajmkophnfnklgjcsncl`). The Google Cloud Item ID
-   **must match that live ID**, or OAuth will fail with errors like “bad client id” /
-   “Authorization page could not be loaded”. Prefer rebuilding so `key` is
-   present and the ID stays `akpchobfndfddajiihkkdpnihihdicjc`.
-   Connect Google surfaces the live extension ID in the Settings error when auth
-   fails for a client mismatch.
+   (Developer mode) — **not** the website hostname.
+   - **Chrome Web Store (live):** `meiehjfjcaahfjcdneoegjkmajbfghmm` — use this Item ID for the published / store build (Connect Google for store users).
+   - **Unpacked with manifest `key`:** `akpchobfndfddajiihkkdpnihihdicjc` — local dist builds that keep `key`.
+   - Unpacked *without* `key` gets a different Chrome-assigned ID; Item ID must match that live ID or OAuth fails (“bad client id” / “Authorization page could not be loaded”).
+   Click path: **APIs & Services → Credentials →** Chrome-extension OAuth client → **Item ID**.
+   Connect Google surfaces the live extension ID in the Settings error when auth fails for a client mismatch. See [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md).
 7. Copy the **Client ID** (ends with `.apps.googleusercontent.com`).
 8. Put it in gitignored env (never commit the real ID):
 
@@ -221,12 +217,12 @@ npm run build
 
 Shortcut: **⌘⇧U** (Mac) / **Ctrl+Shift+U** (Windows/Linux) — start or stop.
 
-**Stable extension ID** (fixed via manifest `key`): `akpchobfndfddajiihkkdpnihihdicjc`  
-Library page (same path the popup uses): `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
-**Open in Chrome…** (macOS) opens the HTTPS bridge `https://mypipcam.earnyour.com/open-library?ext=…` so the extension opens Library via `chrome.tabs` — direct `chrome-extension://` navigation is often blocked by ad blockers (`ERR_BLOCKED_BY_CLIENT`). 
+**Extension IDs:** store (live) `meiehjfjcaahfjcdneoegjkmajbfghmm` · unpacked (`key`) `akpchobfndfddajiihkkdpnihihdicjc`  
+Library page (unpacked): `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
+**Open in Chrome…** (macOS) opens the HTTPS bridge `https://mypipcam.earnyour.com/open-library?ext=…` with either ID so the extension opens Library via `chrome.tabs` — direct `chrome-extension://` navigation is often blocked by ad blockers (`ERR_BLOCKED_BY_CLIENT`).  
 (The macOS app **Open Recording Library** menu opens this URL.)
 
-If you loaded an unpacked build *before* the manifest `key` was added, your ID will differ. In the macOS menu choose **Set Extension ID…**, paste the ID from `chrome://extensions` (Developer mode), then **Save & Open Library**. The app also auto-detects an installed “MyPipCam” extension under Chrome/Edge/Brave/Arc profiles when no override is set.
+If auto-detect picks the wrong install, use **Set Extension ID…** and paste the ID from `chrome://extensions` (Developer mode), then **Save & Open Library**. The app recognizes both the store and unpacked IDs under Chrome/Edge/Brave/Arc profiles.
 
 ### What it does
 

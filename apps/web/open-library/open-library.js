@@ -1,19 +1,16 @@
 ;(function () {
-  var DEFAULT_EXT_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
+  // Unpacked dist with manifest `key` (local / Load unpacked).
+  var UNPACKED_EXT_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
+  // Chrome Web Store listing (published zip without `key`).
+  var STORE_EXT_ID = 'meiehjfjcaahfjcdneoegjkmajbfghmm'
   var LIBRARY_PATH = 'src/library/index.html'
   var EXT_ID_RE = /^[a-p]{32}$/
 
   var params = new URLSearchParams(window.location.search)
-  var extRaw = (params.get('ext') || DEFAULT_EXT_ID).trim().toLowerCase()
-  var extId = EXT_ID_RE.test(extRaw) ? extRaw : DEFAULT_EXT_ID
+  var extParam = (params.get('ext') || '').trim().toLowerCase()
+  var hasExplicitExt = EXT_ID_RE.test(extParam)
+  var primaryId = hasExplicitExt ? extParam : UNPACKED_EXT_ID
   var recordingId = (params.get('id') || '').trim()
-
-  var direct =
-    'chrome-extension://' +
-    extId +
-    '/' +
-    LIBRARY_PATH +
-    (recordingId ? '?id=' + encodeURIComponent(recordingId) : '')
 
   var titleEl = document.getElementById('title')
   var bodyEl = document.getElementById('body')
@@ -22,7 +19,22 @@
   var openDirectEl = document.getElementById('openDirect')
   var openExtsEl = document.getElementById('openExts')
 
-  if (openDirectEl) openDirectEl.href = direct
+  function directUrl(extId) {
+    return (
+      'chrome-extension://' +
+      extId +
+      '/' +
+      LIBRARY_PATH +
+      (recordingId ? '?id=' + encodeURIComponent(recordingId) : '')
+    )
+  }
+
+  function setDirectHref(extId) {
+    if (openDirectEl) openDirectEl.href = directUrl(extId)
+  }
+
+  setDirectHref(primaryId)
+
   // chrome:// links from https pages often don't navigate; keep as copy tip.
   if (openExtsEl) {
     openExtsEl.addEventListener('click', function (e) {
@@ -35,20 +47,27 @@
     })
   }
 
-  function showFallback(reason) {
+  function showFallback(reason, extId) {
     if (titleEl) titleEl.textContent = 'Couldn’t reach the extension'
     if (bodyEl) {
       bodyEl.textContent =
-        'Load the MyPipCam extension in Chrome (Developer mode → Load unpacked → apps/extension/dist), then click Open extension page. If that shows ERR_BLOCKED_BY_CLIENT, disable your ad blocker for this tab or open Library from the extension popup.'
+        'Install MyPipCam from the Chrome Web Store, or Load unpacked → apps/extension/dist, then click Open extension page. If that shows ERR_BLOCKED_BY_CLIENT, disable your ad blocker for this tab or open Library from the extension popup.'
     }
     if (actionsEl) actionsEl.hidden = false
     if (hintEl) {
       hintEl.hidden = false
       hintEl.textContent =
         (reason ? reason + ' · ' : '') +
-        'Direct URL: ' +
-        direct
+        'Tried ID ' +
+        extId +
+        ' · Direct URL: ' +
+        directUrl(extId) +
+        ' · Store ID: ' +
+        STORE_EXT_ID +
+        ' · Unpacked ID: ' +
+        UNPACKED_EXT_ID
     }
+    setDirectHref(extId)
   }
 
   function showSuccess() {
@@ -61,7 +80,7 @@
     if (hintEl) hintEl.hidden = true
   }
 
-  function sendOpenLibrary() {
+  function sendOpenLibrary(extId) {
     return new Promise(function (resolve, reject) {
       if (
         typeof chrome === 'undefined' ||
@@ -100,11 +119,31 @@
     })
   }
 
-  sendOpenLibrary()
-    .then(function () {
-      showSuccess()
-    })
-    .catch(function (err) {
-      showFallback(err && err.message ? err.message : String(err))
-    })
+  function tryIds(ids, index, lastErr) {
+    if (index >= ids.length) {
+      showFallback(
+        lastErr && lastErr.message ? lastErr.message : String(lastErr || ''),
+        ids[ids.length - 1] || primaryId,
+      )
+      return
+    }
+    var extId = ids[index]
+    setDirectHref(extId)
+    sendOpenLibrary(extId)
+      .then(function () {
+        showSuccess()
+      })
+      .catch(function (err) {
+        tryIds(ids, index + 1, err)
+      })
+  }
+
+  // Explicit ?ext= uses that ID only. Otherwise try unpacked then store.
+  var ids = hasExplicitExt
+    ? [primaryId]
+    : primaryId === STORE_EXT_ID
+      ? [STORE_EXT_ID, UNPACKED_EXT_ID]
+      : [UNPACKED_EXT_ID, STORE_EXT_ID]
+
+  tryIds(ids, 0, null)
 })()

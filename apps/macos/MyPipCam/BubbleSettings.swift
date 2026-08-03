@@ -130,8 +130,8 @@ final class BubbleSettings: ObservableObject {
         didSet { objectWillChange.send() }
     }
     /// Optional override for the Chrome extension ID used by “Open in Chrome…”.
-    /// Empty = use the stable ID from the extension manifest key
-    /// (`ExtensionLibraryOpener.defaultExtensionID`).
+    /// Empty = auto-detect store (`chromeWebStoreExtensionID`) or unpacked
+    /// (`defaultExtensionID`) install.
     @AppStorage("chromeExtensionId") var chromeExtensionId: String = "" {
         didSet { objectWillChange.send() }
     }

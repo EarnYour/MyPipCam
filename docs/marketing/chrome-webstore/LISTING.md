@@ -174,9 +174,15 @@ MyPipCam records the current Chrome tab with an optional live camera picture-in-
 
 ## After publish — OAuth reminder
 
-1. Chrome Web Store item ID: `meiehjfjcaahfjcdneoegjkmajbfghmm`
-2. Google Cloud Console → APIs & Services → Credentials → Chrome extension OAuth client  
-3. Set **Item ID** to `meiehjfjcaahfjcdneoegjkmajbfghmm`  
-4. Rebuild the extension with `VITE_GOOGLE_OAUTH_CLIENT_ID` set, upload a new store package if needed, and retest **Connect Google**
+**Live store ID:** `meiehjfjcaahfjcdneoegjkmajbfghmm`  
+**Unpacked (manifest `key`) ID:** `akpchobfndfddajiihkkdpnihihdicjc` — do not overwrite the store Item ID with this when testing Connect Google on the published listing.
 
-See also: `../CHROME_WEBSTORE.md`
+### Exact Google Cloud click path (store Item ID)
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → MyPipCam project  
+2. **APIs & Services** → **Credentials**  
+3. Open (or create) the **OAuth 2.0 Client ID** with Application type **Chrome extension**  
+4. **Item ID** = `meiehjfjcaahfjcdneoegjkmajbfghmm` → **Save**  
+5. Copy **Client ID** → `apps/extension/.env.local` → `VITE_GOOGLE_OAUTH_CLIENT_ID=…` → rebuild store zip → retest **Connect Google** from the store install
+
+See also: [`../CHROME_WEBSTORE.md`](../CHROME_WEBSTORE.md)

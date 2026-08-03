@@ -65,17 +65,25 @@ npm run dev
 
 `postinstall` / `prepare-assets` copies FFmpeg + MediaPipe into `public/` (gitignored). Do not commit those vendored binaries.
 
-### Stable extension ID
+### Extension IDs (store vs unpacked)
 
-Packed/unpacked builds that include the manifest `key` use:
+| Build | Extension ID |
+| --- | --- |
+| **Chrome Web Store** (live) | `meiehjfjcaahfjcdneoegjkmajbfghmm` |
+| **Unpacked** (manifest `key` present) | `akpchobfndfddajiihkkdpnihihdicjc` |
 
-`akpchobfndfddajiihkkdpnihihdicjc`
+Google Cloud OAuth **Item ID** (Chrome extension client) must match the install you are testing:
 
-If `dist/manifest.json` lacks `key`, Chrome assigns a **different** ID. Google Cloud OAuth **Item ID** must match the ID shown on `chrome://extensions`. Prefer a rebuild so `key` is present.
+- Store / published build → `meiehjfjcaahfjcdneoegjkmajbfghmm`  
+- Local unpacked with `key` → `akpchobfndfddajiihkkdpnihihdicjc`
 
-Library URL (stable ID):
+If `dist/manifest.json` lacks `key` and is not the store package, Chrome assigns yet another ID — use whatever `chrome://extensions` shows.
 
-`chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html` (macOS Open in Chrome uses `https://mypipcam.earnyour.com/open-library` so ad blockers do not `ERR_BLOCKED_BY_CLIENT` the extension page)
+Library URL (unpacked stable ID):
+
+`chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`
+
+macOS Open in Chrome uses `https://mypipcam.earnyour.com/open-library?ext=…` (pass store or unpacked ID) so ad blockers do not `ERR_BLOCKED_BY_CLIENT` the extension page.
 
 ---
 
@@ -93,7 +101,7 @@ VITE_GOOGLE_OAUTH_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
 - Read at **build time** via Vite / `driveConfig.ts`. Rebuild after changing.
 - Without a real ID, core record/library/editor still works; **Connect Google** will fail until configured.
 
-Google Cloud (optional Drive): enable Drive API → OAuth consent (home/privacy/terms on `mypipcam.earnyour.com`, authorized domain `earnyour.com`) → credentials type **Chrome extension** → Item ID = live extension ID from `chrome://extensions`. Full steps: [README.md § Google Drive](README.md#google-drive-optional-cloud-library).
+Google Cloud (optional Drive): enable Drive API → OAuth consent (home/privacy/terms on `mypipcam.earnyour.com`, authorized domain `earnyour.com`) → **APIs & Services → Credentials → OAuth client ID → Chrome extension** → **Item ID** = store `meiehjfjcaahfjcdneoegjkmajbfghmm` or unpacked `akpchobfndfddajiihkkdpnihihdicjc` (match `chrome://extensions`). Full steps: [README.md § Google Drive](README.md#google-drive-optional-cloud-library) · [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md).
 
 ### Web — Vercel / local serverless
 

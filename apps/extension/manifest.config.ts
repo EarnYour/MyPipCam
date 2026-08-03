@@ -7,8 +7,9 @@ export default defineManifest({
   description:
     'Record this Chrome tab with a live draggable camera PiP (Loom-style). Local library and editor.',
   version: '1.1.11',
-  // PUBLIC key only → stable extension ID across unpacked reloads.
-  // ID: akpchobfndfddajiihkkdpnihihdicjc
+  // PUBLIC key only → stable unpacked extension ID across reloads.
+  // Unpacked ID: akpchobfndfddajiihkkdpnihihdicjc
+  // Chrome Web Store ID (zip without this field): meiehjfjcaahfjcdneoegjkmajbfghmm
   // Matching PRIVATE key must never be committed (apps/extension/keys/*.pem).
   // Forks/distributors: generate your own keypair (`openssl genrsa` / Chrome pack)
   // and replace this field, or omit `key` and accept a new extension ID.
@@ -53,7 +54,8 @@ export default defineManifest({
   ],
   oauth2: {
     // From VITE_GOOGLE_OAUTH_CLIENT_ID (.env.local) via driveConfig.ts.
-    // Extension ID for Google Cloud Console: akpchobfndfddajiihkkdpnihihdicjc
+    // Google Cloud Item ID: store meiehjfjcaahfjcdneoegjkmajbfghmm
+    // or unpacked akpchobfndfddajiihkkdpnihihdicjc (match chrome://extensions).
     client_id: GOOGLE_OAUTH_CLIENT_ID,
     scopes: [DRIVE_SCOPE],
   },
