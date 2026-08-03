@@ -118,39 +118,124 @@ pkill -x MyPipCam 2>/dev/null || true
 pkill -x LoomCam 2>/dev/null || true
 sleep 0.3
 
-# Stale pre-rename builds confuse Launch Services / TCC dialogs ("LoomCam would like…").
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+unregister_bundle_clones() {
+  local keep="${1:-}"
+  local query path
+  # Avoid pipefail/SIGPIPE aborting the install when mdfind is empty or lsregister exits early.
+  set +e
+  for query in \
+    "kMDItemCFBundleIdentifier == 'com.stevenmartinez.MyPipCam'" \
+    "kMDItemCFBundleIdentifier == 'com.stevenmartinez.LoomCam'"
+  do
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      [[ -n "$keep" && "$path" == "$keep" ]] && continue
+      "$LSREG" -u "$path" >/dev/null 2>&1
+    done < <(mdfind "$query" 2>/dev/null)
+  done
+  # Spotlight misses deleted clones; lsregister -dump still lists phantom paths that
+  # can win Open at Login / TCC ("LoomCam would like…") over /Applications.
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    [[ -n "$keep" && "$path" == "$keep" ]] && continue
+    "$LSREG" -u "$path" >/dev/null 2>&1
+  done < <(
+    "$LSREG" -dump 2>/dev/null \
+      | egrep 'path:.*(MyPipCam|LoomCam)\.app' \
+      | sed -E 's/^path:[[:space:]]+//; s/ \(0x[0-9a-fA-F]+\)$//'
+  )
+  set -e
+}
+
+# Stale pre-rename / Debug clones confuse Launch Services, TCC ("LoomCam would like…"),
+# and Open at Login (SMAppService may still point at a deleted Debug path).
 rm -rf /Applications/LoomCam.app
-rm -rf "$MACOS/build/Build/Products/Debug/LoomCam.app"
-rm -rf "$MACOS/build/Build/Products/Debug/LoomCam.swiftmodule"
-rm -rf "$MACOS/build/Build/Intermediates.noindex/LoomCam.build"
-# Legacy login item often points at the Debug LoomCam.app path.
+for stale in \
+  "$MACOS/build/Build/Products/Debug/LoomCam.app" \
+  "$MACOS/build/Build/Products/Debug/MyPipCam.app" \
+  "$MACOS/build/DerivedData/Build/Products/Debug/LoomCam.app" \
+  "$MACOS/build/DerivedData/Build/Products/Debug/MyPipCam.app" \
+  "$MACOS/build-agent/Build/Products/Debug/LoomCam.app" \
+  "$MACOS/build-agent/Build/Products/Debug/MyPipCam.app" \
+  "$MACOS/build/Build/Products/Debug/LoomCam.swiftmodule" \
+  "$MACOS/build/Build/Intermediates.noindex/LoomCam.build"
+do
+  [[ -e "$stale" ]] || continue
+  "$LSREG" -u "$stale" 2>/dev/null || true
+  rm -rf "$stale"
+done
+# Agent/tmp derived-data trees (not the current build-release staging used for ditto).
+for stale_root in "$MACOS"/build-release-* "$MACOS"/build-debug /tmp/mypipcam-* /private/tmp/mypipcam-*; do
+  [[ -e "$stale_root" ]] || continue
+  [[ "$stale_root" == "$DERIVED" ]] && continue
+  while IFS= read -r stale_app; do
+    [[ -z "$stale_app" ]] && continue
+    "$LSREG" -u "$stale_app" 2>/dev/null || true
+  done < <(find "$stale_root" \( -name 'MyPipCam.app' -o -name 'LoomCam.app' \) 2>/dev/null)
+  rm -rf "$stale_root"
+done
+# Classic login items (pre-SMAppService) often pointed at Debug LoomCam.app.
 osascript -e 'tell application "System Events" to delete login item "LoomCam"' 2>/dev/null || true
+osascript -e 'tell application "System Events" to delete login item "MyPipCam"' 2>/dev/null || true
+
+# Drop every registered clone before we promote /Applications (keeps TCC + login on one binary).
+unregister_bundle_clones ""
 
 # Replace existing install (ditto preserves more metadata than rm+cp)
 rm -rf "${APP_DST}"
 ditto "${APP_SRC}" "${APP_DST}"
 
-LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 # Critical: xcodebuild registers the build-release .app with Launch Services. If that copy
 # wins over /Applications, Screen Recording TCC binds to the wrong binary and Settings
 # toggles appear to "do nothing". Prefer Applications; drop staging/build clones.
 "$LSREG" -u "$APP_SRC" 2>/dev/null || true
-while IFS= read -r extra; do
-  [[ -z "$extra" || "$extra" == "$APP_DST" ]] && continue
-  "$LSREG" -u "$extra" 2>/dev/null || true
-done < <(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.MyPipCam'" 2>/dev/null || true)
-# Drop any remaining LoomCam registrations (old bundle id).
-while IFS= read -r extra; do
-  [[ -z "$extra" ]] && continue
-  "$LSREG" -u "$extra" 2>/dev/null || true
-done < <(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.LoomCam'" 2>/dev/null || true)
+unregister_bundle_clones "$APP_DST"
 "$LSREG" -f "$APP_DST" 2>/dev/null || true
+
+DISPLAY_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+BUNDLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+SHORT_VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+BUILD_VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+if [[ "${DISPLAY_NAME}" != "MyPipCam" && "${BUNDLE_NAME}" != "MyPipCam" ]]; then
+  echo "error: installed app is not named MyPipCam (display=${DISPLAY_NAME:-?} name=${BUNDLE_NAME:-?})" >&2
+  exit 1
+fi
+if [[ "${BUNDLE_ID}" == *LoomCam* ]]; then
+  echo "error: installed bundle id still looks like LoomCam: ${BUNDLE_ID}" >&2
+  exit 1
+fi
 
 echo ""
 AUTH="$(codesign -dv --verbose=2 "$APP_DST" 2>&1 | awk -F= '/^Authority=/{print $2; exit}')"
 NEW_CDHASH="$(codesign -dv --verbose=2 "$APP_DST" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
 echo "Installed: ${APP_DST}"
+echo "Name: ${DISPLAY_NAME:-MyPipCam} · ${BUNDLE_ID} · v${SHORT_VER:-?} (${BUILD_VER:-?})"
 echo "Signing: ${AUTH:-unknown} · Team ${EXPECTED_TEAM} · CDHash ${NEW_CDHASH:-unknown}"
+
+echo ""
+echo "Launch Services copies (only /Applications should remain registered as primary):"
+CLONES="$(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.MyPipCam'" 2>/dev/null || true)"
+if [[ -z "${CLONES}" ]]; then
+  echo "  (spotlight index empty — /Applications/MyPipCam.app is still the launch target)"
+else
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if [[ "$path" == "$APP_DST" ]]; then
+      echo "  ✓ $path"
+    else
+      echo "  · $path (unregistered; build staging only — do not Open at Login from here)"
+    fi
+  done <<< "$CLONES"
+fi
+LOOM_LEFT="$(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.LoomCam'" 2>/dev/null || true)"
+if [[ -n "${LOOM_LEFT}" ]]; then
+  echo "warning: LoomCam.app still on disk — remove these paths:" >&2
+  echo "$LOOM_LEFT" >&2
+fi
+
 if [[ -n "$OLD_CDHASH" && -n "$NEW_CDHASH" && "$OLD_CDHASH" != "$NEW_CDHASH" ]]; then
   echo ""
   echo "NOTE: Binary fingerprint changed (typical for Apple Development rebuilds)."
@@ -160,7 +245,12 @@ if [[ -n "$OLD_CDHASH" && -n "$NEW_CDHASH" && "$OLD_CDHASH" != "$NEW_CDHASH" ]];
   echo "  3. If no prompt: System Settings → Privacy & Security → Screen Recording"
   echo "     → remove every MyPipCam entry → Record again"
   echo "  Optional reset: tccutil reset ScreenCapture com.stevenmartinez.MyPipCam"
+  echo "  Camera reset:    tccutil reset Camera com.stevenmartinez.MyPipCam"
 fi
+echo ""
+echo "Open at Login: re-enable inside MyPipCam → Settings after install so SMAppService"
+echo "binds to ${APP_DST} (not a Debug/build clone). Check:"
+echo "  System Settings → General → Login Items → MyPipCam → /Applications/MyPipCam.app"
 echo ""
 echo "Open with: open /Applications/MyPipCam.app"
 echo "Probe capture: open -W /Applications/MyPipCam.app --args --probe-screencapture"
