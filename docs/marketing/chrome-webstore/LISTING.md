@@ -2,10 +2,10 @@
 
 **Product name:** MyPipCam (not MyPixCam)  
 **Brand:** EarnYour Marketing · [mypipcam.earnyour.com](https://mypipcam.earnyour.com)  
-**Dashboard store ID (from your screenshot):** `mciohjfbcaahfjceneoogjxmajbfghmm`
+**Dashboard store ID (live):** `meiehjfjcaahfjcdneoegjkmajbfghmm`
 
 > After store publish, update Google Cloud OAuth **Chrome extension → Item ID** to  
-> `mciohjfbcaahfjceneoogjxmajbfghmm` (Connect Google / Drive will fail until this matches).  
+> `meiehjfjcaahfjcdneoegjkmajbfghmm` (Connect Google / Drive will fail until this matches).  
 > Local unpacked ID remains `akpchobfndfddajiihkkdpnihihdicjc` when the manifest `key` is present.
 
 Upload graphics from this folder (see filenames below). Package zip: `../MyPipCam-chrome-webstore.zip`.
@@ -103,11 +103,15 @@ https://mypipcam.earnyour.com
 ```
 
 ### Support URL
+
+Paste exactly (https preferred — dashboard rejects empty Support URL):
+
 ```
-mailto:steven@earnyour.com
+https://mypipcam.earnyour.com
 ```
 
-(Alternate if the form requires https only: `https://mypipcam.earnyour.com` — contact is also on the site footer.)
+Support email (also in description / site): `steven@earnyour.com`  
+(`mailto:steven@earnyour.com` only if the field accepts mailto and https is already set elsewhere.)
 
 ### YouTube video URL (optional)
 ```
@@ -136,49 +140,43 @@ Official Chrome image guide: https://developer.chrome.com/docs/webstore/images
 
 ---
 
-## Privacy tab — single-purpose & permission justifications
+## Privacy tab + Settings (required to publish)
 
-### Single purpose
+**Full copy-paste answers (every permission Chrome listed in “Unable to publish”):** see [`PRIVACY_PRACTICES.md`](./PRIVACY_PRACTICES.md).
+
+| Field | Value |
+| --- | --- |
+| Privacy policy URL | `https://mypipcam.earnyour.com/privacy` |
+| Support URL | `https://mypipcam.earnyour.com` |
+| Single purpose | See PRIVACY_PRACTICES.md §1 |
+| Permission justifications | See PRIVACY_PRACTICES.md §2 (`storage`, `identity`, `tabCapture`, `camera`, `microphone`, `cookies`, `personal results`, `website content`, `displayCapture`, `audioCapture`, `identity.email`, plus any others shown) |
+| Remote code | **No** — see PRIVACY_PRACTICES.md §3 |
+| Data usage certification | Check all Limited Use / “I do not sell…” boxes — §4 |
+
+### Settings — you must click (manual)
+
+1. Dashboard → **Settings** → set publisher **contact email** to `steven@earnyour.com` → open Google’s email → **Verify**.
+2. Dashboard → **Settings** → **Identity verification** → **Start** / begin the ID flow → finish Google’s verification.
+3. Item → **Privacy** → paste justifications + policy URL + certify Developer Program Policies / User Data checkboxes.
+4. Item → **Store listing** → Support URL = `https://mypipcam.earnyour.com` → Save → Publish.
+
+### Certify Developer Program Policies
+
+On the Privacy tab (and/or publish confirmation), check the certification that the item complies with the [Chrome Web Store Developer Program Policies](https://developer.chrome.com/docs/webstore/program-policies/) and User Data / Limited Use rules. Publishing is blocked until this is checked.
+
+### Single purpose (short)
+
 ```
-MyPipCam records the current Chrome tab with an optional live camera picture-in-picture, saves clips to a local library, and optionally uploads to Google Drive or creates share watch links.
+MyPipCam records the current Chrome tab with an optional live camera picture-in-picture, saves clips to a local library with a built-in editor, and optionally uploads to the user’s Google Drive or creates share watch links.
 ```
-
-### Permission justifications (draft — paste/adapt per permission)
-
-**tabCapture**  
-Required to capture the active tab’s audio/video so MyPipCam can record Loom-style tab recordings. Capture starts only when you click record in the extension UI.
-
-**activeTab / tabs**  
-Used to identify the tab you chose to record, focus/open Library or recording UI, and coordinate start/stop with the correct tab. We do not browse your history for advertising.
-
-**scripting + host permissions (http://\*/\*, https://\*/\*)**  
-Needed to inject the recording overlay (countdown, camera PiP frame, stop controls) into the page being recorded. The overlay runs only in the context of a recording you start; it is not used to scrape or modify unrelated browsing.
-
-**storage / unlimitedStorage**  
-Stores recording metadata, preferences, and local video blobs in the extension so your library works offline without uploading by default. Unlimited storage allows longer/higher-quality clips in IndexedDB.
-
-**offscreen**  
-Holds MediaStreams and runs the MediaRecorder pipeline outside the service worker so tab + camera capture can continue reliably under Manifest V3.
-
-**identity**  
-Used only for optional “Connect Google” OAuth so you can upload recordings to your own Google Drive. Not required for local record/library/editor.
-
-**alarms**  
-Used for lightweight background tasks such as sync/retry timing related to optional Drive or library maintenance — not for tracking browsing.
-
-**notifications**  
-Optional user-facing alerts (for example when a long recording finishes or an upload completes). No marketing spam.
-
-**Camera / Microphone (user media)**  
-Requested only when you start Tab+Cam (or enable mic). Used to composite your webcam (and optional mic audio) into the recording. Denied permissions simply disable those features.
 
 ---
 
 ## After publish — OAuth reminder
 
-1. Chrome Web Store item ID: `mciohjfbcaahfjceneoogjxmajbfghmm`
+1. Chrome Web Store item ID: `meiehjfjcaahfjcdneoegjkmajbfghmm`
 2. Google Cloud Console → APIs & Services → Credentials → Chrome extension OAuth client  
-3. Set **Item ID** to `mciohjfbcaahfjceneoogjxmajbfghmm`  
+3. Set **Item ID** to `meiehjfjcaahfjcdneoegjkmajbfghmm`  
 4. Rebuild the extension with `VITE_GOOGLE_OAUTH_CLIENT_ID` set, upload a new store package if needed, and retest **Connect Google**
 
 See also: `../CHROME_WEBSTORE.md`
