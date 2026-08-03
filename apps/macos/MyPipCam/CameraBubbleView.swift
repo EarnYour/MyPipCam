@@ -166,6 +166,13 @@ struct CameraBubbleView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .padding(.top, 2)
+            } else if camera.canRetryCameraStart {
+                Button("Retry Camera") {
+                    Task { await camera.requestAccessAndStart() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 2)
             }
         }
         .foregroundStyle(.white.opacity(0.9))
