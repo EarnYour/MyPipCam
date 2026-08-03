@@ -1,39 +1,37 @@
-# Remotion scaffold — MyPipCam highlight reel
+# Remotion — MyPipCam highlight reel
 
-Lightweight Remotion project that composites `../clips/*.mp4` with luminous glass popups and an end card.
+Composites `../clips/*.mp4` (Cut A order) with luminous glass popups, lower-thirds, brand intro, and end card.
 
 ## Setup
 
 ```bash
 cd docs/marketing/long-form-demo/remotion
-npm install
-mkdir -p public
-# Symlink extracted clips into Remotion public/
-ln -sfn ../../clips/*.mp4 public/ 2>/dev/null || \
-  for f in ../../clips/*.mp4; do ln -sfn "$f" "public/$(basename "$f")"; done
+npm install   # copies clips → public/clips/ (Remotion needs real files, not symlinks)
 ```
 
 ## Preview
 
 ```bash
 npm start
-# Studio → compositions: OverlayDemo | HighlightReel
+# Studio → HighlightReel | OverlayDemo
 ```
 
 ## Render
 
 ```bash
-# Short glass popup sample (~3s)
-npm run render:overlays
-
-# Full highlight scaffold (~6.5 min of stitched clips + end card)
+# Full highlight (~6.5–7 min of clips + cards) → H.264
 npm run render:highlight
 ```
 
-Outputs land in `remotion/out/`.
+Output: `../output/MyPipCam-highlight-demo.mp4`
+
+```bash
+# Short glass popup sample (~3s)
+npm run render:overlays
+```
 
 ### Notes
 
+- Duration tracks actual clip lengths (~6m20s media + intro/titles/end ≈ 6m40s). Stretch to 8–12 min needs more extracts from the source MOV.
 - Remotion company license applies for commercial use — confirm before monetized YouTube ads if required.
-- For a polished 8–12 min cut, prefer CapCut/FCP using [`../EDIT_PLAN.md`](../EDIT_PLAN.md) and drop Remotion-rendered overlay plates as layers.
 - Do not point Remotion at the 4.8 GB source MOV; only use `clips/`.

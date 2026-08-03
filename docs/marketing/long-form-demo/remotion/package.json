@@ -2,12 +2,14 @@
   "name": "mypipcam-long-form-demo",
   "private": true,
   "version": "0.1.0",
-  "description": "Glass overlay + highlight reel scaffold for MyPipCam long-form demo",
+  "description": "Glass overlay + highlight reel for MyPipCam long-form demo",
   "scripts": {
     "start": "npx remotion studio",
     "build": "npx remotion bundle",
+    "link-clips": "mkdir -p public/clips && cp -f ../clips/*.mp4 public/clips/",
+    "postinstall": "npm run link-clips",
     "render:overlays": "npx remotion render OverlayDemo out/overlay-demo.mp4",
-    "render:highlight": "npx remotion render HighlightReel out/highlight-reel.mp4"
+    "render:highlight": "mkdir -p ../output out && npx remotion render HighlightReel ../output/MyPipCam-highlight-demo.mp4 --codec h264"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.286",

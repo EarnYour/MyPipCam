@@ -5,120 +5,102 @@ import {
   Sequence,
   staticFile,
 } from "remotion";
-import { GlassCard } from "./GlassCard";
+import { BeatTitle } from "./BeatTitle";
 import { EndCard } from "./EndCard";
+import { GlassCard } from "./GlassCard";
+import { IntroCard } from "./IntroCard";
+import { LowerThird } from "./LowerThird";
+import { beats, secondsToFrames } from "./timeline";
 
 /**
- * Practical scaffold: stitches extracted clips + timed glass popups.
- * Clips live in ../clips — copied/symlinked into public/ at install time
- * (see README). Durations are approximate @ 30fps.
+ * Cut A highlight: brand intro → clips 01–09 (narrative order) → end card.
+ * Glass popups + lower-thirds per EDIT_PLAN / OVERLAY_DESIGN.
  */
-const clips = [
-  {
-    file: "01-hook-talking-head.mp4",
-    frames: 45 * 30,
-    popup: {
-      from: 10,
-      title: "Replace Loom for free",
-      subtitle: "Chrome + macOS · camera PiP",
-      accentWord: "Loom",
-      variant: "orange" as const,
-    },
-  },
-  {
-    file: "02-problem-talking-head.mp4",
-    frames: 40 * 30,
-    popup: {
-      from: 20,
-      title: "No Loom bill",
-      subtitle: "Local-first. Free forever.",
-      accentWord: "Loom",
-      variant: "mint" as const,
-    },
-  },
-  {
-    file: "06-install-github-pip.mp4",
-    frames: 50 * 30,
-    popup: {
-      from: 15,
-      title: "Install free",
-      subtitle: "GitHub Releases → Load unpacked",
-      variant: "orange" as const,
-    },
-  },
-  {
-    file: "04-library-detail.mp4",
-    frames: 45 * 30,
-    popup: {
-      from: 12,
-      title: "Tab + Cam PiP",
-      subtitle: "Record this Chrome tab",
-      variant: "mint" as const,
-    },
-  },
-  {
-    file: "05-macos-pip-menu.mp4",
-    frames: 40 * 30,
-    popup: {
-      from: 18,
-      title: "macOS bubble",
-      subtitle: "Always on top · drag anywhere",
-      variant: "orange" as const,
-    },
-  },
-  {
-    file: "08-editor-export.mp4",
-    frames: 45 * 30,
-    popup: {
-      from: 20,
-      title: "Trim without SaaS",
-      subtitle: "Cut · export locally",
-      variant: "mint" as const,
-    },
-  },
-  {
-    file: "09-library-grid-cta.mp4",
-    frames: 40 * 30,
-    popup: {
-      from: 15,
-      title: "Your library",
-      subtitle: "Local folder · Drive optional",
-      variant: "orange" as const,
-    },
-  },
-];
-
 export const HighlightReel: React.FC = () => {
   let cursor = 0;
-  const endFrames = 8 * 30;
 
   return (
     <AbsoluteFill style={{ background: "#111312" }}>
-      {clips.map((c) => {
+      {beats.map((beat, index) => {
+        const frames = secondsToFrames(beat.seconds);
         const from = cursor;
-        cursor += c.frames;
+        cursor += frames;
+
+        if (beat.kind === "intro") {
+          return (
+            <Sequence key={`intro-${index}`} from={from} durationInFrames={frames}>
+              <IntroCard />
+            </Sequence>
+          );
+        }
+
+        if (beat.kind === "end") {
+          return (
+            <Sequence key={`end-${index}`} from={from} durationInFrames={frames}>
+              <EndCard />
+            </Sequence>
+          );
+        }
+
+        if (beat.kind === "title") {
+          return (
+            <Sequence key={`title-${index}`} from={from} durationInFrames={frames}>
+              <BeatTitle
+                eyebrow={beat.eyebrow}
+                title={beat.title}
+                subtitle={beat.subtitle}
+              />
+            </Sequence>
+          );
+        }
+
         return (
-          <Sequence key={c.file} from={from} durationInFrames={c.frames}>
+          <Sequence key={beat.file} from={from} durationInFrames={frames}>
             <AbsoluteFill>
               <OffthreadVideo
-                src={staticFile(c.file)}
+                src={staticFile(`clips/${beat.file}`)}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
-              <Sequence from={c.popup.from} durationInFrames={75}>
-                <GlassCard
-                  title={c.popup.title}
-                  subtitle={c.popup.subtitle}
-                  variant={c.popup.variant}
-                  accentWord={c.popup.accentWord}
-                />
-              </Sequence>
+              {/* Soft vignette */}
+              <AbsoluteFill
+                style={{
+                  background:
+                    "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.18) 100%)",
+                  pointerEvents: "none",
+                }}
+              />
+              {beat.lowerThird ? (
+                <Sequence
+                  from={beat.lowerThird.from}
+                  durationInFrames={beat.lowerThird.durationInFrames}
+                >
+                  <LowerThird
+                    line1={beat.lowerThird.line1}
+                    line2={beat.lowerThird.line2}
+                    accent={beat.lowerThird.accent}
+                  />
+                </Sequence>
+              ) : null}
+              {beat.popups.map((popup, i) => (
+                <Sequence
+                  key={`${beat.file}-popup-${i}`}
+                  from={popup.from}
+                  durationInFrames={popup.durationInFrames}
+                >
+                  <GlassCard
+                    title={popup.title}
+                    subtitle={popup.subtitle}
+                    variant={popup.variant}
+                    accentWord={popup.accentWord}
+                    position={popup.position}
+                    holdFrames={Math.max(24, popup.durationInFrames - 18)}
+                  />
+                </Sequence>
+              ))}
             </AbsoluteFill>
           </Sequence>
         );
       })}
-      <Sequence from={cursor} durationInFrames={endFrames}>
-        <EndCard />
-      </Sequence>
     </AbsoluteFill>
   );
 };

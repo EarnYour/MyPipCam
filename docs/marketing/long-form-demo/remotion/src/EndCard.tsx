@@ -2,11 +2,21 @@ import React from "react";
 import {
   AbsoluteFill,
   interpolate,
+  spring,
   useCurrentFrame,
+  useVideoConfig,
 } from "remotion";
+import { brand } from "./brand";
+import { fontBody, fontDisplay } from "./fonts";
 
 export const EndCard: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const enter = spring({
+    frame,
+    fps,
+    config: { damping: 16, stiffness: 90 },
+  });
   const opacity = interpolate(frame, [0, 15], [0, 1], {
     extrapolateRight: "clamp",
   });
@@ -19,12 +29,13 @@ export const EndCard: React.FC = () => {
         justifyContent: "center",
         alignItems: "center",
         opacity,
-        fontFamily: "Figtree, system-ui, sans-serif",
-        color: "#fafaf7",
+        fontFamily: fontBody,
+        color: brand.cream,
       }}
     >
       <div
         style={{
+          transform: `scale(${0.94 + enter * 0.06})`,
           background: "rgba(250, 250, 247, 0.12)",
           border: "1px solid rgba(250, 250, 247, 0.35)",
           borderRadius: 24,
@@ -34,12 +45,12 @@ export const EndCard: React.FC = () => {
           WebkitBackdropFilter: "blur(20px)",
           padding: "48px 64px",
           textAlign: "center",
-          maxWidth: 860,
+          maxWidth: 920,
         }}
       >
         <div
           style={{
-            fontFamily: "Syne, system-ui, sans-serif",
+            fontFamily: fontDisplay,
             fontWeight: 800,
             fontSize: 56,
             letterSpacing: "-0.02em",
@@ -49,27 +60,40 @@ export const EndCard: React.FC = () => {
           Install{" "}
           <span
             style={{
-              color: "#ff5e29",
+              color: brand.orange,
               textShadow: "0 0 20px rgba(255,94,41,0.6)",
             }}
           >
             MyPipCam
           </span>
         </div>
-        <div style={{ fontSize: 26, opacity: 0.92, marginBottom: 28 }}>
+        <div style={{ fontSize: 26, opacity: 0.92, marginBottom: 32 }}>
           Replace Loom for free — Chrome extension + Mac bubble
         </div>
         <div
           style={{
-            fontSize: 28,
-            color: "#7ddf9a",
+            fontSize: 30,
+            color: brand.mint,
             textShadow: "0 0 16px rgba(125,223,154,0.4)",
-            lineHeight: 1.5,
+            lineHeight: 1.55,
+            fontWeight: 600,
+            marginBottom: 20,
           }}
         >
-          mypipcam.earnyour.com
+          {brand.siteUrl}
           <br />
-          github.com/EarnYour/MyPipCam/releases
+          <span style={{ fontSize: 24, opacity: 0.95 }}>
+            {brand.releasesUrl}
+          </span>
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 18,
+            opacity: 0.75,
+          }}
+        >
+          Free forever · Link in description
         </div>
       </div>
     </AbsoluteFill>

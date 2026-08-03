@@ -2,6 +2,8 @@ import React from "react";
 import { Composition } from "remotion";
 import { OverlayDemo } from "./OverlayDemo";
 import { HighlightReel } from "./HighlightReel";
+import { FPS } from "./brand";
+import { HIGHLIGHT_DURATION_FRAMES } from "./timeline";
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -10,7 +12,7 @@ export const RemotionRoot: React.FC = () => {
         id="OverlayDemo"
         component={OverlayDemo}
         durationInFrames={90}
-        fps={30}
+        fps={FPS}
         width={1920}
         height={1080}
         defaultProps={{
@@ -22,9 +24,8 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="HighlightReel"
         component={HighlightReel}
-        // ~5m05 clips + 8s end card @ 30fps (305s + 8s)
-        durationInFrames={30 * 313}
-        fps={30}
+        durationInFrames={HIGHLIGHT_DURATION_FRAMES}
+        fps={FPS}
         width={1920}
         height={1080}
       />

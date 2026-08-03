@@ -6,21 +6,28 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-
-const colors = {
-  orange: "#ff5e29",
-  mint: "#7ddf9a",
-  cream: "#fafaf7",
-};
+import { brand } from "./brand";
+import { fontBody, fontDisplay } from "./fonts";
 
 export type GlassVariant = "orange" | "mint";
+export type GlassPosition = "top-left" | "top-right" | "center-left";
 
 export const GlassCard: React.FC<{
   title: string;
   subtitle?: string;
   variant?: GlassVariant;
   accentWord?: string;
-}> = ({ title, subtitle, variant = "orange", accentWord }) => {
+  position?: GlassPosition;
+  /** Frames for fade-out start (relative to sequence). Default ~ hold until near end. */
+  holdFrames?: number;
+}> = ({
+  title,
+  subtitle,
+  variant = "orange",
+  accentWord,
+  position = "top-left",
+  holdFrames = 55,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const enter = spring({
@@ -28,10 +35,14 @@ export const GlassCard: React.FC<{
     fps,
     config: { damping: 14, stiffness: 120 },
   });
-  const opacity = interpolate(frame, [0, 8, 70, 90], [0, 1, 1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const fadeOutStart = holdFrames;
+  const fadeOutEnd = holdFrames + 18;
+  const opacity = interpolate(
+    frame,
+    [0, 8, fadeOutStart, fadeOutEnd],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
   const glow =
     variant === "mint"
       ? "0 0 36px rgba(125, 223, 154, 0.45)"
@@ -45,11 +56,17 @@ export const GlassCard: React.FC<{
     ? title.split(new RegExp(`(${accentWord})`, "i"))
     : [title];
 
+  const align =
+    position === "top-right"
+      ? ({ justifyContent: "flex-start", alignItems: "flex-end" } as const)
+      : position === "center-left"
+        ? ({ justifyContent: "center", alignItems: "flex-start" } as const)
+        : ({ justifyContent: "flex-start", alignItems: "flex-start" } as const);
+
   return (
     <AbsoluteFill
       style={{
-        justifyContent: "flex-start",
-        alignItems: "flex-start",
+        ...align,
         padding: 64,
         opacity,
       }}
@@ -65,17 +82,17 @@ export const GlassCard: React.FC<{
           boxShadow: `${glow}, inset 0 1px 0 rgba(255,255,255,0.25)`,
           backdropFilter: "blur(18px) saturate(1.4)",
           WebkitBackdropFilter: "blur(18px) saturate(1.4)",
-          color: colors.cream,
+          color: brand.cream,
           padding: "20px 28px",
-          maxWidth: 520,
-          fontFamily: "Figtree, system-ui, sans-serif",
+          maxWidth: 540,
+          fontFamily: fontBody,
         }}
       >
         <div
           style={{
-            fontFamily: "Syne, system-ui, sans-serif",
+            fontFamily: fontDisplay,
             fontWeight: 800,
-            fontSize: 42,
+            fontSize: 40,
             letterSpacing: "-0.02em",
             lineHeight: 1.15,
             marginBottom: subtitle ? 8 : 0,
@@ -86,7 +103,7 @@ export const GlassCard: React.FC<{
               <span
                 key={i}
                 style={{
-                  color: colors.orange,
+                  color: brand.orange,
                   textShadow: "0 0 18px rgba(255, 94, 41, 0.65)",
                 }}
               >
@@ -98,7 +115,9 @@ export const GlassCard: React.FC<{
           )}
         </div>
         {subtitle ? (
-          <div style={{ fontSize: 22, opacity: 0.9 }}>{subtitle}</div>
+          <div style={{ fontSize: 22, opacity: 0.9, lineHeight: 1.35 }}>
+            {subtitle}
+          </div>
         ) : null}
       </div>
     </AbsoluteFill>
