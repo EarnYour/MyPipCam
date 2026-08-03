@@ -6,7 +6,7 @@ export default defineManifest({
   name: 'MyPipCam',
   description:
     'Record this Chrome tab with a live draggable camera PiP (Loom-style). Local library and editor.',
-  version: '1.1.3',
+  version: '1.1.8',
   // PUBLIC key only → stable extension ID across unpacked reloads.
   // ID: akpchobfndfddajiihkkdpnihihdicjc
   // Matching PRIVATE key must never be committed (apps/extension/keys/*.pem).
