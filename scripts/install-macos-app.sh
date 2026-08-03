@@ -115,7 +115,16 @@ NEW_CDHASH="$(codesign -dv --verbose=2 "$APP_SRC" 2>&1 | awk -F= '/^CDHash=/{pri
 echo "==> Installing to ${APP_DST} ..."
 # Quit running instance if any
 pkill -x MyPipCam 2>/dev/null || true
+pkill -x LoomCam 2>/dev/null || true
 sleep 0.3
+
+# Stale pre-rename builds confuse Launch Services / TCC dialogs ("LoomCam would like…").
+rm -rf /Applications/LoomCam.app
+rm -rf "$MACOS/build/Build/Products/Debug/LoomCam.app"
+rm -rf "$MACOS/build/Build/Products/Debug/LoomCam.swiftmodule"
+rm -rf "$MACOS/build/Build/Intermediates.noindex/LoomCam.build"
+# Legacy login item often points at the Debug LoomCam.app path.
+osascript -e 'tell application "System Events" to delete login item "LoomCam"' 2>/dev/null || true
 
 # Replace existing install (ditto preserves more metadata than rm+cp)
 rm -rf "${APP_DST}"
@@ -130,6 +139,11 @@ while IFS= read -r extra; do
   [[ -z "$extra" || "$extra" == "$APP_DST" ]] && continue
   "$LSREG" -u "$extra" 2>/dev/null || true
 done < <(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.MyPipCam'" 2>/dev/null || true)
+# Drop any remaining LoomCam registrations (old bundle id).
+while IFS= read -r extra; do
+  [[ -z "$extra" ]] && continue
+  "$LSREG" -u "$extra" 2>/dev/null || true
+done < <(mdfind "kMDItemCFBundleIdentifier == 'com.stevenmartinez.LoomCam'" 2>/dev/null || true)
 "$LSREG" -f "$APP_DST" 2>/dev/null || true
 
 echo ""

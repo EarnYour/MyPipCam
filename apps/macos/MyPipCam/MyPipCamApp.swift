@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Detect reinstall / new code signature so Record can guide Screen Recording re-grant.
         RecordToCloudCoordinator.shared.recorder.noteLaunchIdentity()
 
+        // Copy LoomCam sandbox prefs into MyPipCam before settings managers read them.
+        LegacySettingsMigration.migrateIfNeeded()
+
         let bubble = CameraBubbleController(loginItem: loginItem)
         bubbleController = bubble
         bubble.show()

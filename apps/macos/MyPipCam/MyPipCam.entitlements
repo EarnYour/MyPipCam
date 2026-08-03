@@ -23,6 +23,8 @@
 		<string>Library/Application Support/Microsoft Edge/</string>
 		<string>Library/Application Support/Arc/</string>
 		<string>Library/Application Support/Vivaldi/</string>
+		<!-- One-time LoomCam → MyPipCam UserDefaults migration -->
+		<string>Library/Containers/com.stevenmartinez.LoomCam/Data/Library/Preferences/</string>
 	</array>
 	<!-- Fallback: tell Chrome to open chrome-extension:// library URLs -->
 	<key>com.apple.security.automation.apple-events</key>

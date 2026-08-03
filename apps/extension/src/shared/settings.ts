@@ -52,16 +52,37 @@ function normalizeLoaded(raw: PipSettings): PipSettings {
   }
 }
 
+function asPartialSettings(value: unknown): Partial<PipSettings> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  return value as Partial<PipSettings>
+}
+
+/**
+ * Load PiP / capture settings.
+ * Prefer chrome.storage.sync (cross-device), fall back to local so a sync wipe
+ * or offline profile still restores the last appearance after reboot.
+ */
 export async function loadPipSettings(): Promise<PipSettings> {
-  const [result, localFilter] = await Promise.all([
+  const [syncResult, localResult, localFilter] = await Promise.all([
     chrome.storage.sync.get(KEY),
+    chrome.storage.local.get(KEY),
     chrome.storage.local.get('cameraFilter'),
   ])
-  const raw = { ...DEFAULT_PIP_SETTINGS, ...(result[KEY] as Partial<PipSettings> | undefined) }
-  // Filter source of truth is chrome.storage.local (falls back to sync blob / default).
+  const syncPartial = asPartialSettings(syncResult[KEY])
+  const localPartial = asPartialSettings(localResult[KEY])
+  // Sync wins when present; otherwise use the on-device mirror.
+  const stored = syncPartial ?? localPartial
+  const raw = { ...DEFAULT_PIP_SETTINGS, ...stored }
+  // Filter source of truth is chrome.storage.local (falls back to sync/local blob / default).
   const cameraFilter = isCameraFilterId(localFilter.cameraFilter)
     ? localFilter.cameraFilter
     : normalizeCameraFilter(raw.cameraFilter)
+
+  // Heal: if sync is empty but local has settings, re-upload so sync catches up.
+  if (!syncPartial && localPartial) {
+    void chrome.storage.sync.set({ [KEY]: { ...raw, cameraFilter } }).catch(() => undefined)
+  }
+
   return normalizeLoaded({ ...raw, cameraFilter })
 }
 
@@ -111,7 +132,11 @@ export async function savePipSettings(patch: Partial<PipSettings>): Promise<PipS
   if (clean.captureCursor !== undefined) {
     next.captureCursor = clean.captureCursor !== false
   }
-  await chrome.storage.sync.set({ [KEY]: next })
+  // Dual-write: sync for profile roaming + local so reboot always has a copy.
+  await Promise.all([
+    chrome.storage.sync.set({ [KEY]: next }),
+    chrome.storage.local.set({ [KEY]: next }),
+  ])
   return next
 }
 
