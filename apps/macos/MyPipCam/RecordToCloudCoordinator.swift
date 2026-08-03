@@ -27,6 +27,36 @@ final class RecordToCloudCoordinator: ObservableObject {
                 self?.isRecording = recording
             }
             .store(in: &cancellables)
+
+        // Mid-session SCStream death used to flip isRecording off with no alert.
+        recorder.$fatalSessionError
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] message in
+                self?.handleFatalSessionError(message)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleFatalSessionError(_ message: String) {
+        hideHUD()
+        let diag = recorder.lastFailureDiagnostic ?? ""
+        recorder.clearFatalSessionError()
+        if ScreenCloudRecorderError.isScreenCaptureTCCError(
+            ScreenCloudRecorderError.permissionDenied
+        ), recorder.needsScreenRecordingPermission {
+            presentScreenRecordingHelp(diagnostic: diag)
+            return
+        }
+        if recorder.needsScreenRecordingPermission {
+            presentScreenRecordingHelp(diagnostic: diag.isEmpty ? message : diag)
+            return
+        }
+        presentFailureAlert(
+            title: "Recording Stopped",
+            message: message,
+            diagnostic: diag
+        )
     }
 
     func bind(
@@ -76,7 +106,7 @@ final class RecordToCloudCoordinator: ObservableObject {
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        ensureAlertCanPresent()
 
         setupWindow = window
         isSetupPresented = true
@@ -104,12 +134,26 @@ final class RecordToCloudCoordinator: ObservableObject {
     }
 
     private func startRecording(_ config: StartConfig) async {
-        guard let settings else { return }
+        guard let settings else {
+            presentFailureAlert(
+                title: "Couldn’t Start Recording",
+                message: "Internal error: settings not bound. Quit & reopen MyPipCam, then try Record again.",
+                diagnostic: "settings=nil"
+            )
+            return
+        }
 
         let store = LibraryFolderStore.shared
         if !store.hasLibrary {
-            guard store.ensureDefaultLibrary(settings: settings) || store.chooseFolder(settings: settings) else {
-                return
+            if !store.ensureDefaultLibrary(settings: settings) {
+                if !store.chooseFolder(settings: settings) {
+                    presentFailureAlert(
+                        title: "Couldn’t Start Recording",
+                        message: "Choose a MyPipCam library folder to save recordings, then try again.",
+                        diagnostic: "libraryFolder=missing"
+                    )
+                    return
+                }
             }
         }
 
@@ -118,9 +162,8 @@ final class RecordToCloudCoordinator: ObservableObject {
             await camera?.requestAccessAndStart()
         }
 
-        dismissSetup()
-        try? await Task.sleep(nanoseconds: 350_000_000)
-
+        // Keep the setup window until capture actually starts so validation/SCK errors
+        // are never lost behind a dismissed sheet + accessory activation policy.
         let micID: String? = {
             guard config.includeMicrophone else { return nil }
             let id = microphone?.selectedDeviceID ?? ""
@@ -138,25 +181,33 @@ final class RecordToCloudCoordinator: ObservableObject {
                 includeSystemAudio: config.includeSystemAudio,
                 excludeWindowIDs: hudID.map { [$0] } ?? []
             )
+            dismissSetup()
             lastStatusMessage = nil
         } catch {
             hideHUD()
             let mapped = ScreenCloudRecorderError.mapCaptureError(error)
             let diag = recorder.lastFailureDiagnostic
                 ?? ScreenCloudRecorderError.diagnosticSummary(error)
+            NSLog(
+                "[MyPipCam] startRecording failed %{public}@",
+                diag
+            )
             if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
-                presentScreenRecordingHelp(diagnostic: diag)
+                presentScreenRecordingHelp(diagnostic: diag, underlying: error)
             } else {
-                presentAlert(
+                presentFailureAlert(
                     title: "Couldn’t Start Recording",
-                    message: "\(mapped.localizedDescription)\n\n(\(diag))"
+                    message: mapped.localizedDescription,
+                    diagnostic: diag,
+                    underlying: error
                 )
             }
         }
     }
 
     func stopRecording() async {
-        guard recorder.isRecording else { return }
+        // Allow salvage when the stream already died but left a temp file.
+        guard recorder.isRecording || recorder.errorMessage != nil else { return }
         hideHUD()
 
         do {
@@ -172,6 +223,7 @@ final class RecordToCloudCoordinator: ObservableObject {
             LibraryFolderStore.shared.refresh()
             lastStatusMessage = "Saved “\(saved.title)” to your library."
 
+            ensureAlertCanPresent()
             let alert = NSAlert()
             alert.messageText = "Recording Saved"
             alert.informativeText = """
@@ -204,7 +256,12 @@ final class RecordToCloudCoordinator: ObservableObject {
                 }
             }
         } catch {
-            presentAlert(title: "Recording Failed", message: error.localizedDescription)
+            presentFailureAlert(
+                title: "Recording Failed",
+                message: error.localizedDescription,
+                diagnostic: ScreenCloudRecorderError.diagnosticSummary(error),
+                underlying: error
+            )
         }
     }
 
@@ -225,7 +282,7 @@ final class RecordToCloudCoordinator: ObservableObject {
         )
         let hosting = NSHostingController(rootView: root)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 52),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 64),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -243,8 +300,8 @@ final class RecordToCloudCoordinator: ObservableObject {
             let visible = screen.visibleFrame
             panel.setFrameOrigin(
                 NSPoint(
-                    x: visible.midX - 110,
-                    y: visible.maxY - 72
+                    x: visible.midX - 140,
+                    y: visible.maxY - 80
                 )
             )
         }
@@ -257,7 +314,16 @@ final class RecordToCloudCoordinator: ObservableObject {
         hudWindow = nil
     }
 
+    /// Menu-bar apps suppress modal alerts unless briefly regular + frontmost.
+    private func ensureAlertCanPresent() {
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func presentAlert(title: String, message: String) {
+        ensureAlertCanPresent()
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -266,12 +332,46 @@ final class RecordToCloudCoordinator: ObservableObject {
         alert.runModal()
     }
 
-    private func presentScreenRecordingHelp(diagnostic: String? = nil) {
+    private func presentFailureAlert(
+        title: String,
+        message: String,
+        diagnostic: String,
+        underlying: Error? = nil
+    ) {
+        ensureAlertCanPresent()
+        var detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let diagLine: String
+        if let underlying {
+            diagLine = ScreenCloudRecorderError.diagnosticSummary(underlying)
+        } else {
+            diagLine = diagnostic
+        }
+        if !diagLine.isEmpty {
+            detail += "\n\nTechnical detail: \(diagLine)"
+        }
+        if !diagnostic.isEmpty, diagnostic != diagLine {
+            detail += "\nProbe: \(diagnostic)"
+        }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Copy Details")
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(detail, forType: .string)
+        }
+    }
+
+    private func presentScreenRecordingHelp(diagnostic: String? = nil, underlying: Error? = nil) {
         let perm = ScreenRecordingPermission.shared
         perm.refresh()
-        perm.requestPermission()
+        // Do NOT open Settings before the alert — that hid the dialog and looked like a silent fail.
         perm.startPolling()
 
+        ensureAlertCanPresent()
         let alert = NSAlert()
         let pendingRelaunch = perm.status == .grantedPendingRelaunch
         alert.messageText = pendingRelaunch
@@ -280,12 +380,18 @@ final class RecordToCloudCoordinator: ObservableObject {
         var body = pendingRelaunch
             ? ScreenCloudRecorderError.relaunchHelpText
             : ScreenCloudRecorderError.permissionHelpText
-        if let diagnostic, !diagnostic.isEmpty {
-            body += "\n\nTechnical detail: \(diagnostic)"
+        let diag = diagnostic
+            ?? (underlying.map { ScreenCloudRecorderError.diagnosticSummary($0) })
+            ?? recorder.lastFailureDiagnostic
+        if let diag, !diag.isEmpty {
+            body += "\n\nTechnical detail: \(diag)"
+        }
+        if let underlying {
+            let ns = underlying as NSError
+            body += "\nNSError: domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)"
         }
         alert.informativeText = body
         alert.alertStyle = .warning
-        // Primary action is always relaunch — Settings toggle alone never activates SCK mid-session.
         alert.addButton(withTitle: "Quit & Relaunch")
         alert.addButton(withTitle: "Open Screen Recording Settings")
         alert.addButton(withTitle: "Try Again")
@@ -298,7 +404,14 @@ final class RecordToCloudCoordinator: ObservableObject {
         case .alertSecondButtonReturn:
             ScreenCloudRecorder.openScreenRecordingSettings()
         case .alertThirdButtonReturn:
-            presentSetup()
+            // Setup sheet may still be open; refresh content and leave it.
+            Task {
+                _ = recorder.ensureScreenCaptureAccess()
+                await recorder.refreshShareableContent()
+            }
+            if !isSetupPresented {
+                presentSetup()
+            }
         default:
             break
         }
@@ -317,27 +430,40 @@ struct RecordingHUDView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Color(red: 1, green: 0.37, blue: 0.16))
-                .frame(width: 10, height: 10)
-            Text(timeLabel)
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
+        HStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color(red: 1, green: 0.37, blue: 0.16))
+                    .frame(width: 10, height: 10)
+                Text(timeLabel)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .fixedSize()
+            }
             Button(action: onStop) {
                 Text("Stop")
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.16), in: Capsule())
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 1, green: 0.37, blue: 0.16), in: Capsule())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .help("Stop recording and save to library")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.82))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 2)
         .padding(4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording \(timeLabel)")
     }
 }

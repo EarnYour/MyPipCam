@@ -46,12 +46,14 @@ final class ScreenRecordingPermission: ObservableObject {
         }
     }
 
-    /// Registers the app with TCC / opens Settings. Does not make SCK work mid-session.
-    func requestPermission() {
+    /// Registers the app with TCC. Does not make SCK work mid-session.
+    /// Callers that need Settings should open it from an explicit button — auto-opening
+    /// Settings before an alert made failures look silent on Tahoe.
+    func requestPermission(openSettingsIfDenied: Bool = false) {
         prepareFrontmost()
         let granted = CGRequestScreenCaptureAccess()
         refresh()
-        if !granted || status == .notGranted {
+        if openSettingsIfDenied, !granted || status == .notGranted {
             openSystemSettings()
         }
     }

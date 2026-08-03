@@ -13,8 +13,9 @@ struct RecordToCloudSetupView: View {
     @AppStorage("cloudCaptureTarget") private var captureTargetRaw: String = CloudCaptureTarget.screen.rawValue
     @AppStorage("cloudCaptureDisplayID") private var savedDisplayID: Int = 0
     @AppStorage("cloudCaptureWindowID") private var savedWindowID: Int = 0
-    @AppStorage("cloudIncludeSystemAudio") private var includeSystemAudio = true
-    @AppStorage("cloudIncludeMicrophone") private var includeMicrophone = true
+    // Default video-only so mic/system-audio TCC never blocks first capture.
+    @AppStorage("cloudIncludeSystemAudio") private var includeSystemAudio = false
+    @AppStorage("cloudIncludeMicrophone") private var includeMicrophone = false
 
     @State private var selectedDisplayID: CGDirectDisplayID = 0
     @State private var selectedWindowID: CGWindowID = 0
@@ -325,12 +326,11 @@ struct RecordToCloudSetupView: View {
 
     private func start() async {
         localError = nil
-        if captureTarget == .window && selectedWindowID == 0 {
+        // Do not block Start when the display list is empty — that used to look like a
+        // silent no-op. Always hand off to the coordinator so SCK runs and every failure
+        // surfaces as a modal alert with domain/code/description.
+        if captureTarget == .window && selectedWindowID == 0 && !recorder.windows.isEmpty {
             localError = "Select a window to capture."
-            return
-        }
-        if captureTarget == .screen && selectedDisplayID == 0 {
-            localError = "Select a display to capture."
             return
         }
 
@@ -339,11 +339,14 @@ struct RecordToCloudSetupView: View {
         isStarting = true
         defer { isStarting = false }
 
+        let displayID: CGDirectDisplayID? = selectedDisplayID == 0 ? nil : selectedDisplayID
+        let windowID: CGWindowID? = selectedWindowID == 0 ? nil : selectedWindowID
+
         await onStart(
             RecordToCloudCoordinator.StartConfig(
                 target: captureTarget,
-                displayID: selectedDisplayID,
-                windowID: selectedWindowID,
+                displayID: displayID,
+                windowID: windowID,
                 includeSystemAudio: includeSystemAudio,
                 includeMicrophone: includeMicrophone
             )

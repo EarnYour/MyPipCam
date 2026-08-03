@@ -102,7 +102,40 @@ enum ScreenCloudRecorderError: LocalizedError {
         -3820 // SCStreamErrorFailedToStartMicrophoneCapture (macOS 15+)
     ]
 
+    /// Mic / system-audio SCStream failures — safe to retry video-only.
+    static func isAudioCaptureError(_ error: Error) -> Bool {
+        if let err = error as? ScreenCloudRecorderError {
+            switch err {
+            case .startFailed(let detail):
+                let lower = detail.lowercased()
+                return lower.contains("microphone") || lower.contains("system audio")
+                    || lower.contains("audio capture")
+            default:
+                break
+            }
+        }
+        let ns = error as NSError
+        if ns.domain == SCStreamErrorDomain || ns.domain.contains("SCStream")
+            || ns.domain.contains("ScreenCaptureKit")
+        {
+            if ns.code == SCStreamError.failedToStartAudioCapture.rawValue { return true }
+            if ns.code == -3820 { return true } // FailedToStartMicrophoneCapture
+        }
+        let blob = "\(ns.localizedDescription) \(ns.localizedFailureReason ?? "")".lowercased()
+        if blob.contains("microphone") && (blob.contains("fail") || blob.contains("tcc") || blob.contains("denied")) {
+            return true
+        }
+        if blob.contains("audio")
+            && (blob.contains("fail") || blob.contains("unable") || blob.contains("denied") || blob.contains("tcc"))
+            && !blob.contains("screen recording")
+        {
+            return true
+        }
+        return false
+    }
+
     /// Only true Screen Recording TCC / user-decline — not mic/system-audio/entitlement failures.
+    /// Prefer exact SCStream codes; string matching is a last resort.
     static func isScreenCaptureTCCError(_ error: Error) -> Bool {
         if let err = error as? ScreenCloudRecorderError, case .permissionDenied = err {
             return true
@@ -118,7 +151,7 @@ enum ScreenCloudRecorderError: LocalizedError {
             return false
         }
 
-        // SCStreamErrorUserDeclined = -3801
+        // SCStreamErrorUserDeclined = -3801 — the only reliable TCC signal from SCK.
         if isStreamDomain, ns.code == SCStreamError.userDeclined.rawValue {
             return true
         }
@@ -129,11 +162,7 @@ enum ScreenCloudRecorderError: LocalizedError {
             && (blob.contains("display") || blob.contains("window") || blob.contains("application")) {
             return true
         }
-        if blob.contains("screen recording")
-            && (blob.contains("denied") || blob.contains("not authorized") || blob.contains("permission")) {
-            return true
-        }
-        // Do NOT match bare "tcc"+"capture" — that false-positives microphone/system-audio TCC.
+        // Do NOT match broad "screen recording" / "permission" strings — that hid real errors.
         return false
     }
 
@@ -143,11 +172,10 @@ enum ScreenCloudRecorderError: LocalizedError {
             // Map specific codes before the broad TCC check so mic/audio never become permissionDenied.
             switch ns.code {
             case SCStreamError.noDisplayList.rawValue, SCStreamError.noCaptureSource.rawValue:
-                // Empty display list after a denied Screen Recording grant often surfaces as -3814.
-                if !CGPreflightScreenCaptureAccess() {
-                    return ScreenCloudRecorderError.permissionDenied
-                }
-                return ScreenCloudRecorderError.noDisplay
+                // Keep the real code visible. Only -3801 is treated as Screen Recording TCC help.
+                return ScreenCloudRecorderError.startFailed(
+                    "No capture display available. If Screen Recording is off for MyPipCam, enable it in System Settings, Quit & Relaunch, then try again. (\(diagnosticSummary(error)))"
+                )
             case SCStreamError.noWindowList.rawValue:
                 return ScreenCloudRecorderError.noWindow
             case -3820: // SCStreamErrorFailedToStartMicrophoneCapture (macOS 15+)
@@ -225,6 +253,158 @@ enum ScreenCaptureSigningIdentity {
     }
 }
 
+/// Arguments needed to rebuild an SCContentFilter after a mid-session stream failure.
+private struct RestartableCapture {
+    var target: CloudCaptureTarget
+    var displayID: CGDirectDisplayID?
+    var windowID: CGWindowID?
+    var microphoneDeviceID: String?
+    var includeSystemAudio: Bool
+    var excludeWindowIDs: [CGWindowID]
+}
+
+/// AVAssetWriter owned on the capture sample queue — never hop samples to MainActor
+/// (that raced `finishWriting` and deleted the MP4 before any frame was appended).
+private final class CaptureWriterSession: @unchecked Sendable {
+    let outputURL: URL
+    private let queue: DispatchQueue
+    private let writer: AVAssetWriter
+    private let videoInput: AVAssetWriterInput
+    private let audioInput: AVAssetWriterInput?
+    private var sessionStarted = false
+    private(set) var videoFrameCount = 0
+
+    init(
+        outputURL: URL,
+        width: Int,
+        height: Int,
+        includeAudio: Bool,
+        queue: DispatchQueue
+    ) throws {
+        self.outputURL = outputURL
+        self.queue = queue
+
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 8_000_000,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            ]
+        ]
+        let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        video.expectsMediaDataInRealTime = true
+        guard writer.canAdd(video) else {
+            throw ScreenCloudRecorderError.writerFailed("Cannot add video track.")
+        }
+        writer.add(video)
+
+        var audio: AVAssetWriterInput?
+        if includeAudio {
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 48_000,
+                AVEncoderBitRateKey: 160_000
+            ]
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            input.expectsMediaDataInRealTime = true
+            if writer.canAdd(input) {
+                writer.add(input)
+                audio = input
+            }
+        }
+
+        guard writer.startWriting() else {
+            throw ScreenCloudRecorderError.writerFailed(
+                writer.error?.localizedDescription ?? "Could not start writer."
+            )
+        }
+
+        self.writer = writer
+        self.videoInput = video
+        self.audioInput = audio
+    }
+
+    /// Must be called on `queue` (SCStream sample handler queue).
+    func append(_ sampleBuffer: CMSampleBuffer, isVideo: Bool) {
+        guard CMSampleBufferIsValid(sampleBuffer) else { return }
+        if isVideo {
+            // Skip idle/blank/suspended SCK frames — only `.complete` is writable.
+            guard Self.isCompleteScreenFrame(sampleBuffer) else { return }
+        }
+        if !sessionStarted {
+            guard isVideo else { return }
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            writer.startSession(atSourceTime: pts)
+            sessionStarted = true
+        }
+        if isVideo {
+            guard videoInput.isReadyForMoreMediaData else { return }
+            if videoInput.append(sampleBuffer) {
+                videoFrameCount += 1
+            }
+        } else {
+            guard let audioInput, audioInput.isReadyForMoreMediaData else { return }
+            _ = audioInput.append(sampleBuffer)
+        }
+    }
+
+    private static func isCompleteScreenFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard
+            let attachments = CMSampleBufferGetSampleAttachmentsArray(
+                sampleBuffer,
+                createIfNecessary: false
+            ) as? [[SCStreamFrameInfo: Any]],
+            let raw = attachments.first?[.status] as? Int,
+            let status = SCFrameStatus(rawValue: raw)
+        else {
+            // No SCK attachments — treat as a normal buffer (mic / non-SCK).
+            return true
+        }
+        return status == .complete
+    }
+
+    func finish() async -> Result<URL, Error> {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.videoInput.markAsFinished()
+                self.audioInput?.markAsFinished()
+                if !self.sessionStarted || self.videoFrameCount == 0 {
+                    self.writer.cancelWriting()
+                    continuation.resume(
+                        returning: .failure(
+                            ScreenCloudRecorderError.writerFailed(
+                                "No video frames were captured. Check Screen Recording permission, then Quit & Relaunch and try again."
+                            )
+                        )
+                    )
+                    return
+                }
+                self.writer.finishWriting {
+                    if self.writer.status == .completed,
+                       FileManager.default.fileExists(atPath: self.outputURL.path)
+                    {
+                        continuation.resume(returning: .success(self.outputURL))
+                    } else {
+                        let detail = self.writer.error?.localizedDescription
+                            ?? "Writer status \(self.writer.status.rawValue)"
+                        continuation.resume(
+                            returning: .failure(
+                                ScreenCloudRecorderError.writerFailed(
+                                    "Could not finalize recording: \(detail)"
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Screen / window capture via ScreenCaptureKit → MP4 temp file.
 @MainActor
 final class ScreenCloudRecorder: NSObject, ObservableObject {
@@ -237,23 +417,33 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     @Published private(set) var signingIdentityChanged = false
     /// Last underlying NSError summary from a failed SCK call (domain/code/desc).
     @Published private(set) var lastFailureDiagnostic: String?
+    /// Set when a running session dies and could not be recovered — coordinator must show an alert.
+    @Published private(set) var fatalSessionError: String?
 
     @Published private(set) var displays: [CapturableDisplay] = []
     @Published private(set) var windows: [CapturableWindow] = []
 
     private var stream: SCStream?
     private var recordingOutput: AnyObject?
-    private var assetWriter: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
+    /// Thread-safe writer; accessed from sample queue + MainActor stop path.
+    nonisolated(unsafe) private var writerSession: CaptureWriterSession?
     private var micSession: AVCaptureSession?
-    private var writerStarted = false
     private var outputURL: URL?
     private var startedAt: Date?
     private var timer: Timer?
     private let sampleQueue = DispatchQueue(label: "com.mypipcam.desktop-recorder.samples")
     private var excludeWindowIDs: [CGWindowID] = []
     private var restoredActivationPolicy: NSApplication.ActivationPolicy?
+    private var restartParams: RestartableCapture?
+    private var didFallbackToVideoOnly = false
+    private var isHandlingStreamStop = false
+    private var recordingFinishContinuation: CheckedContinuation<Result<URL, Error>, Never>?
+    private var usesRecordingOutput = false
+
+    /// Clears a presented fatal-session alert after the UI has shown it.
+    func clearFatalSessionError() {
+        fatalSessionError = nil
+    }
 
     func noteLaunchIdentity() {
         if ScreenCaptureSigningIdentity.detectIdentityChange() {
@@ -485,29 +675,23 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
     ) async throws -> URL {
         guard !isRecording else { throw ScreenCloudRecorderError.alreadyRecording }
 
-        // Gate on relaunch-aware TCC state. Calling SCK while not ready yields -3801 / “declined TCCs”.
-        let perm = ScreenRecordingPermission.shared
-        perm.refresh()
-        switch perm.status {
-        case .granted:
-            break
-        case .grantedPendingRelaunch:
-            needsScreenRecordingPermission = true
-            lastFailureDiagnostic = "preflight=true pendingRelaunch=true (SCK needs new process)"
-            throw ScreenCloudRecorderError.permissionDenied
-        case .notGranted:
-            _ = ensureScreenCaptureAccess()
-            perm.requestPermission()
-            perm.refresh()
-            if perm.status != .granted {
-                needsScreenRecordingPermission = true
-                lastFailureDiagnostic =
-                    "preflight=\(CGPreflightScreenCaptureAccess()) status=\(String(describing: perm.status)) (TCC ScreenCapture does not allow in-app prompting on this OS)"
-                throw ScreenCloudRecorderError.permissionDenied
-            }
-        }
+        // Never gate on CGPreflight / relaunch heuristics — those false-positive on Tahoe
+        // (Settings ON + no Allow sheet) and block before ScreenCaptureKit runs.
+        // Always attempt SCShareableContent; only treat real SCK TCC errors as permissionDenied.
+        _ = ensureScreenCaptureAccess()
+        ScreenRecordingPermission.shared.refresh()
 
         self.excludeWindowIDs = excludeWindowIDs
+        fatalSessionError = nil
+        didFallbackToVideoOnly = false
+        restartParams = RestartableCapture(
+            target: target,
+            displayID: displayID,
+            windowID: windowID,
+            microphoneDeviceID: microphoneDeviceID,
+            includeSystemAudio: includeSystemAudio,
+            excludeWindowIDs: excludeWindowIDs
+        )
 
         let content: SCShareableContent
         do {
@@ -515,55 +699,24 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             needsScreenRecordingPermission = false
             signingIdentityChanged = false
             lastFailureDiagnostic = nil
+            ScreenRecordingPermission.shared.refresh()
         } catch {
             let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+            rememberFailure(error)
             if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
                 needsScreenRecordingPermission = true
-                ScreenRecordingPermission.shared.requestPermission()
                 throw ScreenCloudRecorderError.permissionDenied
             }
+            // Preserve the real SCK/NSError for the UI — never swallow into a silent path.
             throw mapped
         }
 
-        let filter: SCContentFilter
-        let width: Int
-        let height: Int
-
-        switch target {
-        case .screen:
-            guard
-                let display = content.displays.first(where: { $0.displayID == displayID })
-                    ?? content.displays.first
-            else { throw ScreenCloudRecorderError.noDisplay }
-
-            // Re-include floating PiP bubble: exclude our app, then except bubble windows
-            // (recording HUD / setup windows stay out via excludeWindowIDs).
-            let ourBundle = Bundle.main.bundleIdentifier
-            let ourApps = content.applications.filter { $0.bundleIdentifier == ourBundle }
-            let bubbleWindows = content.windows.filter { window in
-                window.owningApplication?.bundleIdentifier == ourBundle
-                    && !excludeWindowIDs.contains(window.windowID)
-            }
-            if !ourApps.isEmpty {
-                filter = SCContentFilter(
-                    display: display,
-                    excludingApplications: ourApps,
-                    exceptingWindows: bubbleWindows
-                )
-            } else {
-                let excluded = content.windows.filter { excludeWindowIDs.contains($0.windowID) }
-                filter = SCContentFilter(display: display, excludingWindows: excluded)
-            }
-            width = min(max(2, display.width * 2), 3840)
-            height = min(max(2, display.height * 2), 2160)
-        case .window:
-            guard let windowID,
-                  let window = content.windows.first(where: { $0.windowID == windowID })
-            else { throw ScreenCloudRecorderError.noWindow }
-            filter = SCContentFilter(desktopIndependentWindow: window)
-            width = max(2, Int(window.frame.width) & ~1)
-            height = max(2, Int(window.frame.height) & ~1)
-        }
+        let built = try makeFilter(
+            target: target,
+            displayID: displayID,
+            windowID: windowID,
+            content: content
+        )
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("mypipcam-desktop-\(UUID().uuidString).mp4")
@@ -574,9 +727,9 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
 
         do {
             try await startCaptureWithFallback(
-                filter: filter,
-                width: width,
-                height: height,
+                filter: built.filter,
+                width: built.width,
+                height: built.height,
                 outputURL: url,
                 microphoneDeviceID: microphoneDeviceID,
                 includeSystemAudio: includeSystemAudio
@@ -599,8 +752,165 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         startedAt = Date()
         elapsedSeconds = 0
         isRecording = true
-        errorMessage = nil
+        // Preserve soft warning from startCaptureWithFallback (video-only audio fallback).
         lastFailureDiagnostic = nil
+        beginElapsedTimer()
+        return url
+    }
+
+    func stop() async throws -> (url: URL, durationMs: Double) {
+        // Allow stop after a stream error left a partial file (isRecording may already be false).
+        guard isRecording || outputURL != nil || writerSession != nil else {
+            throw ScreenCloudRecorderError.notRecording
+        }
+        timer?.invalidate()
+        timer = nil
+
+        let durationMs = max(0, elapsedSeconds * 1000)
+        isHandlingStreamStop = true
+        defer { isHandlingStreamStop = false }
+
+        let finalizedURL: URL
+        if usesRecordingOutput, #available(macOS 15.0, *) {
+            finalizedURL = try await stopRecordingOutputSession()
+        } else {
+            finalizedURL = try await stopAssetWriterSession()
+        }
+
+        isRecording = false
+        startedAt = nil
+        restartParams = nil
+        usesRecordingOutput = false
+        outputURL = finalizedURL
+
+        let attrs = try? FileManager.default.attributesOfItem(atPath: finalizedURL.path)
+        let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        guard size > 0 else {
+            throw ScreenCloudRecorderError.writerFailed(
+                "Recording file was empty (capture never produced frames). Path: \(finalizedURL.path)"
+            )
+        }
+        NSLog(
+            "[MyPipCam] stop OK path=%{public}@ bytes=%d durationMs=%.0f",
+            finalizedURL.path,
+            size,
+            durationMs
+        )
+        return (finalizedURL, durationMs)
+    }
+
+    func cancel() async {
+        isHandlingStreamStop = true
+        defer { isHandlingStreamStop = false }
+        timer?.invalidate()
+        timer = nil
+        if usesRecordingOutput, #available(macOS 15.0, *),
+           let output = recordingOutput as? SCRecordingOutput,
+           let stream
+        {
+            try? stream.removeRecordingOutput(output)
+        }
+        try? await stream?.stopCapture()
+        stream = nil
+        recordingOutput = nil
+        if let session = writerSession {
+            writerSession = nil
+            _ = await session.finish()
+        }
+        stopMicSession()
+        if let outputURL {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        outputURL = nil
+        isRecording = false
+        startedAt = nil
+        elapsedSeconds = 0
+        restartParams = nil
+        didFallbackToVideoOnly = false
+        usesRecordingOutput = false
+        if let cont = recordingFinishContinuation {
+            recordingFinishContinuation = nil
+            cont.resume(returning: .failure(ScreenCloudRecorderError.notRecording))
+        }
+    }
+
+    private func stopAssetWriterSession() async throws -> URL {
+        try? await stream?.stopCapture()
+        stream = nil
+        recordingOutput = nil
+        stopMicSession()
+        guard let session = writerSession else {
+            let path = outputURL?.path ?? "(nil)"
+            throw ScreenCloudRecorderError.writerFailed(
+                "Recording file was not written. No writer session (path \(path))."
+            )
+        }
+        writerSession = nil
+        switch await session.finish() {
+        case .success(let url):
+            return url
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    @available(macOS 15.0, *)
+    private func stopRecordingOutputSession() async throws -> URL {
+        let expected = outputURL
+        guard let stream, let output = recordingOutput as? SCRecordingOutput else {
+            // Stream may already be gone — check if a file was left behind.
+            if let expected, FileManager.default.fileExists(atPath: expected.path) {
+                return expected
+            }
+            throw ScreenCloudRecorderError.writerFailed(
+                "Recording file was not written. Capture ended before the file was finalized."
+            )
+        }
+
+        let result: Result<URL, Error> = await withCheckedContinuation { continuation in
+            self.recordingFinishContinuation = continuation
+            do {
+                // Required to flush/finalize the MP4 — stopCapture alone often leaves no file.
+                try stream.removeRecordingOutput(output)
+            } catch {
+                NSLog(
+                    "[MyPipCam] removeRecordingOutput: %{public}@",
+                    error.localizedDescription
+                )
+            }
+            Task { @MainActor in
+                try? await stream.stopCapture()
+                // If delegate never fires, don't hang Stop forever.
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                if let cont = self.recordingFinishContinuation {
+                    self.recordingFinishContinuation = nil
+                    if let expected, FileManager.default.fileExists(atPath: expected.path) {
+                        cont.resume(returning: .success(expected))
+                    } else {
+                        cont.resume(
+                            returning: .failure(
+                                ScreenCloudRecorderError.writerFailed(
+                                    "Recording file was not written after stop. Path: \(expected?.path ?? "nil")"
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        self.stream = nil
+        self.recordingOutput = nil
+        switch result {
+        case .success(let url):
+            return url
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    private func beginElapsedTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let startedAt = self.startedAt else { return }
@@ -610,56 +920,56 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         if let timer {
             RunLoop.main.add(timer, forMode: .common)
         }
-        return url
     }
 
-    func stop() async throws -> (url: URL, durationMs: Double) {
-        guard isRecording else { throw ScreenCloudRecorderError.notRecording }
-        timer?.invalidate()
-        timer = nil
+    private func makeFilter(
+        target: CloudCaptureTarget,
+        displayID: CGDirectDisplayID?,
+        windowID: CGWindowID?,
+        content: SCShareableContent
+    ) throws -> (filter: SCContentFilter, width: Int, height: Int) {
+        switch target {
+        case .screen:
+            guard
+                let display = content.displays.first(where: { $0.displayID == displayID })
+                    ?? content.displays.first
+            else { throw ScreenCloudRecorderError.noDisplay }
 
-        let durationMs = max(0, elapsedSeconds * 1000)
-        let url = outputURL
-
-        if #available(macOS 15.0, *), recordingOutput != nil {
-            try await stream?.stopCapture()
-            stream = nil
-            recordingOutput = nil
-        } else {
-            try await stream?.stopCapture()
-            stream = nil
-            await finishAssetWriter()
-            stopMicSession()
+            // Re-include floating PiP bubble: exclude our app, then except bubble windows
+            // (recording HUD / setup windows stay out via excludeWindowIDs).
+            let ourBundle = Bundle.main.bundleIdentifier
+            let ourApps = content.applications.filter { $0.bundleIdentifier == ourBundle }
+            let bubbleWindows = content.windows.filter { window in
+                window.owningApplication?.bundleIdentifier == ourBundle
+                    && !excludeWindowIDs.contains(window.windowID)
+            }
+            let filter: SCContentFilter
+            if !ourApps.isEmpty {
+                filter = SCContentFilter(
+                    display: display,
+                    excludingApplications: ourApps,
+                    exceptingWindows: bubbleWindows
+                )
+            } else {
+                let excluded = content.windows.filter { excludeWindowIDs.contains($0.windowID) }
+                filter = SCContentFilter(display: display, excludingWindows: excluded)
+            }
+            let width = min(max(2, display.width * 2), 3840)
+            let height = min(max(2, display.height * 2), 2160)
+            return (filter, width, height)
+        case .window:
+            guard let windowID,
+                  let window = content.windows.first(where: { $0.windowID == windowID })
+            else { throw ScreenCloudRecorderError.noWindow }
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let width = max(2, Int(window.frame.width) & ~1)
+            let height = max(2, Int(window.frame.height) & ~1)
+            return (filter, width, height)
         }
-
-        isRecording = false
-        startedAt = nil
-
-        guard let url, FileManager.default.fileExists(atPath: url.path) else {
-            throw ScreenCloudRecorderError.writerFailed("Recording file was not written.")
-        }
-        return (url, durationMs)
     }
 
-    func cancel() async {
-        timer?.invalidate()
-        timer = nil
-        try? await stream?.stopCapture()
-        stream = nil
-        recordingOutput = nil
-        await finishAssetWriter()
-        stopMicSession()
-        if let outputURL {
-            try? FileManager.default.removeItem(at: outputURL)
-        }
-        outputURL = nil
-        isRecording = false
-        startedAt = nil
-        elapsedSeconds = 0
-    }
-
-    /// Prefer SCRecordingOutput on macOS 15+, but fall back to AVAssetWriter (and strip audio) on failure
-    /// so mic/system-audio errors are not misreported as Screen Recording TCC.
+    /// Prefer AVAssetWriter (reliable sandbox MP4). SCRecordingOutput is last resort — it often
+    /// starts successfully then leaves no file on stop unless `removeRecordingOutput` runs.
     private func startCaptureWithFallback(
         filter: SCContentFilter,
         width: Int,
@@ -669,28 +979,7 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         includeSystemAudio: Bool
     ) async throws {
         var lastError: Error?
-
-        if #available(macOS 15.0, *) {
-            do {
-                try await startWithRecordingOutput(
-                    filter: filter,
-                    width: width,
-                    height: height,
-                    outputURL: outputURL,
-                    microphoneDeviceID: microphoneDeviceID,
-                    includeSystemAudio: includeSystemAudio
-                )
-                return
-            } catch {
-                lastError = error
-                await cancelPartialStart()
-                if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
-                NSLog(
-                    "[MyPipCam] SCRecordingOutput start failed (%@) — trying asset writer",
-                    String(describing: error)
-                )
-            }
-        }
+        let wantsAudio = microphoneDeviceID != nil || includeSystemAudio
 
         do {
             try await startWithAssetWriter(
@@ -706,31 +995,197 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
             lastError = error
             await cancelPartialStart()
             if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
+            NSLog(
+                "[MyPipCam] AVAssetWriter start failed (%@) — trying video-only / SCRecordingOutput",
+                String(describing: error)
+            )
         }
 
-        // Last resort: video-only (no mic / system audio).
-        if microphoneDeviceID != nil || includeSystemAudio {
-            try await startWithAssetWriter(
-                filter: filter,
-                width: width,
-                height: height,
-                outputURL: outputURL,
-                microphoneDeviceID: nil,
-                includeSystemAudio: false
-            )
-            errorMessage = "Recording without microphone/system audio (capture audio failed)."
-            return
+        // Video-only asset writer if audio killed the session.
+        if wantsAudio {
+            do {
+                try await startWithAssetWriter(
+                    filter: filter,
+                    width: width,
+                    height: height,
+                    outputURL: outputURL,
+                    microphoneDeviceID: nil,
+                    includeSystemAudio: false
+                )
+                didFallbackToVideoOnly = true
+                errorMessage = "Recording without microphone/system audio (capture audio failed)."
+                return
+            } catch {
+                lastError = error
+                await cancelPartialStart()
+                if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
+            }
+        }
+
+        if #available(macOS 15.0, *) {
+            // Fresh URL — SCRecordingOutput rejects reusing a path AVAssetWriter already opened.
+            let sckURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mypipcam-desktop-\(UUID().uuidString).mp4")
+            self.outputURL = sckURL
+            do {
+                try await startWithRecordingOutput(
+                    filter: filter,
+                    width: width,
+                    height: height,
+                    outputURL: sckURL,
+                    microphoneDeviceID: nil,
+                    includeSystemAudio: false
+                )
+                if wantsAudio {
+                    didFallbackToVideoOnly = true
+                    errorMessage =
+                        "Recording without microphone/system audio (capture audio failed)."
+                }
+                return
+            } catch {
+                lastError = error
+                await cancelPartialStart()
+                if ScreenCloudRecorderError.isScreenCaptureTCCError(error) { throw error }
+            }
         }
 
         throw lastError ?? ScreenCloudRecorderError.startFailed("Could not start capture.")
     }
 
     private func cancelPartialStart() async {
+        let previous = isHandlingStreamStop
+        isHandlingStreamStop = true
+        if usesRecordingOutput, #available(macOS 15.0, *),
+           let output = recordingOutput as? SCRecordingOutput,
+           let stream
+        {
+            try? stream.removeRecordingOutput(output)
+        }
         try? await stream?.stopCapture()
         stream = nil
         recordingOutput = nil
-        await finishAssetWriter()
+        if let session = writerSession {
+            writerSession = nil
+            _ = await session.finish()
+        }
         stopMicSession()
+        usesRecordingOutput = false
+        isHandlingStreamStop = previous
+    }
+
+    /// Mid-session SCStream death: recover video-only when audio killed the stream; otherwise alert.
+    private func handleStreamFailure(_ error: Error) async {
+        guard !isHandlingStreamStop else { return }
+        isHandlingStreamStop = true
+        defer { isHandlingStreamStop = false }
+
+        rememberFailure(error)
+        let mapped = ScreenCloudRecorderError.mapCaptureError(error)
+        NSLog(
+            "[MyPipCam] stream stopped while recording: %{public}@",
+            ScreenCloudRecorderError.diagnosticSummary(error)
+        )
+
+        let hadAudio = (restartParams?.microphoneDeviceID != nil)
+            || (restartParams?.includeSystemAudio == true)
+        let canRecoverAudio =
+            isRecording
+            && !didFallbackToVideoOnly
+            && hadAudio
+            && (
+                ScreenCloudRecorderError.isAudioCaptureError(error)
+                    || ScreenCloudRecorderError.isAudioCaptureError(mapped)
+            )
+            && !ScreenCloudRecorderError.isScreenCaptureTCCError(mapped)
+
+        if canRecoverAudio {
+            do {
+                try await recoverVideoOnlyAfterAudioFailure()
+                return
+            } catch {
+                rememberFailure(error)
+                NSLog(
+                    "[MyPipCam] video-only recovery failed: %{public}@",
+                    ScreenCloudRecorderError.diagnosticSummary(error)
+                )
+            }
+        }
+
+        timer?.invalidate()
+        timer = nil
+        if usesRecordingOutput, #available(macOS 15.0, *),
+           let output = recordingOutput as? SCRecordingOutput,
+           let stream
+        {
+            try? stream.removeRecordingOutput(output)
+        }
+        try? await stream?.stopCapture()
+        stream = nil
+        recordingOutput = nil
+        // Do not finish/cancel the writer here — Stop may still salvage frames already buffered.
+        stopMicSession()
+
+        if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
+            needsScreenRecordingPermission = true
+            errorMessage = ScreenCloudRecorderError.permissionHelpText
+            fatalSessionError = ScreenCloudRecorderError.permissionHelpText
+        } else {
+            let message = mapped.localizedDescription
+            errorMessage = message
+            fatalSessionError = message
+        }
+        isRecording = false
+        startedAt = nil
+        // Keep outputURL + writerSession so Stop can still try to finalize.
+        restartParams = nil
+    }
+
+    private func recoverVideoOnlyAfterAudioFailure() async throws {
+        guard let params = restartParams else {
+            throw ScreenCloudRecorderError.startFailed("Missing capture session to recover.")
+        }
+        NSLog("[MyPipCam] Recovering: restarting capture video-only after audio failure")
+
+        if let old = outputURL {
+            try? FileManager.default.removeItem(at: old)
+        }
+        await cancelPartialStart()
+
+        let content = try await fetchShareableContent()
+        let built = try makeFilter(
+            target: params.target,
+            displayID: params.displayID,
+            windowID: params.windowID,
+            content: content
+        )
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mypipcam-desktop-\(UUID().uuidString).mp4")
+        outputURL = url
+        didFallbackToVideoOnly = true
+        restartParams = RestartableCapture(
+            target: params.target,
+            displayID: params.displayID,
+            windowID: params.windowID,
+            microphoneDeviceID: nil,
+            includeSystemAudio: false,
+            excludeWindowIDs: params.excludeWindowIDs
+        )
+
+        // Prefer asset-writer video-only for recovery — more predictable than SCRecordingOutput.
+        try await startWithAssetWriter(
+            filter: built.filter,
+            width: built.width,
+            height: built.height,
+            outputURL: url,
+            microphoneDeviceID: nil,
+            includeSystemAudio: false
+        )
+        isRecording = true
+        errorMessage = "Recording continued without microphone/system audio (audio capture failed)."
+        if startedAt == nil {
+            startedAt = Date()
+            beginElapsedTimer()
+        }
     }
 
     @available(macOS 15.0, *)
@@ -777,6 +1232,9 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         try await stream.startCapture()
         self.stream = stream
         self.recordingOutput = output
+        self.usesRecordingOutput = true
+        self.writerSession = nil
+        NSLog("[MyPipCam] SCRecordingOutput started → %{public}@", outputURL.path)
     }
 
     private func startWithAssetWriter(
@@ -799,49 +1257,24 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.pixelFormat = kCVPixelFormatType_32BGRA
 
-        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 8_000_000,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
-            ]
-        ]
-        let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        video.expectsMediaDataInRealTime = true
-        guard writer.canAdd(video) else {
-            throw ScreenCloudRecorderError.writerFailed("Cannot add video track.")
+        // Remove stale file so AVAssetWriter can create a fresh one.
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
         }
-        writer.add(video)
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
 
-        var audio: AVAssetWriterInput?
-        if useSystemAudio || useMic {
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVNumberOfChannelsKey: 2,
-                AVSampleRateKey: 48_000,
-                AVEncoderBitRateKey: 160_000
-            ]
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-            input.expectsMediaDataInRealTime = true
-            if writer.canAdd(input) {
-                writer.add(input)
-                audio = input
-            }
-        }
-
-        guard writer.startWriting() else {
-            throw ScreenCloudRecorderError.writerFailed(
-                writer.error?.localizedDescription ?? "Could not start writer."
-            )
-        }
-
-        assetWriter = writer
-        videoInput = video
-        audioInput = audio
-        writerStarted = false
+        let session = try CaptureWriterSession(
+            outputURL: outputURL,
+            width: width,
+            height: height,
+            includeAudio: useSystemAudio || useMic,
+            queue: sampleQueue
+        )
+        writerSession = session
+        usesRecordingOutput = false
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
@@ -850,6 +1283,14 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         }
         try await stream.startCapture()
         self.stream = stream
+        self.recordingOutput = nil
+        NSLog(
+            "[MyPipCam] AVAssetWriter capture started → %{public}@ (%dx%d audio=%@)",
+            outputURL.path,
+            width,
+            height,
+            (useSystemAudio || useMic) ? "yes" : "no"
+        )
 
         if let microphoneDeviceID, useMic {
             try startMicSession(deviceID: microphoneDeviceID)
@@ -884,61 +1325,12 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
         micSession?.stopRunning()
         micSession = nil
     }
-
-    private func finishAssetWriter() async {
-        let writer = assetWriter
-        let video = videoInput
-        let audio = audioInput
-        assetWriter = nil
-        videoInput = nil
-        audioInput = nil
-        writerStarted = false
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sampleQueue.async {
-                video?.markAsFinished()
-                audio?.markAsFinished()
-                guard let writer else {
-                    continuation.resume()
-                    return
-                }
-                writer.finishWriting { continuation.resume() }
-            }
-        }
-    }
-
-    private func appendSample(_ sampleBuffer: CMSampleBuffer, isVideo: Bool) {
-        guard let writer = assetWriter else { return }
-        if !writerStarted {
-            guard isVideo else { return }
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            writer.startSession(atSourceTime: pts)
-            writerStarted = true
-        }
-        if isVideo {
-            guard let videoInput, videoInput.isReadyForMoreMediaData else { return }
-            videoInput.append(sampleBuffer)
-        } else {
-            guard let audioInput, audioInput.isReadyForMoreMediaData else { return }
-            audioInput.append(sampleBuffer)
-        }
-    }
 }
 
 extension ScreenCloudRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            self.rememberFailure(error)
-            let mapped = ScreenCloudRecorderError.mapCaptureError(error)
-            if ScreenCloudRecorderError.isScreenCaptureTCCError(mapped) {
-                self.needsScreenRecordingPermission = true
-                self.errorMessage = ScreenCloudRecorderError.permissionHelpText
-            } else {
-                self.errorMessage = mapped.localizedDescription
-            }
-            self.isRecording = false
-            self.stream = nil
-            self.recordingOutput = nil
+            await self.handleStreamFailure(error)
         }
     }
 }
@@ -949,12 +1341,15 @@ extension ScreenCloudRecorder: SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
+        // Append on the sample queue directly — never hop to MainActor (that raced finishWriting
+        // and left "Recording file was not written" with zero frames).
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
+        guard let session = writerSession else { return }
         switch type {
         case .screen:
-            Task { @MainActor in self.appendSample(sampleBuffer, isVideo: true) }
+            session.append(sampleBuffer, isVideo: true)
         case .audio, .microphone:
-            Task { @MainActor in self.appendSample(sampleBuffer, isVideo: false) }
+            session.append(sampleBuffer, isVideo: false)
         @unknown default:
             break
         }
@@ -967,7 +1362,7 @@ extension ScreenCloudRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        Task { @MainActor in self.appendSample(sampleBuffer, isVideo: false) }
+        writerSession?.append(sampleBuffer, isVideo: false)
     }
 }
 
@@ -978,7 +1373,19 @@ extension ScreenCloudRecorder: SCRecordingOutputDelegate {
         didFailWithError error: Error
     ) {
         Task { @MainActor in
-            self.errorMessage = error.localizedDescription
+            await self.handleStreamFailure(error)
+        }
+    }
+
+    nonisolated func recordingOutput(
+        _ recordingOutput: SCRecordingOutput,
+        didFinishRecordingAt url: URL
+    ) {
+        Task { @MainActor in
+            if let cont = self.recordingFinishContinuation {
+                self.recordingFinishContinuation = nil
+                cont.resume(returning: .success(url))
+            }
         }
     }
 }
