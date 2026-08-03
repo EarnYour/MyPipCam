@@ -376,6 +376,9 @@ function stopTracks(stream: MediaStream | null) {
   for (const track of stream.getTracks()) track.stop()
 }
 
+let filterCss = ''
+let filterCtx: CanvasRenderingContext2D | null = null
+
 function stopCameraFilterPipeline() {
   if (filterLoopRaf) {
     cancelAnimationFrame(filterLoopRaf)
@@ -386,11 +389,41 @@ function stopCameraFilterPipeline() {
     filterVideo = null
   }
   filterCanvas = null
+  filterCtx = null
+  filterCss = ''
+}
+
+/**
+ * Start the cam-filter canvas RAF. Deferred until MediaRecorder starts so
+ * OFFSCREEN_PREPARE / countdown does not burn a full draw loop early.
+ */
+function startCameraFilterLoop() {
+  if (!filterVideo || !filterCanvas || !filterCtx || !filterCss) return
+  if (filterLoopRaf) return
+  const ctx = filterCtx
+  const css = filterCss
+  const draw = () => {
+    if (!filterVideo || !filterCanvas || !filterCtx) return
+    filterLoopRaf = requestAnimationFrame(draw)
+    const vw = filterVideo.videoWidth
+    const vh = filterVideo.videoHeight
+    if (!vw || !vh) return
+    if (filterCanvas.width !== vw || filterCanvas.height !== vh) {
+      filterCanvas.width = vw
+      filterCanvas.height = vh
+    }
+    ctx.filter = css
+    ctx.drawImage(filterVideo, 0, 0, filterCanvas.width, filterCanvas.height)
+    ctx.filter = 'none'
+  }
+  draw()
 }
 
 /**
  * Pipe a camera stream through a canvas with a CSS filter so cam-only
  * recordings match the PiP preview look.
+ * Sets up the canvas pipeline during PREPARE but does not start the RAF
+ * draw loop until {@link startCameraFilterLoop} (COMMIT / startRecorder).
  */
 async function applyCameraFilterStream(
   source: MediaStream,
@@ -417,24 +450,15 @@ async function applyCameraFilterStream(
   const ctx = canvas.getContext('2d')
   if (!ctx) return source
 
+  // Paint one frame so captureStream has a non-empty first sample; RAF waits for record.
+  ctx.filter = css
+  ctx.drawImage(video, 0, 0, w, h)
+  ctx.filter = 'none'
+
   filterVideo = video
   filterCanvas = canvas
-
-  const draw = () => {
-    if (!filterVideo || !filterCanvas) return
-    filterLoopRaf = requestAnimationFrame(draw)
-    const vw = filterVideo.videoWidth
-    const vh = filterVideo.videoHeight
-    if (!vw || !vh) return
-    if (filterCanvas.width !== vw || filterCanvas.height !== vh) {
-      filterCanvas.width = vw
-      filterCanvas.height = vh
-    }
-    ctx.filter = css
-    ctx.drawImage(filterVideo, 0, 0, filterCanvas.width, filterCanvas.height)
-    ctx.filter = 'none'
-  }
-  draw()
+  filterCtx = ctx
+  filterCss = css
 
   return canvas.captureStream(30)
 }
@@ -551,6 +575,9 @@ async function startRecorder(opts?: { continueSession?: boolean }) {
   if (recorder && recorder.state !== 'inactive') return
 
   await ensureAudioContextRunning(audioCtx)
+
+  // Cam-filter RAF only while recording — not during PREPARE/countdown.
+  startCameraFilterLoop()
 
   mimeType = pickMimeType()
   chunks = []

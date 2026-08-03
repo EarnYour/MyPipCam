@@ -943,8 +943,14 @@ final class ScreenCloudRecorder: NSObject, ObservableObject {
                 let excluded = content.windows.filter { excludeWindowIDs.contains($0.windowID) }
                 filter = SCContentFilter(display: display, excludingWindows: excluded)
             }
-            let width = min(max(2, display.width * 2), 3840)
-            let height = min(max(2, display.height * 2), 2160)
+            // Retina 2× often yields 4K; cap at 1440p to cut encode/CPU vs prior 4K ceiling.
+            let rawW = max(2, display.width * 2)
+            let rawH = max(2, display.height * 2)
+            let maxW = 2560
+            let maxH = 1440
+            let scale = min(1.0, min(Double(maxW) / Double(rawW), Double(maxH) / Double(rawH)))
+            let width = max(2, Int((Double(rawW) * scale).rounded(.down)) & ~1)
+            let height = max(2, Int((Double(rawH) * scale).rounded(.down)) & ~1)
             return (filter, width, height)
         case .window:
             guard let windowID,

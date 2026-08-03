@@ -2,11 +2,12 @@
  * Mid-take / save-time helpers for Loom-style rewind & trim.
  * Uses ffmpeg.wasm (same core as the editor) when sealed WebM parts must be
  * trimmed or concatenated. Active MediaRecorder chunks can be sliced without ffmpeg.
+ *
+ * FFmpeg is loaded only via dynamic import() when punch-in trim / concat actually
+ * needs it — timeslice blob slicing never pulls the wasm core.
  */
 
-import { FFmpeg } from '@ffmpeg/ffmpeg'
-import { fetchFile } from '@ffmpeg/util'
-import { getFFmpeg } from '../editor/ffmpegExport'
+import type { FFmpeg } from '@ffmpeg/ffmpeg'
 
 export type RecordingPart = {
   blob: Blob
@@ -19,6 +20,16 @@ async function safeDelete(ffmpeg: FFmpeg, name: string) {
   } catch {
     /* missing */
   }
+}
+
+/** Lazy-load editor ffmpeg singleton + fetchFile only when trim/concat runs. */
+async function loadFfmpegTools(onLog?: (msg: string) => void) {
+  const [{ getFFmpeg }, { fetchFile }] = await Promise.all([
+    import('../editor/ffmpegExport'),
+    import('@ffmpeg/util'),
+  ])
+  const ffmpeg = await getFFmpeg(onLog)
+  return { ffmpeg, fetchFile }
 }
 
 /** Best-effort duration from a blob (Chrome MediaRecorder WebM is usually readable). */
@@ -48,6 +59,7 @@ export async function measureBlobDurationMs(blob: Blob): Promise<number | null> 
 /**
  * Slice ~1s MediaRecorder timeslice chunks to approximately keepMs.
  * First chunk includes the WebM header — always keep at least one when keepMs > 0.
+ * Does not load ffmpeg.
  */
 export function sliceTimesliceChunks(
   chunks: Blob[],
@@ -69,7 +81,7 @@ export async function trimBlobToSeconds(
   onLog?: (msg: string) => void,
 ): Promise<Blob> {
   const end = Math.max(0.05, outSec)
-  const ffmpeg = await getFFmpeg(onLog)
+  const { ffmpeg, fetchFile } = await loadFfmpegTools(onLog)
   const inName = 'live_trim_in.webm'
   const outName = 'live_trim_out.webm'
   await safeDelete(ffmpeg, inName)
@@ -127,7 +139,7 @@ export async function concatRecordingParts(
   if (parts.length === 0) throw new Error('No recording parts to concat')
   if (parts.length === 1) return parts[0]!.blob
 
-  const ffmpeg = await getFFmpeg(onLog)
+  const { ffmpeg, fetchFile } = await loadFfmpegTools(onLog)
   const inNames: string[] = []
   for (let i = 0; i < parts.length; i++) {
     const name = `live_part_${i}.webm`

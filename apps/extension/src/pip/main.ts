@@ -85,6 +85,8 @@ function stopLoop() {
   }
 }
 
+let outCtx: CanvasRenderingContext2D | null = null
+
 function drawLoop() {
   if (!running) return
   raf = requestAnimationFrame(drawLoop)
@@ -95,8 +97,10 @@ function drawLoop() {
   if (canvas.width !== frame.width || canvas.height !== frame.height) {
     canvas.width = frame.width
     canvas.height = frame.height
+    outCtx = canvas.getContext('2d')
   }
-  const ctx = canvas.getContext('2d')
+  const ctx = outCtx ?? canvas.getContext('2d')
+  outCtx = ctx
   if (!ctx) return
   ctx.drawImage(frame, 0, 0)
 }
@@ -213,6 +217,10 @@ window.addEventListener('message', (event) => {
   }
   if (data.type === 'MPC_PIP_FILTER') {
     applyCameraFilter(normalizeCameraFilter(data.filter))
+  }
+  // Parent signals MediaRecorder active so blur can drop segment FPS further.
+  if (data.type === 'MPC_PIP_RECORDING') {
+    blurEngine?.setLowPower(Boolean(data.recording))
   }
   if (data.type === 'MPC_PIP_STOP') {
     stopCamera()

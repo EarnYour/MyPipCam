@@ -132,6 +132,8 @@ export function EditorApp() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  const playheadRef = useRef<HTMLDivElement>(null)
+  const timeCurrentRef = useRef<HTMLSpanElement>(null)
   const dragKindRef = useRef<DragKind | null>(null)
   const selectAnchorRef = useRef<number | null>(null)
   const autoRanRef = useRef(false)
@@ -142,6 +144,12 @@ export function EditorApp() {
   const inSecRef = useRef(0)
   const outSecRef = useRef(0)
   const skipRangesRef = useRef<TimeRange[]>([])
+  /** Latest playhead time — updated every RAF/timeupdate without React re-render. */
+  const currentRef = useRef(0)
+  const durationRef = useRef(0)
+  const lastUiSyncRef = useRef(0)
+  /** Throttle React `current` updates (transcript highlight, etc.) while playing. */
+  const UI_SYNC_MS = 200
 
   useEffect(() => {
     void loadApiSettings().then((s) => setHasKey(hasOpenAiKey(s)))
@@ -248,6 +256,35 @@ export function EditorApp() {
   inSecRef.current = inSec
   outSecRef.current = outSec
   skipRangesRef.current = skipRanges
+  durationRef.current = duration
+
+  /** Imperative playhead/time paint — avoids re-rendering EditorApp every frame. */
+  function paintPlayhead(t: number) {
+    currentRef.current = t
+    const d = durationRef.current
+    const pct = d > 0 ? (t / d) * 100 : 0
+    if (playheadRef.current) playheadRef.current.style.left = `${pct}%`
+    if (timeCurrentRef.current) timeCurrentRef.current.textContent = secLabel(t)
+    if (trackRef.current) trackRef.current.setAttribute('aria-valuenow', String(t))
+  }
+
+  /** Paint immediately; optionally throttle React state for secondary UI. */
+  function syncPlayhead(t: number, opts?: { forceState?: boolean }) {
+    paintPlayhead(t)
+    const force = opts?.forceState === true
+    const now = performance.now()
+    if (force || now - lastUiSyncRef.current >= UI_SYNC_MS) {
+      lastUiSyncRef.current = now
+      setCurrent(t)
+    }
+  }
+
+  // Seed / re-paint playhead when duration or media identity changes.
+  useEffect(() => {
+    paintPlayhead(currentRef.current)
+    // paintPlayhead reads refs only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, videoUrl])
 
   function pushUndo(prev: TimeRange[]) {
     setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), prev.map((r) => ({ ...r }))])
@@ -276,7 +313,7 @@ export function EditorApp() {
     skipGuardRef.current = true
     skipSeekingRef.current = false
     if (v) v.currentTime = next
-    setCurrent(next)
+    syncPlayhead(next, { forceState: true })
     const clear = () => {
       if (seekGenRef.current !== gen) return
       skipGuardRef.current = false
@@ -306,7 +343,7 @@ export function EditorApp() {
     const finish = (time: number, pause: boolean) => {
       if (seekGenRef.current !== gen) return
       if (pause && !v.paused) v.pause()
-      setCurrent(time)
+      syncPlayhead(time, { forceState: true })
       skipSeekingRef.current = false
       skipGuardRef.current = false
     }
@@ -512,7 +549,7 @@ export function EditorApp() {
   }
 
   function markSelectionStart() {
-    const start = clamp(current, inSec, outSec)
+    const start = clamp(currentRef.current, inSec, outSec)
     setSelection((sel) => ({
       start,
       end: sel
@@ -523,7 +560,7 @@ export function EditorApp() {
   }
 
   function markSelectionEnd() {
-    const end = clamp(current, inSec, outSec)
+    const end = clamp(currentRef.current, inSec, outSec)
     setSelection((sel) => ({
       start: sel
         ? Math.min(sel.start, end - MIN_RANGE)
@@ -534,13 +571,13 @@ export function EditorApp() {
   }
 
   function trimStartHere() {
-    const next = Math.min(current, outSec - MIN_RANGE)
+    const next = Math.min(currentRef.current, outSec - MIN_RANGE)
     setInSec(Math.max(0, next))
     setSuccess(`Trim start set to ${secLabel(Math.max(0, next))} (I)`)
   }
 
   function trimEndHere() {
-    const next = Math.max(current, inSec + MIN_RANGE)
+    const next = Math.max(currentRef.current, inSec + MIN_RANGE)
     setOutSec(Math.min(duration || next, next))
     setSuccess(`Trim end set to ${secLabel(Math.min(duration || next, next))} (O)`)
   }
@@ -767,7 +804,8 @@ export function EditorApp() {
     const syncAndSkip = () => {
       if (skipGuardRef.current || skipSeekingRef.current) return
       const t = v.currentTime
-      setCurrent(t)
+      // Imperative paint every frame; React state only on throttle / pause.
+      syncPlayhead(t, { forceState: v.paused })
 
       if (!previewEditsRef.current) return
 
@@ -783,7 +821,7 @@ export function EditorApp() {
           v.pause()
           skipGuardRef.current = true
           v.currentTime = outS
-          setCurrent(outS)
+          syncPlayhead(outS, { forceState: true })
           window.setTimeout(() => {
             skipGuardRef.current = false
           }, 40)
@@ -806,7 +844,11 @@ export function EditorApp() {
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(tick)
     }
-    const onPause = () => cancelAnimationFrame(raf)
+    const onPause = () => {
+      cancelAnimationFrame(raf)
+      // Flush latest time into React state when playback stops.
+      syncPlayhead(v.currentTime, { forceState: true })
+    }
     const onTime = () => {
       // Keep UI in sync while paused/scrubbing; also catch skips if RAF isn't running.
       syncAndSkip()
@@ -850,25 +892,25 @@ export function EditorApp() {
 
       if (key === 'j' || key === 'J') {
         e.preventDefault()
-        seekTo(current - (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE * 10))
+        seekTo(currentRef.current - (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE * 10))
         return
       }
 
       if (key === 'l' || key === 'L') {
         e.preventDefault()
-        seekTo(current + (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE * 10))
+        seekTo(currentRef.current + (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE * 10))
         return
       }
 
       if (key === 'ArrowLeft') {
         e.preventDefault()
-        seekTo(current - (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE))
+        seekTo(currentRef.current - (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE))
         return
       }
 
       if (key === 'ArrowRight') {
         e.preventDefault()
-        seekTo(current + (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE))
+        seekTo(currentRef.current + (e.shiftKey ? NUDGE_COARSE : NUDGE_FINE))
         return
       }
 
@@ -911,7 +953,8 @@ export function EditorApp() {
           cutSelection()
           return
         }
-        const hitIdx = cutRanges.findIndex((r) => current >= r.start && current < r.end)
+        const t = currentRef.current
+        const hitIdx = cutRanges.findIndex((r) => t >= r.start && t < r.end)
         if (hitIdx >= 0) {
           removeCutAt(hitIdx)
           return
@@ -922,8 +965,9 @@ export function EditorApp() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // Intentionally omit `current` — key handlers read currentRef to avoid rebinding every frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, current, inSec, outSec, selection, selectMode, cutRanges, undoStack, duration])
+  }, [busy, inSec, outSec, selection, selectMode, cutRanges, undoStack, duration])
 
   async function runExport(mode: 'download' | 'overwrite' | 'save-as') {
     if (!record) return
@@ -1068,7 +1112,6 @@ export function EditorApp() {
   const inPct = duration ? (inSec / duration) * 100 : 0
   const outPct = duration ? (outSec / duration) * 100 : 0
   const keepWidth = Math.max(0, outPct - inPct)
-  const playPct = duration ? (current / duration) * 100 : 0
   const selPct = selection
     ? {
         left: duration ? (selection.start / duration) * 100 : 0,
@@ -1159,7 +1202,8 @@ export function EditorApp() {
                 {playing ? '❚❚' : '▶'}
               </button>
               <span className="mono transport-time">
-                {secLabel(current)}
+                {/* Text updated imperatively in paintPlayhead — avoid React stomping every frame. */}
+                <span ref={timeCurrentRef} />
                 <span className="transport-sep">/</span>
                 {secLabel(duration)}
               </span>
@@ -1307,7 +1351,7 @@ export function EditorApp() {
                 }
                 aria-valuemin={0}
                 aria-valuemax={duration}
-                aria-valuenow={current}
+                aria-valuenow={currentRef.current}
                 onPointerDown={(e) =>
                   onTimelinePointerDown(e.shiftKey || selectMode ? 'select' : 'seek', e)
                 }
@@ -1398,7 +1442,11 @@ export function EditorApp() {
                   />
                 ))}
 
-                <div className="playhead" style={{ left: `${playPct}%` }} />
+                <div
+                  ref={playheadRef}
+                  className="playhead"
+                  style={{ left: `${duration ? (currentRef.current / duration) * 100 : 0}%` }}
+                />
 
                 <button
                   type="button"

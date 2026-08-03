@@ -13,8 +13,8 @@ import {
 } from '@mediapipe/tasks-vision'
 import type { BackgroundEffect } from './types'
 
-/** Background gaussian radius — soft enough to read as blur without a heavy frosted look. */
-const BLUR_PX = 8
+/** Background gaussian radius — applied at downscaled blur buffer, then upscaled. */
+const BLUR_PX = 6
 /**
  * Feather the person mask edge (px at mask resolution). Softens the cutout so hair /
  * shoulders blend into the blurred background instead of a hard stencil.
@@ -23,13 +23,24 @@ const MASK_FEATHER_PX = 5
 /** Slight confidence boost before feathering — expands the subject a touch so blur doesn't eat into the face. */
 const MASK_DILATE = 0.08
 /** Process at most this many segmentations per second (draw can reuse last frame). */
-const MAX_SEGMENT_FPS = 20
+const MAX_SEGMENT_FPS = 12
+/**
+ * Max long-edge for segmentation input. Selfie segmenter is trained small;
+ * downscaling is the largest CPU/GPU win vs feeding full 640² every frame.
+ */
+const SEG_MAX_EDGE = 256
+/** Blur the background at this fraction of output size, then upscale (cheaper than full-res CSS blur). */
+const BLUR_SCALE = 0.5
 
 function assetUrl(path: string): string {
   if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
     return chrome.runtime.getURL(path)
   }
   return `/${path.replace(/^\//, '')}`
+}
+
+function get2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
+  return canvas.getContext('2d', { willReadFrequently: false })
 }
 
 export class PersonBackgroundBlur {
@@ -40,10 +51,25 @@ export class PersonBackgroundBlur {
   private readonly maskCanvas = document.createElement('canvas')
   /** Softened alpha mask (gaussian feather) used for destination-in. */
   private readonly softMaskCanvas = document.createElement('canvas')
+  /** Downscaled frame fed to the segmenter (reused every frame). */
+  private readonly segInput = document.createElement('canvas')
+
+  private outCtx: CanvasRenderingContext2D | null = null
+  private blurCtx: CanvasRenderingContext2D | null = null
+  private personCtx: CanvasRenderingContext2D | null = null
+  private maskCtx: CanvasRenderingContext2D | null = null
+  private softMaskCtx: CanvasRenderingContext2D | null = null
+  private segCtx: CanvasRenderingContext2D | null = null
+
+  /** Reused mask ImageData buffer (avoids allocate-per-frame). */
+  private maskImageData: ImageData | null = null
+
   private lastTs = -1
   private lastSegmentAt = 0
   private busy = false
   private closed = false
+  /** When true, segment even less often (active recording / thermal pressure). */
+  private lowPower = false
 
   static async create(): Promise<PersonBackgroundBlur> {
     const engine = new PersonBackgroundBlur()
@@ -80,6 +106,38 @@ export class PersonBackgroundBlur {
     return Boolean(this.segmenter) && !this.closed
   }
 
+  /** Drop segmentation rate further while MediaRecorder is active. */
+  setLowPower(on: boolean) {
+    this.lowPower = on
+  }
+
+  private ensureOutputSize(vw: number, vh: number) {
+    if (this.output.width === vw && this.output.height === vh) return
+    this.output.width = vw
+    this.output.height = vh
+    this.personCanvas.width = vw
+    this.personCanvas.height = vh
+    const bw = Math.max(2, Math.round(vw * BLUR_SCALE))
+    const bh = Math.max(2, Math.round(vh * BLUR_SCALE))
+    this.blurCanvas.width = bw
+    this.blurCanvas.height = bh
+    this.outCtx = get2d(this.output)
+    this.blurCtx = get2d(this.blurCanvas)
+    this.personCtx = get2d(this.personCanvas)
+  }
+
+  private ensureSegSize(vw: number, vh: number): { sw: number; sh: number } {
+    const scale = Math.min(1, SEG_MAX_EDGE / Math.max(vw, vh))
+    const sw = Math.max(2, Math.round(vw * scale))
+    const sh = Math.max(2, Math.round(vh * scale))
+    if (this.segInput.width !== sw || this.segInput.height !== sh) {
+      this.segInput.width = sw
+      this.segInput.height = sh
+      this.segCtx = get2d(this.segInput)
+    }
+    return { sw, sh }
+  }
+
   /**
    * Segment + composite. Returns the output canvas, or null if not ready /
    * video has no frames yet. Reuses the previous output when throttled.
@@ -90,17 +148,11 @@ export class PersonBackgroundBlur {
     const vh = video.videoHeight
     if (!vw || !vh) return null
 
-    if (this.output.width !== vw || this.output.height !== vh) {
-      this.output.width = vw
-      this.output.height = vh
-      this.blurCanvas.width = vw
-      this.blurCanvas.height = vh
-      this.personCanvas.width = vw
-      this.personCanvas.height = vh
-    }
+    this.ensureOutputSize(vw, vh)
 
     const now = performance.now()
-    const minGap = 1000 / MAX_SEGMENT_FPS
+    const maxFps = this.lowPower ? MAX_SEGMENT_FPS * 0.6 : MAX_SEGMENT_FPS
+    const minGap = 1000 / Math.max(4, maxFps)
     if (this.busy || now - this.lastSegmentAt < minGap) {
       return this.output.width ? this.output : null
     }
@@ -112,12 +164,18 @@ export class PersonBackgroundBlur {
     this.lastTs = ts
 
     try {
-      const result = this.segmenter.segmentForVideo(video, ts)
+      const { sw, sh } = this.ensureSegSize(vw, vh)
+      const segCtx = this.segCtx
+      if (!segCtx) throw new Error('no seg ctx')
+      segCtx.drawImage(video, 0, 0, sw, sh)
+
+      const result = this.segmenter.segmentForVideo(this.segInput, ts)
       this.composite(video, result)
       result.close()
     } catch {
       // Fall back to raw frame so the bubble never goes blank.
-      const ctx = this.output.getContext('2d')
+      const ctx = this.outCtx ?? get2d(this.output)
+      this.outCtx = ctx
       if (ctx) {
         ctx.filter = 'none'
         ctx.drawImage(video, 0, 0, vw, vh)
@@ -134,7 +192,7 @@ export class PersonBackgroundBlur {
     const vh = this.output.height
     const mask = result.confidenceMasks?.[0]
     if (!mask) {
-      const ctx = this.output.getContext('2d')
+      const ctx = this.outCtx
       if (ctx) {
         ctx.filter = 'none'
         ctx.drawImage(video, 0, 0, vw, vh)
@@ -149,24 +207,31 @@ export class PersonBackgroundBlur {
       this.maskCanvas.height = mh
       this.softMaskCanvas.width = mw
       this.softMaskCanvas.height = mh
+      this.maskCtx = get2d(this.maskCanvas)
+      this.softMaskCtx = get2d(this.softMaskCanvas)
+      this.maskImageData = null
     }
 
-    const maskCtx = this.maskCanvas.getContext('2d')
-    const softMaskCtx = this.softMaskCanvas.getContext('2d')
-    const blurCtx = this.blurCanvas.getContext('2d')
-    const personCtx = this.personCanvas.getContext('2d')
-    const outCtx = this.output.getContext('2d')
+    const maskCtx = this.maskCtx
+    const softMaskCtx = this.softMaskCtx
+    const blurCtx = this.blurCtx
+    const personCtx = this.personCtx
+    const outCtx = this.outCtx
     if (!maskCtx || !softMaskCtx || !blurCtx || !personCtx || !outCtx) {
       mask.close()
       return
     }
 
     const floats = mask.getAsFloat32Array()
-    const imageData = maskCtx.createImageData(mw, mh)
+    let imageData = this.maskImageData
+    if (!imageData || imageData.width !== mw || imageData.height !== mh) {
+      imageData = maskCtx.createImageData(mw, mh)
+      this.maskImageData = imageData
+    }
     const data = imageData.data
     for (let i = 0; i < floats.length; i++) {
       // Dilate slightly so subsequent feather doesn't shrink the subject inward.
-      const v = Math.min(1, floats[i] + MASK_DILATE)
+      const v = Math.min(1, floats[i]! + MASK_DILATE)
       const a = Math.max(0, Math.min(255, Math.round(v * 255)))
       const o = i * 4
       data[o] = 255
@@ -183,13 +248,13 @@ export class PersonBackgroundBlur {
     softMaskCtx.drawImage(this.maskCanvas, 0, 0)
     softMaskCtx.filter = 'none'
 
-    // Soft blurred background
+    // Soft blurred background at reduced resolution, then upscale.
     blurCtx.save()
     blurCtx.filter = `blur(${BLUR_PX}px)`
-    blurCtx.drawImage(video, 0, 0, vw, vh)
+    blurCtx.drawImage(video, 0, 0, this.blurCanvas.width, this.blurCanvas.height)
     blurCtx.restore()
 
-    // Person cutout with feathered alpha
+    // Person cutout with feathered alpha (full output resolution).
     personCtx.clearRect(0, 0, vw, vh)
     personCtx.filter = 'none'
     personCtx.drawImage(video, 0, 0, vw, vh)
@@ -198,7 +263,8 @@ export class PersonBackgroundBlur {
     personCtx.globalCompositeOperation = 'source-over'
 
     outCtx.clearRect(0, 0, vw, vh)
-    outCtx.drawImage(this.blurCanvas, 0, 0)
+    outCtx.imageSmoothingEnabled = true
+    outCtx.drawImage(this.blurCanvas, 0, 0, vw, vh)
     outCtx.drawImage(this.personCanvas, 0, 0)
   }
 
@@ -210,6 +276,13 @@ export class PersonBackgroundBlur {
       /* ignore */
     }
     this.segmenter = null
+    this.outCtx = null
+    this.blurCtx = null
+    this.personCtx = null
+    this.maskCtx = null
+    this.softMaskCtx = null
+    this.segCtx = null
+    this.maskImageData = null
   }
 }
 

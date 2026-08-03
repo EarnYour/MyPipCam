@@ -11,9 +11,19 @@ export type SilenceDetectOptions = {
   paddingSec?: number
 }
 
+/** Target rate for RMS analysis — full decode stays at native rate, then we downsample. */
+const ANALYSIS_RATE = 8000
+/** Yield to the event loop every this many samples while scanning (keep UI responsive). */
+const YIELD_EVERY_SAMPLES = 480_000
+
 /**
  * Decode audio from a media blob and find silent ranges via RMS energy.
  * Works client-side with Web Audio — no network.
+ *
+ * Performance: after decode, mixes to mono and downsamples to ~8 kHz before the
+ * RMS scan so long takes don't walk tens of millions of samples on the main thread.
+ * Decode itself still uses decodeAudioData (full file) — TODO: move decode+scan
+ * to a Web Worker / OfflineAudioContext pipeline when we add a worker bundle.
  */
 export async function detectSilenceRanges(
   blob: Blob,
@@ -25,20 +35,21 @@ export async function detectSilenceRanges(
   const paddingSec = options.paddingSec ?? 0.08
 
   const buffer = await decodeAudio(blob)
-  const channel = mixToMono(buffer)
-  const sampleRate = buffer.sampleRate
+  const duration = buffer.duration
+  const mono = mixToMono(buffer)
+  const { data: channel, sampleRate } = downsampleForAnalysis(mono, buffer.sampleRate)
   const hop = Math.max(1, Math.floor(hopSec * sampleRate))
 
   let peak = 0
   for (let i = 0; i < channel.length; i++) {
     const a = Math.abs(channel[i]!)
     if (a > peak) peak = a
+    if (i > 0 && i % YIELD_EVERY_SAMPLES === 0) await yieldToMain()
   }
   if (peak < 1e-6) {
     // Entirely silent — propose cutting everything except a tiny head/tail keep
-    const dur = buffer.duration
-    if (dur <= minSilenceSec * 2) return []
-    return [{ start: paddingSec, end: Math.max(paddingSec, dur - paddingSec) }]
+    if (duration <= minSilenceSec * 2) return []
+    return [{ start: paddingSec, end: Math.max(paddingSec, duration - paddingSec) }]
   }
 
   const silentFlags: boolean[] = []
@@ -51,6 +62,7 @@ export async function detectSilenceRanges(
     }
     const rms = Math.sqrt(sum / Math.max(1, end - i))
     silentFlags.push(rms / peak < threshold)
+    if (silentFlags.length % 4000 === 0) await yieldToMain()
   }
 
   const raw: TimeRange[] = []
@@ -66,7 +78,7 @@ export async function detectSilenceRanges(
     const end = (i * hop) / sampleRate
     if (end - start >= minSilenceSec) {
       raw.push({
-        start: Math.min(buffer.duration, start + paddingSec),
+        start: Math.min(duration, start + paddingSec),
         end: Math.max(0, end - paddingSec),
       })
     }
@@ -87,8 +99,9 @@ async function decodeAudio(blob: Blob): Promise<AudioBuffer> {
 
 function mixToMono(buffer: AudioBuffer): Float32Array {
   const len = buffer.length
-  const out = new Float32Array(len)
   const n = buffer.numberOfChannels
+  if (n === 1) return buffer.getChannelData(0).slice()
+  const out = new Float32Array(len)
   for (let c = 0; c < n; c++) {
     const data = buffer.getChannelData(c)
     for (let i = 0; i < len; i++) {
@@ -96,6 +109,37 @@ function mixToMono(buffer: AudioBuffer): Float32Array {
     }
   }
   return out
+}
+
+/** Box-downsample toward ANALYSIS_RATE so RMS walks far fewer samples. */
+function downsampleForAnalysis(
+  channel: Float32Array,
+  sampleRate: number,
+): { data: Float32Array; sampleRate: number } {
+  if (sampleRate <= ANALYSIS_RATE * 1.1) {
+    return { data: channel, sampleRate }
+  }
+  const ratio = sampleRate / ANALYSIS_RATE
+  const outLen = Math.max(1, Math.floor(channel.length / ratio))
+  const out = new Float32Array(outLen)
+  for (let i = 0; i < outLen; i++) {
+    const start = Math.floor(i * ratio)
+    const end = Math.min(channel.length, Math.floor((i + 1) * ratio))
+    let sum = 0
+    for (let j = start; j < end; j++) sum += channel[j]!
+    out[i] = sum / Math.max(1, end - start)
+  }
+  return { data: out, sampleRate: ANALYSIS_RATE }
+}
+
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve())
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
 }
 
 /** Normalize an unordered pair into a TimeRange. */

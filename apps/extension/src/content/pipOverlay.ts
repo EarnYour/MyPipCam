@@ -1906,6 +1906,18 @@ class TabOverlay {
     }
   }
 
+  /** Tell the PiP iframe to drop blur segmentation FPS while MediaRecorder is hot. */
+  private postPipRecordingState(recording: boolean) {
+    try {
+      this.frame?.contentWindow?.postMessage(
+        { type: 'MPC_PIP_RECORDING', token: this.pipChannelToken, recording },
+        '*',
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Called by background when MediaRecorder has actually started. */
   beginRecordingClock() {
     this.state.phase = 'recording'
@@ -1916,6 +1928,7 @@ class TabOverlay {
     this.setDockBusy(false)
     this.setPausedUi(false)
     this.enterRecordingUi()
+    this.postPipRecordingState(true)
   }
 
   /**
@@ -1943,6 +1956,7 @@ class TabOverlay {
     this.pauseStartedAt = 0
     this.timerEl.textContent = '0:00'
     this.state.phase = 'countdown'
+    this.postPipRecordingState(false)
     this.pauseBtn.innerHTML = iconPause()
     this.pauseBtn.title = 'Pause'
     this.pauseBtn.setAttribute('aria-label', 'Pause recording')
@@ -2804,6 +2818,10 @@ class TabOverlay {
       token: this.pipChannelToken,
     })
     try {
+      this.frame?.contentWindow?.postMessage(
+        { type: 'MPC_PIP_RECORDING', token: this.pipChannelToken, recording: false },
+        '*',
+      )
       this.frame?.contentWindow?.postMessage(
         { type: 'MPC_PIP_STOP', token: this.pipChannelToken },
         '*',
