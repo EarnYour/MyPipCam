@@ -17,16 +17,22 @@
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
-	<!-- Detect unpacked MyPipCam installs for “Open in Chrome…” -->
+	<!-- Best-effort Chromium profile probes for “Open in Chrome…”.
+	     On recent macOS, sandbox may still deny reading Preferences (EPERM) while
+	     allowing fileExists on known paths — detection falls back to metadata probes
+	     and opens the HTTPS bridge without a false “Not Detected” dialog. -->
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
 		<string>Library/Application Support/Google/Chrome/</string>
 		<string>Library/Application Support/Google/Chrome Canary/</string>
 		<string>Library/Application Support/Google/Chrome Beta/</string>
+		<string>Library/Application Support/Google/Chrome for Testing/</string>
+		<string>Library/Application Support/Google/ChromeForTesting/</string>
 		<string>Library/Application Support/Chromium/</string>
 		<string>Library/Application Support/BraveSoftware/Brave-Browser/</string>
 		<string>Library/Application Support/Microsoft Edge/</string>
 		<string>Library/Application Support/Arc/</string>
+		<string>Library/Application Support/Arc/User Data/</string>
 		<string>Library/Application Support/Vivaldi/</string>
 		<!-- One-time LoomCam → MyPipCam UserDefaults migration -->
 		<string>Library/Containers/com.stevenmartinez.LoomCam/Data/Library/Preferences/</string>
