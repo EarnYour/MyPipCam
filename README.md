@@ -311,6 +311,7 @@ Record your display/screen in OBS as usual. MyPipCam sits on top of your desktop
 
 | Action | How |
 | --- | --- |
+| Show / Hide Bubble | Menu bar icon (also Hide in bubble ⋯ / right-click; Show restores after Hide, Cmd+W, or Cmd+H) |
 | Move | Drag the bubble |
 | Resize | Scroll while hovering, or right-click → Size |
 | Switch camera | Hover → video icon, or right-click → Camera |

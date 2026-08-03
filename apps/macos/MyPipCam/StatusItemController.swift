@@ -10,19 +10,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let settings: BubbleSettings
     private let libraryStore: LibraryFolderStore
     private let onQuit: () -> Void
+    private let isBubbleVisible: () -> Bool
     private let onShowBubble: () -> Void
+    private let onHideBubble: () -> Void
+    private var showHideItem: NSMenuItem?
 
     init(
         loginItem: LoginItemManager,
         settings: BubbleSettings,
         libraryStore: LibraryFolderStore? = nil,
+        isBubbleVisible: @escaping () -> Bool,
         onShowBubble: @escaping () -> Void,
+        onHideBubble: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.loginItem = loginItem
         self.settings = settings
         self.libraryStore = libraryStore ?? .shared
+        self.isBubbleVisible = isBubbleVisible
         self.onShowBubble = onShowBubble
+        self.onHideBubble = onHideBubble
         self.onQuit = onQuit
         super.init()
     }
@@ -43,9 +50,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // auto-enablement would re-enable items whose target responds.
         menu.autoenablesItems = false
 
-        let showItem = NSMenuItem(title: "Show Bubble", action: #selector(showBubble), keyEquivalent: "s")
-        showItem.target = self
-        menu.addItem(showItem)
+        let showHideItem = NSMenuItem(
+            title: "Show Bubble",
+            action: #selector(toggleBubbleVisibility),
+            keyEquivalent: "s"
+        )
+        showHideItem.target = self
+        menu.addItem(showHideItem)
+        self.showHideItem = showHideItem
 
         menu.addItem(NSMenuItem.separator())
 
@@ -138,6 +150,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshLoginItemState()
         refreshLibraryMenuState()
         refreshRecordMenuState()
+        refreshShowHideMenuState()
+    }
+
+    private func refreshShowHideMenuState() {
+        showHideItem?.title = isBubbleVisible() ? "Hide Bubble" : "Show Bubble"
     }
 
     private func refreshRecordMenuState() {
@@ -164,8 +181,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         revealLibraryItem?.isEnabled = libraryStore.hasLibrary
     }
 
-    @objc private func showBubble() {
-        onShowBubble()
+    @objc private func toggleBubbleVisibility() {
+        if isBubbleVisible() {
+            onHideBubble()
+        } else {
+            onShowBubble()
+        }
     }
 
     @objc private func toggleRecord() {

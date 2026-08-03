@@ -30,6 +30,7 @@ import {
 import {
   detectSilenceRanges,
   mergeRanges,
+  nextPlayableTime,
   normalizeRange,
   rangeContaining,
   type TimeRange,
@@ -125,6 +126,8 @@ export function EditorApp() {
   const [playing, setPlaying] = useState(false)
   const [previewEdits, setPreviewEdits] = useState(true)
   const [zoom, setZoom] = useState(1)
+  /** When on, drag on the timeline selects a cut range (no Shift needed). */
+  const [selectMode, setSelectMode] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -133,6 +136,12 @@ export function EditorApp() {
   const selectAnchorRef = useRef<number | null>(null)
   const autoRanRef = useRef(false)
   const skipGuardRef = useRef(false)
+  const skipSeekingRef = useRef(false)
+  const seekGenRef = useRef(0)
+  const previewEditsRef = useRef(true)
+  const inSecRef = useRef(0)
+  const outSecRef = useRef(0)
+  const skipRangesRef = useRef<TimeRange[]>([])
 
   useEffect(() => {
     void loadApiSettings().then((s) => setHasKey(hasOpenAiKey(s)))
@@ -163,7 +172,7 @@ export function EditorApp() {
       setFocusHint('Silences appear as yellow markers. Convert them to cuts, or Apply on export.')
     } else if (focus === 'trim') {
       setFocusHint(
-        'Drag orange handles to trim. Shift-drag on the timeline to select a middle section, then Cut out (or Delete).',
+        'Drag the orange ends to trim start/end. Select a middle range, then Cut out to remove it.',
       )
     } else if (focus === 'filler') {
       setFillerOpen(true)
@@ -243,6 +252,11 @@ export function EditorApp() {
     return mergeRanges(ranges)
   }, [cutRanges, applySilences, silenceRanges, applyFillers, fillerRanges])
 
+  previewEditsRef.current = previewEdits
+  inSecRef.current = inSec
+  outSecRef.current = outSec
+  skipRangesRef.current = skipRanges
+
   function pushUndo(prev: TimeRange[]) {
     setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), prev.map((r) => ({ ...r }))])
   }
@@ -266,12 +280,95 @@ export function EditorApp() {
   function seekTo(t: number) {
     const v = videoRef.current
     const next = clamp(t, 0, duration || t)
+    const gen = ++seekGenRef.current
     skipGuardRef.current = true
+    skipSeekingRef.current = false
     if (v) v.currentTime = next
     setCurrent(next)
-    window.setTimeout(() => {
+    const clear = () => {
+      if (seekGenRef.current !== gen) return
       skipGuardRef.current = false
-    }, 40)
+    }
+    v?.addEventListener('seeked', clear, { once: true })
+    window.setTimeout(clear, 160)
+  }
+
+  /** Jump the element out of a remove range; retries if keyframe snap lands back inside. */
+  function skipVideoPastRemoves(v: HTMLVideoElement, fromTime: number) {
+    if (skipSeekingRef.current || skipGuardRef.current) return
+    if (!previewEditsRef.current) return
+
+    const inS = inSecRef.current
+    const outS = outSecRef.current
+    const removes = skipRangesRef.current
+    const mapped = nextPlayableTime(fromTime, inS, outS, removes)
+
+    if (!mapped.ended && Math.abs(mapped.time - fromTime) < 1e-4) return
+
+    skipSeekingRef.current = true
+    skipGuardRef.current = true
+    const gen = ++seekGenRef.current
+    let attempts = 0
+    let target = mapped.ended ? outS : mapped.time
+
+    const finish = (time: number, pause: boolean) => {
+      if (seekGenRef.current !== gen) return
+      if (pause && !v.paused) v.pause()
+      setCurrent(time)
+      skipSeekingRef.current = false
+      skipGuardRef.current = false
+    }
+
+    const step = () => {
+      if (seekGenRef.current !== gen) return
+      attempts += 1
+      v.currentTime = target
+
+      const onSeeked = () => {
+        if (seekGenRef.current !== gen) return
+        const landed = v.currentTime
+
+        if (mapped.ended || landed >= outS - 0.02) {
+          finish(outS, true)
+          if (Math.abs(landed - outS) > 0.02) v.currentTime = outS
+          return
+        }
+
+        const still = rangeContaining(removes, landed)
+        if (still && landed < still.end - 1e-3) {
+          // Keyframe snap put us back inside the cut — nudge further ahead.
+          if (attempts >= 24) {
+            finish(Math.min(outS, still.end), still.end >= outS - 0.02)
+            return
+          }
+          target = Math.min(outS, Math.max(still.end, landed + 0.12 * attempts))
+          step()
+          return
+        }
+
+        // Landed outside removes (or exactly on a keep boundary).
+        const again = nextPlayableTime(landed, inS, outS, removes)
+        if (again.ended) {
+          finish(outS, true)
+          v.currentTime = outS
+          return
+        }
+        if (again.time > landed + 1e-3) {
+          target = again.time
+          step()
+          return
+        }
+        finish(landed, false)
+      }
+
+      v.addEventListener('seeked', onSeeked, { once: true })
+    }
+
+    if (mapped.ended) {
+      if (!v.paused) v.pause()
+      target = outS
+    }
+    step()
   }
 
   function clientXToTime(clientX: number) {
@@ -351,7 +448,7 @@ export function EditorApp() {
     const scroller = timelineRef.current
     if (!scroller || !duration) return
 
-    if (kind === 'select' || (kind === 'seek' && e.shiftKey)) {
+    if (kind === 'select' || (kind === 'seek' && (e.shiftKey || selectMode))) {
       const t = clientXToTime(e.clientX)
       selectAnchorRef.current = t
       dragKindRef.current = 'select'
@@ -397,7 +494,7 @@ export function EditorApp() {
 
   function cutSelection() {
     if (!selection || selection.end - selection.start < MIN_RANGE) {
-      setError('Select a range first — Shift-drag on the timeline, or mark [ and ].')
+      setError('Select a range first — use Select range, then drag on the timeline (or mark start/end).')
       return
     }
     const clipped = {
@@ -408,9 +505,52 @@ export function EditorApp() {
       setError('Selection is outside the keep range.')
       return
     }
-    commitCuts([...cutRanges, clipped], `Cut ${secLabel(clipped.end - clipped.start)} from timeline.`)
+    const removed = clipped.end - clipped.start
+    const nextCuts = mergeRanges([...cutRanges, clipped])
+    commitCuts(
+      nextCuts,
+      `Removed ${secLabel(removed)} from the middle. Undo if that wasn’t right.`,
+    )
     setSelection(null)
+    setSelectMode(false)
     setError(null)
+    // Don't leave the playhead inside the deleted range (preview would look "stuck").
+    const join = nextPlayableTime(clipped.start, inSec, outSec, nextCuts)
+    seekTo(join.ended ? Math.max(inSec, clipped.start) : join.time)
+  }
+
+  function markSelectionStart() {
+    const start = clamp(current, inSec, outSec)
+    setSelection((sel) => ({
+      start,
+      end: sel
+        ? Math.max(sel.end, start + MIN_RANGE)
+        : Math.min(outSec, start + Math.max(1, (outSec - inSec) * 0.1)),
+    }))
+    setSelectMode(true)
+  }
+
+  function markSelectionEnd() {
+    const end = clamp(current, inSec, outSec)
+    setSelection((sel) => ({
+      start: sel
+        ? Math.min(sel.start, end - MIN_RANGE)
+        : Math.max(inSec, end - Math.max(1, (outSec - inSec) * 0.1)),
+      end,
+    }))
+    setSelectMode(true)
+  }
+
+  function trimStartHere() {
+    const next = Math.min(current, outSec - MIN_RANGE)
+    setInSec(Math.max(0, next))
+    setSuccess(`Trim start set to ${secLabel(Math.max(0, next))} (I)`)
+  }
+
+  function trimEndHere() {
+    const next = Math.max(current, inSec + MIN_RANGE)
+    setOutSec(Math.min(duration || next, next))
+    setSuccess(`Trim end set to ${secLabel(Math.min(duration || next, next))} (O)`)
   }
 
   function removeCutAt(index: number) {
@@ -625,50 +765,75 @@ export function EditorApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record, editorFocus])
 
-  // Preview: skip cut / applied overlay regions while playing.
+  // Preview: skip cut / applied overlay regions while playing (RAF + seeked retries).
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
 
-    const onTime = () => {
-      if (skipGuardRef.current) return
+    let raf = 0
+
+    const syncAndSkip = () => {
+      if (skipGuardRef.current || skipSeekingRef.current) return
       const t = v.currentTime
       setCurrent(t)
 
-      if (!previewEdits) return
+      if (!previewEditsRef.current) return
 
-      if (t < inSec - 0.02) {
-        skipGuardRef.current = true
-        v.currentTime = inSec
-        skipGuardRef.current = false
+      const inS = inSecRef.current
+      const outS = outSecRef.current
+
+      if (t < inS - 0.02) {
+        skipVideoPastRemoves(v, inS)
         return
       }
-      if (t >= outSec - 0.02) {
+      if (t >= outS - 0.02) {
         if (!v.paused) {
           v.pause()
           skipGuardRef.current = true
-          v.currentTime = outSec
-          skipGuardRef.current = false
+          v.currentTime = outS
+          setCurrent(outS)
+          window.setTimeout(() => {
+            skipGuardRef.current = false
+          }, 40)
         }
         return
       }
 
-      const hit = rangeContaining(skipRanges, t)
-      if (hit) {
-        skipGuardRef.current = true
-        if (hit.end >= outSec - 0.02) {
-          v.pause()
-          v.currentTime = outSec
-        } else {
-          v.currentTime = hit.end + 0.001
-        }
-        skipGuardRef.current = false
+      const hit = rangeContaining(skipRangesRef.current, t)
+      if (hit) skipVideoPastRemoves(v, t)
+    }
+
+    const tick = () => {
+      syncAndSkip()
+      if (!v.paused && !v.ended) {
+        raf = requestAnimationFrame(tick)
       }
     }
 
+    const onPlay = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(tick)
+    }
+    const onPause = () => cancelAnimationFrame(raf)
+    const onTime = () => {
+      // Keep UI in sync while paused/scrubbing; also catch skips if RAF isn't running.
+      syncAndSkip()
+    }
+
+    v.addEventListener('play', onPlay)
+    v.addEventListener('pause', onPause)
     v.addEventListener('timeupdate', onTime)
-    return () => v.removeEventListener('timeupdate', onTime)
-  }, [previewEdits, inSec, outSec, skipRanges])
+    if (!v.paused) raf = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      v.removeEventListener('play', onPlay)
+      v.removeEventListener('pause', onPause)
+      v.removeEventListener('timeupdate', onTime)
+    }
+    // skipVideoPastRemoves closes over stable refs; rebind when element identity changes only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -717,35 +882,34 @@ export function EditorApp() {
 
       if (key === 'i' || key === 'I') {
         e.preventDefault()
-        setInSec(Math.min(current, outSec - MIN_RANGE))
-        setSuccess(`In set to ${secLabel(Math.min(current, outSec - MIN_RANGE))}`)
+        trimStartHere()
         return
       }
 
       if (key === 'o' || key === 'O') {
         e.preventDefault()
-        setOutSec(Math.max(current, inSec + MIN_RANGE))
-        setSuccess(`Out set to ${secLabel(Math.max(current, inSec + MIN_RANGE))}`)
+        trimEndHere()
         return
       }
 
       if (key === '[') {
         e.preventDefault()
-        const start = clamp(current, inSec, outSec)
-        setSelection((sel) => {
-          const end = sel ? Math.max(sel.end, start + MIN_RANGE) : Math.min(outSec, start + 1)
-          return { start, end: Math.max(end, start + MIN_RANGE) }
-        })
+        markSelectionStart()
         return
       }
 
       if (key === ']') {
         e.preventDefault()
-        const end = clamp(current, inSec, outSec)
-        setSelection((sel) => {
-          const start = sel ? Math.min(sel.start, end - MIN_RANGE) : Math.max(inSec, end - 1)
-          return { start: Math.min(start, end - MIN_RANGE), end }
-        })
+        markSelectionEnd()
+        return
+      }
+
+      if (key === 'Escape') {
+        if (selection || selectMode) {
+          e.preventDefault()
+          setSelection(null)
+          setSelectMode(false)
+        }
         return
       }
 
@@ -760,14 +924,14 @@ export function EditorApp() {
           removeCutAt(hitIdx)
           return
         }
-        setError('Nothing to cut — Shift-drag a range first, or place the playhead on a cut.')
+        setError('Nothing to cut — select a range first, or place the playhead on a cut.')
       }
     }
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, current, inSec, outSec, selection, cutRanges, undoStack])
+  }, [busy, current, inSec, outSec, selection, selectMode, cutRanges, undoStack, duration])
 
   async function runExport(mode: 'download' | 'overwrite' | 'save-as') {
     if (!record) return
@@ -861,10 +1025,28 @@ export function EditorApp() {
     const v = videoRef.current
     if (!v) return
     if (v.paused) {
-      if (previewEdits && (v.currentTime < inSec || v.currentTime >= outSec)) {
-        v.currentTime = inSec
+      if (previewEdits) {
+        let startFrom = v.currentTime
+        if (startFrom < inSec || startFrom >= outSec - 0.02) {
+          startFrom = inSec
+        }
+        const mapped = nextPlayableTime(startFrom, inSec, outSec, skipRanges)
+        if (mapped.ended) {
+          const restart = nextPlayableTime(inSec, inSec, outSec, skipRanges)
+          if (restart.ended) {
+            setError('Nothing left to play — loosen your cuts or trim.')
+            return
+          }
+          seekTo(restart.time)
+        } else if (Math.abs(mapped.time - v.currentTime) > 1e-3) {
+          seekTo(mapped.time)
+        }
       }
-      await v.play()
+      try {
+        await v.play()
+      } catch {
+        /* autoplay / abort */
+      }
     } else {
       v.pause()
     }
@@ -1018,37 +1200,72 @@ export function EditorApp() {
 
           <div className="timeline-block">
             <div className="timeline-meta">
-              <span className="mono">In {secLabel(inSec)}</span>
-              <span className="muted timeline-hint">
-                Scrub · Shift-drag select · Delete cut · ⌘Z undo · ⌘/Ctrl-scroll zoom
+              <span className="mono" title="Trim start (orange left handle · I)">
+                Start {secLabel(inSec)}
               </span>
-              <span className="mono">Out {secLabel(outSec)}</span>
+              <span className="muted timeline-hint">
+                {selectMode
+                  ? 'Select mode on — drag on the timeline to highlight what to remove'
+                  : 'Drag orange ends to trim · Select a range and Cut out to remove the middle'}
+              </span>
+              <span className="mono" title="Trim end (orange right handle · O)">
+                End {secLabel(outSec)}
+              </span>
             </div>
 
-            <div className="timeline-toolbar">
+            <div className="timeline-toolbar" role="toolbar" aria-label="Trim and cut controls">
               <div className="timeline-toolbar-left">
+                <button
+                  type="button"
+                  onClick={() => trimStartHere()}
+                  title="Trim start to playhead (I)"
+                >
+                  Trim start
+                </button>
+                <button
+                  type="button"
+                  onClick={() => trimEndHere()}
+                  title="Trim end to playhead (O)"
+                >
+                  Trim end
+                </button>
+                <button
+                  type="button"
+                  className={selectMode ? 'is-active' : undefined}
+                  aria-pressed={selectMode}
+                  onClick={() => {
+                    setSelectMode((on) => {
+                      if (on) setSelection(null)
+                      return !on
+                    })
+                  }}
+                  title="Drag on the timeline to select a middle section (or hold Shift while dragging)"
+                >
+                  Select range
+                </button>
                 <button
                   type="button"
                   className="primary"
                   disabled={!selection}
                   onClick={() => cutSelection()}
-                  title="Cut out the selected range (Delete)"
+                  title="Remove the selected middle section (Delete / Backspace)"
                 >
-                  Cut out
+                  Cut out selection
                 </button>
                 <button
                   type="button"
                   disabled={undoStack.length === 0}
                   onClick={() => undoCut()}
-                  title="Undo last cut (⌘Z)"
+                  title="Undo last cut (⌘Z / Ctrl+Z)"
                 >
-                  Undo
+                  Undo{undoStack.length > 0 ? ` (${undoStack.length})` : ''}
                 </button>
                 <button
                   type="button"
                   className="ghost"
                   disabled={cutRanges.length === 0}
                   onClick={() => clearAllCuts()}
+                  title="Remove all cut-out regions"
                 >
                   Clear cuts
                 </button>
@@ -1060,6 +1277,7 @@ export function EditorApp() {
                   disabled={zoom <= 1}
                   onClick={() => setZoom((z) => clamp(z - 0.5, 1, 6))}
                   aria-label="Zoom out"
+                  title="Zoom out (⌘/Ctrl-scroll)"
                 >
                   −
                 </button>
@@ -1070,6 +1288,7 @@ export function EditorApp() {
                   disabled={zoom >= 6}
                   onClick={() => setZoom((z) => clamp(z + 0.5, 1, 6))}
                   aria-label="Zoom in"
+                  title="Zoom in (⌘/Ctrl-scroll)"
                 >
                   +
                 </button>
@@ -1078,7 +1297,7 @@ export function EditorApp() {
 
             <div
               ref={timelineRef}
-              className="timeline-scroll"
+              className={`timeline-scroll${selectMode ? ' is-select-mode' : ''}`}
               onPointerMove={onTimelinePointerMove}
               onPointerUp={onTimelinePointerUp}
               onPointerCancel={onTimelinePointerUp}
@@ -1086,14 +1305,20 @@ export function EditorApp() {
             >
               <div
                 ref={trackRef}
-                className="timeline"
+                className={`timeline${selectMode ? ' is-select-mode' : ''}`}
                 style={{ width: `${zoom * 100}%` }}
                 role="slider"
-                aria-label="Edit timeline"
+                aria-label={
+                  selectMode
+                    ? 'Edit timeline — drag to select a range to cut out'
+                    : 'Edit timeline — drag orange ends to trim, or turn on Select range'
+                }
                 aria-valuemin={0}
                 aria-valuemax={duration}
                 aria-valuenow={current}
-                onPointerDown={(e) => onTimelinePointerDown(e.shiftKey ? 'select' : 'seek', e)}
+                onPointerDown={(e) =>
+                  onTimelinePointerDown(e.shiftKey || selectMode ? 'select' : 'seek', e)
+                }
               >
                 <div className="timeline-dim left" style={{ width: `${inPct}%` }} />
                 <div className="timeline-dim right" style={{ width: `${100 - outPct}%` }} />
@@ -1108,13 +1333,14 @@ export function EditorApp() {
                         left: `${duration ? (r.start / duration) * 100 : 0}%`,
                         width: `${duration ? ((r.end - r.start) / duration) * 100 : 0}%`,
                       }}
-                      title={`Cut ${secLabel(r.start)}–${secLabel(r.end)}`}
+                      title={`Cut out ${secLabel(r.start)}–${secLabel(r.end)} (−${secLabel(r.end - r.start)})`}
                     />
                     <button
                       type="button"
                       className="cut-handle cut-handle--start"
                       style={{ left: `${duration ? (r.start / duration) * 100 : 0}%` }}
-                      aria-label={`Cut ${i + 1} start`}
+                      aria-label={`Adjust cut ${i + 1} start`}
+                      title="Drag to adjust cut start"
                       onPointerDown={(e) =>
                         onTimelinePointerDown({ type: 'cutStart', index: i }, e)
                       }
@@ -1123,7 +1349,8 @@ export function EditorApp() {
                       type="button"
                       className="cut-handle cut-handle--end"
                       style={{ left: `${duration ? (r.end / duration) * 100 : 0}%` }}
-                      aria-label={`Cut ${i + 1} end`}
+                      aria-label={`Adjust cut ${i + 1} end`}
+                      title="Drag to adjust cut end"
                       onPointerDown={(e) =>
                         onTimelinePointerDown({ type: 'cutEnd', index: i }, e)
                       }
@@ -1136,12 +1363,14 @@ export function EditorApp() {
                     <div
                       className="selection"
                       style={{ left: `${selPct.left}%`, width: `${selPct.width}%` }}
+                      title={`Will remove ${secLabel(selection!.end - selection!.start)} from the middle`}
                     />
                     <button
                       type="button"
                       className="sel-handle sel-handle--start"
                       style={{ left: `${selPct.left}%` }}
                       aria-label="Selection start"
+                      title="Drag to adjust selection start"
                       onPointerDown={(e) => onTimelinePointerDown('selStart', e)}
                     />
                     <button
@@ -1149,6 +1378,7 @@ export function EditorApp() {
                       className="sel-handle sel-handle--end"
                       style={{ left: `${selPct.left + selPct.width}%` }}
                       aria-label="Selection end"
+                      title="Drag to adjust selection end"
                       onPointerDown={(e) => onTimelinePointerDown('selEnd', e)}
                     />
                   </>
@@ -1182,18 +1412,27 @@ export function EditorApp() {
                   type="button"
                   className="trim-handle trim-handle--in"
                   style={{ left: `${inPct}%` }}
-                  aria-label="Trim in"
+                  aria-label="Trim start"
+                  title="Drag to trim start (I at playhead)"
+                  data-label="Start"
                   onPointerDown={(e) => onTimelinePointerDown('in', e)}
                 />
                 <button
                   type="button"
                   className="trim-handle trim-handle--out"
                   style={{ left: `${outPct}%` }}
-                  aria-label="Trim out"
+                  aria-label="Trim end"
+                  title="Drag to trim end (O at playhead)"
+                  data-label="End"
                   onPointerDown={(e) => onTimelinePointerDown('out', e)}
                 />
               </div>
             </div>
+
+            <p className="timeline-howto muted">
+              Drag ends to trim · Select a range and Cut out to remove the middle · Undo undoes cuts
+              (⌘Z)
+            </p>
 
             <div className="timeline-legend muted">
               <span className="leg keep-leg">Keep</span>
@@ -1204,16 +1443,30 @@ export function EditorApp() {
             </div>
 
             {selection && (
-              <div className="selection-bar">
-                <span className="mono">
-                  Selected {secLabel(selection.start)} – {secLabel(selection.end)} (
-                  {secLabel(selection.end - selection.start)})
+              <div className="selection-bar" role="status">
+                <span>
+                  Remove{' '}
+                  <span className="mono">{secLabel(selection.end - selection.start)}</span> from the
+                  middle ({secLabel(selection.start)}–{secLabel(selection.end)})?
                 </span>
-                <button type="button" className="primary" onClick={() => cutSelection()}>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => cutSelection()}
+                  title="Cut out selection (Delete)"
+                >
                   Cut out selection
                 </button>
-                <button type="button" className="ghost" onClick={() => setSelection(null)}>
-                  Clear
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setSelection(null)
+                    setSelectMode(false)
+                  }}
+                  title="Clear selection (Esc)"
+                >
+                  Cancel
                 </button>
               </div>
             )}
@@ -1232,6 +1485,7 @@ export function EditorApp() {
                       type="button"
                       className="ghost cut-remove"
                       aria-label={`Remove cut ${i + 1}`}
+                      title="Restore this section"
                       onClick={() => removeCutAt(i)}
                     >
                       ×
@@ -1285,77 +1539,58 @@ export function EditorApp() {
               <div className="edit-actions">
                 <section className="action-card">
                   <div className="action-card-head">
-                    <h2>Trim</h2>
+                    <h2>Trim ends</h2>
                     <span className="action-meta mono">
                       {secLabel(inSec)} – {secLabel(outSec)}
                     </span>
                   </div>
                   <p className="action-help">
-                    Orange handles set the keep ends. Shortcut: I / O at playhead.
+                    Shorten the video by moving the orange start/end handles — or set them to the
+                    playhead. Shortcuts: I / O.
                   </p>
                   <div className="action-row">
-                    <button
-                      type="button"
-                      onClick={() => setInSec(Math.min(current, outSec - MIN_RANGE))}
-                    >
-                      Set in here
+                    <button type="button" onClick={() => trimStartHere()} title="Trim start (I)">
+                      Trim start
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setOutSec(Math.max(current, inSec + MIN_RANGE))}
-                    >
-                      Set out here
+                    <button type="button" onClick={() => trimEndHere()} title="Trim end (O)">
+                      Trim end
                     </button>
                   </div>
                   <div className="action-row">
                     <button type="button" onClick={() => seekTo(inSec)}>
-                      Jump to in
+                      Jump to start
                     </button>
                     <button type="button" onClick={() => seekTo(outSec)}>
-                      Jump to out
+                      Jump to end
                     </button>
                   </div>
                 </section>
 
                 <section className="action-card">
                   <div className="action-card-head">
-                    <h2>Cut out</h2>
+                    <h2>Cut out middle</h2>
                     {cutRanges.length > 0 && (
                       <span className="action-badge">{cutRanges.length}</span>
                     )}
                   </div>
                   <p className="action-help">
-                    Shift-drag a range on the timeline, then Cut out (or Delete). Export joins the
-                    green keep pieces.
+                    Select a middle section, then Cut out. Export joins the green keep pieces.
+                    Multi-cut supported.
                   </p>
                   <div className="action-row">
                     <button
                       type="button"
-                      onClick={() => {
-                        const start = clamp(current, inSec, outSec)
-                        setSelection((sel) => ({
-                          start,
-                          end: sel
-                            ? Math.max(sel.end, start + MIN_RANGE)
-                            : Math.min(outSec, start + Math.max(1, (outSec - inSec) * 0.1)),
-                        }))
-                      }}
+                      onClick={() => markSelectionStart()}
+                      title="Mark selection start at playhead ([)"
                     >
-                      Mark [ here
+                      Start here
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const end = clamp(current, inSec, outSec)
-                        setSelection((sel) => ({
-                          start: sel
-                            ? Math.min(sel.start, end - MIN_RANGE)
-                            : Math.max(inSec, end - Math.max(1, (outSec - inSec) * 0.1)),
-                          end,
-                        }))
-                      }}
+                      onClick={() => markSelectionEnd()}
+                      title="Mark selection end at playhead (])"
                     >
-                      Mark ] here
+                      End here
                     </button>
                   </div>
                   <div className="action-row">
@@ -1364,6 +1599,7 @@ export function EditorApp() {
                       className="primary"
                       disabled={!selection}
                       onClick={() => cutSelection()}
+                      title="Cut out selection (Delete)"
                     >
                       Cut out selection
                     </button>
@@ -1371,12 +1607,13 @@ export function EditorApp() {
                       type="button"
                       disabled={undoStack.length === 0}
                       onClick={() => undoCut()}
+                      title="Undo last cut (⌘Z)"
                     >
                       Undo
                     </button>
                   </div>
                   <p className="muted micro">
-                    Space play · J / L nudge · ← → frame · ⌘Z undo
+                    Select range · Shift-drag · [ ] · Delete · Esc clear · ⌘Z undo
                   </p>
                 </section>
 

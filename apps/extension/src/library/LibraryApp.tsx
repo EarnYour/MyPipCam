@@ -218,6 +218,12 @@ export function LibraryApp() {
   /** Name left in chrome.storage but IndexedDB handle missing — must re-pick. */
   const [folderHandleMissing, setFolderHandleMissing] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [hasOpenAiKeyStored, setHasOpenAiKeyStored] = useState(false)
+
+  const refreshOpenAiKeyStatus = useCallback(async () => {
+    const settings = await loadApiSettings()
+    setHasOpenAiKeyStored(hasOpenAiKey(settings))
+  }, [])
 
   const showBanner = useCallback(
     (msg: string | null, shareUrl: string | null = null, tone: 'ok' | 'warn' = 'ok') => {
@@ -504,6 +510,7 @@ export function LibraryApp() {
     }
     void refreshFolderName()
     void refresh()
+    void refreshOpenAiKeyStatus()
 
     const showDriveToast = async () => {
       const toast = await consumeDriveUploadToast()
@@ -525,6 +532,9 @@ export function LibraryApp() {
       if (area === 'local' && (changes.drivePendingUploadIds || changes.driveLastUploadError)) {
         void refreshDriveUploadNotice()
       }
+      if (area === 'local' && changes.apiSettings) {
+        void refreshOpenAiKeyStatus()
+      }
     }
     chrome.storage.onChanged.addListener(onStorage)
     window.addEventListener('popstate', onPopState)
@@ -534,7 +544,7 @@ export function LibraryApp() {
       Object.values(thumbUrls).forEach((u) => URL.revokeObjectURL(u))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh, refreshFolderName, refreshDriveUploadNotice, showBanner])
+  }, [refresh, refreshFolderName, refreshDriveUploadNotice, refreshOpenAiKeyStatus, showBanner])
 
   // Load video when detail opens / changes.
   useEffect(() => {
@@ -1131,6 +1141,7 @@ export function LibraryApp() {
           onEdit={(id, focus) => void openEditorTab(id, focus)}
           onOpenSettings={() => setSettingsOpen(true)}
           onTranscribe={onTranscribe}
+          hasOpenAiKey={hasOpenAiKeyStored}
         />
       ) : (
         <>
@@ -1259,6 +1270,7 @@ export function LibraryApp() {
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onSaved={(settings) => setHasOpenAiKeyStored(hasOpenAiKey(settings))}
         onLibraryFolderChanged={(name) => {
           setFolderName(name)
           setFolderAccessNeeded(false)
@@ -1281,6 +1293,7 @@ type DetailProps = {
   playerError: string | null
   busyId: string | null
   driveConnected: boolean
+  hasOpenAiKey: boolean
   onBack: () => void
   onRename: (id: string, title: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
@@ -1322,6 +1335,7 @@ function RecordingDetail({
   playerError,
   busyId,
   driveConnected,
+  hasOpenAiKey,
   onBack,
   onRename,
   onDelete,
@@ -1635,7 +1649,11 @@ function RecordingDetail({
                         className="detail-action-row"
                         disabled={!canEdit}
                         onClick={() => onEdit(detailId, 'filler')}
-                        title="Opens editor — needs OpenAI key for transcript word timings"
+                        title={
+                          hasOpenAiKey
+                            ? 'Opens editor — cut fillers using transcript word timings'
+                            : 'Opens editor — needs an API key for transcript word timings'
+                        }
                       >
                         <span className="detail-action-icon" aria-hidden="true">
                           🎙
@@ -1643,7 +1661,9 @@ function RecordingDetail({
                         <span className="detail-action-copy">
                           <strong>Remove filler words</strong>
                           <span className="muted">
-                            Cut um/uh/like via transcript timings (OpenAI key)
+                            {hasOpenAiKey
+                              ? 'Cut um/uh/like via transcript timings'
+                              : 'Cut um/uh/like via transcript timings (API key)'}
                           </span>
                         </span>
                         <span className="detail-action-chevron" aria-hidden="true">
@@ -1746,7 +1766,9 @@ function RecordingDetail({
                 <div>
                   <h2 className="detail-panel-title">Transcript</h2>
                   <p className="muted detail-panel-copy">
-                    Captions stay on-device. Transcription uses your OpenAI key (Whisper).
+                    {hasOpenAiKey
+                      ? 'Captions stay on-device.'
+                      : 'Captions stay on-device. Add an API key in Settings to generate a transcript.'}
                   </p>
                 </div>
                 {item?.transcript ? (
@@ -1781,13 +1803,15 @@ function RecordingDetail({
                         : 'Generate transcript'}
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="ghost detail-panel-action"
-                  onClick={onOpenSettings}
-                >
-                  Open API key settings
-                </button>
+                {!hasOpenAiKey && (
+                  <button
+                    type="button"
+                    className="ghost detail-panel-action"
+                    onClick={onOpenSettings}
+                  >
+                    Open API key settings
+                  </button>
+                )}
               </div>
             )}
 

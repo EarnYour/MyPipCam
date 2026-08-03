@@ -45,6 +45,9 @@ final class CameraBubbleController: NSObject {
             microphone: microphone,
             settings: settings,
             loginItem: loginItem,
+            onHide: { [weak self] in
+                self?.hideBubble()
+            },
             onQuit: { [weak self] in
                 self?.quit()
             }
@@ -155,8 +158,92 @@ final class CameraBubbleController: NSObject {
         }
     }
 
+    /// Whether the floating bubble window is currently on-screen.
+    var isBubbleVisible: Bool {
+        panel?.isVisible == true && !NSApp.isHidden
+    }
+
+    /// Hide the bubble without quitting (menu bar icon stays).
+    func hideBubble() {
+        panel?.orderOut(nil)
+    }
+
+    /// Bring the bubble back after Hide, Cmd+H, Cmd+W, or an off-screen drag.
     func showAgain() {
-        panel?.orderFrontRegardless()
+        if NSApp.isHidden {
+            NSApp.unhide(nil)
+        }
+
+        guard let panel else {
+            show()
+            return
+        }
+
+        // Closed panels (e.g. Cmd+W) keep the NSPanel when isReleasedWhenClosed is false,
+        // but SwiftUI hosting can end up blank — recreate if the content view is gone.
+        if panel.contentView == nil {
+            panel.close()
+            self.panel = nil
+            show()
+            return
+        }
+
+        ensureOnScreen(panel)
+        panel.alphaValue = 1
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.orderFrontRegardless()
+        // Nonactivating panels sometimes need an explicit key pass to paint again.
+        panel.makeKeyAndOrderFront(nil)
+
+        if !camera.isRunning {
+            Task { await camera.requestAccessAndStart() }
+        }
+    }
+
+    /// Clamp the panel into a visible screen frame (active mouse screen preferred).
+    private func ensureOnScreen(_ panel: NSPanel) {
+        let mouse = NSEvent.mouseLocation
+        let screen =
+            NSScreen.screens.first(where: { $0.frame.contains(mouse) })
+            ?? panel.screen
+            ?? NSScreen.main
+        guard let screen else {
+            positionDefault(panel)
+            return
+        }
+
+        let visible = screen.visibleFrame
+        var frame = panel.frame
+
+        // Completely outside the destination screen → snap to default corner.
+        let intersects = frame.intersects(visible.insetBy(dx: -8, dy: -8))
+        if !intersects || frame.width < 40 || frame.height < 40 {
+            applySize(animate: false)
+            positionDefault(panel)
+            // Reposition onto the mouse's screen, not whichever screen show() used.
+            if screen != NSScreen.main {
+                var origin = panel.frame.origin
+                if settings.useWidescreen {
+                    origin = NSPoint(
+                        x: visible.midX - panel.frame.width / 2,
+                        y: visible.midY - panel.frame.height / 2
+                    )
+                } else {
+                    origin = NSPoint(
+                        x: visible.maxX - panel.frame.width - 36,
+                        y: visible.minY + 36
+                    )
+                }
+                panel.setFrameOrigin(origin)
+            }
+            return
+        }
+
+        // Partially off-screen → clamp.
+        frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        panel.setFrame(frame, display: true)
     }
 
     func quit() {
@@ -185,4 +272,9 @@ final class CameraBubbleController: NSObject {
 final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performClose(_ sender: Any?) {
+        // Cmd+W / performClose should hide, not destroy — Show Bubble can restore.
+        orderOut(nil)
+    }
 }

@@ -90,6 +90,8 @@ struct BorderColorPopover: View {
                     TextField("#RRGGBBAA", text: $hexDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
+                        // Toolbar forces .white; reset so typed hex is visible on the field.
+                        .foregroundStyle(Color(nsColor: .textColor))
                         .onSubmit(applyHex)
 
                     Button("Apply", action: applyHex)
@@ -125,6 +127,9 @@ struct BorderColorPopover: View {
 
         .padding(14)
         .frame(width: 220)
+        // Popover is attached under the camera toolbar, which sets .foregroundStyle(.white).
+        // Reset so labels/inputs use normal system (dark-on-light / light-on-dark) contrast.
+        .foregroundStyle(.primary)
         .onAppear {
             hexDraft = settings.borderPreset == .transparent
                 ? ""

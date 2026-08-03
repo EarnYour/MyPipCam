@@ -11,6 +11,7 @@ struct CameraBubbleView: View {
     @State private var isHovered = false
     @StateObject private var dismissHelper = ControlsDismissHelper()
     @ObservedObject private var recording = RecordingController.shared
+    var onHide: () -> Void = {}
     var onQuit: () -> Void
 
     /// Extra space around the bubble so the soft circular shadow isn't clipped.
@@ -166,6 +167,13 @@ struct CameraBubbleView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .padding(.top, 2)
+            } else if camera.canRetryCameraStart {
+                Button("Retry Camera") {
+                    Task { await camera.requestAccessAndStart() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 2)
             }
         }
         .foregroundStyle(.white.opacity(0.9))
@@ -190,6 +198,9 @@ struct CameraBubbleView: View {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     showControls = true
                 }
+            }
+            Button("Hide Bubble") {
+                onHide()
             }
             Button("Open Recording Library") {
                 LibraryWindowPresenter.open(settings: settings, chooseIfNeeded: true)
@@ -295,6 +306,8 @@ struct CameraBubbleView: View {
             }
             .popover(isPresented: $showBorderPopover, arrowEdge: .top) {
                 BorderColorPopover(settings: settings)
+                    // Break white toolbar inheritance for popover content (hex field contrast).
+                    .foregroundStyle(.primary)
             }
             .help("Appearance")
 
@@ -461,6 +474,9 @@ struct CameraBubbleView: View {
         }
 
         Divider()
+        Button("Hide Bubble") {
+            onHide()
+        }
         Toggle("Open at Login", isOn: loginAtStartupBinding)
         Button("Quit MyPipCam", role: .destructive, action: onQuit)
     }

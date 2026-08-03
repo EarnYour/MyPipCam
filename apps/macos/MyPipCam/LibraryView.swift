@@ -206,14 +206,22 @@ struct LibraryView: View {
             .padding(.vertical, 10)
 
             if !store.displayPath.isEmpty {
-                Text(store.displayPath)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(store.displayPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if isMoviesRootLibrary {
+                        Text("Suggested: ~/Movies/MyPipCam (yours matches Chrome if you picked Movies there).")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
 
             Divider()
@@ -378,10 +386,18 @@ struct LibraryView: View {
         isRenaming = true
     }
 
+    private var isMoviesRootLibrary: Bool {
+        let path = (store.displayPath as NSString).standardizingPath
+        let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies")
+        return path == (movies.path as NSString).standardizingPath
+    }
+
     private func openInChrome() {
         let override = settings.chromeExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
         ExtensionLibraryOpener.openRecordingLibrary(
-            extensionID: override.isEmpty ? nil : override
+            extensionID: override.isEmpty ? nil : override,
+            recordingID: selection
         )
     }
 

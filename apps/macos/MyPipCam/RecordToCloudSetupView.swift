@@ -33,6 +33,9 @@ struct RecordToCloudSetupView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if recorder.needsScreenRecordingPermission || recorder.signingIdentityChanged {
+                        screenRecordingPermissionBanner
+                    }
                     captureSection
                     deviceSection
                     audioSection
@@ -43,7 +46,8 @@ struct RecordToCloudSetupView: View {
                             .foregroundStyle(Color(red: 0.75, green: 0.2, blue: 0.2))
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if let recorderError = recorder.errorMessage {
+                    if let recorderError = recorder.errorMessage,
+                       !recorder.needsScreenRecordingPermission {
                         Text(recorderError)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color(red: 0.75, green: 0.2, blue: 0.2))
@@ -81,6 +85,43 @@ struct RecordToCloudSetupView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
+    }
+
+    private var screenRecordingPermissionBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(
+                recorder.signingIdentityChanged && !recorder.needsScreenRecordingPermission
+                    ? "App was reinstalled — confirm Screen Recording"
+                    : "Screen Recording permission needed"
+            )
+            .font(.system(size: 13, weight: .semibold))
+            Text(
+                recorder.needsScreenRecordingPermission
+                    ? "macOS declined capture for this copy of MyPipCam (even if the Settings toggle looks on). Toggle MyPipCam off → on, quit the app, then reopen."
+                    : "Developer-signed rebuilds often need Screen Recording re-granted. Open Settings, toggle MyPipCam off → on, quit, then reopen."
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button("Open Screen Recording Settings…") {
+                    ScreenCloudRecorder.openScreenRecordingSettings()
+                }
+                Button("Recheck") {
+                    Task {
+                        _ = recorder.ensureScreenCaptureAccess()
+                        await recorder.refreshShareableContent()
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 1, green: 0.95, blue: 0.9), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(brand.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var captureSection: some View {
@@ -124,17 +165,6 @@ struct RecordToCloudSetupView: View {
                 Text("Window mode records only that window. Prefer Screen for desktop + PiP. Pick a browser window for tab-like capture.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-            case .tab:
-                Text("True Chrome tab capture isn’t available in the desktop app. Use Window and pick your browser, or record in the Chrome extension.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Open Chrome Extension Library…") {
-                    let override = settings.chromeExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ExtensionLibraryOpener.openRecordingLibrary(
-                        extensionID: override.isEmpty ? nil : override
-                    )
-                }
             }
         }
     }
@@ -158,10 +188,9 @@ struct RecordToCloudSetupView: View {
                         lineWidth: 1
                     )
                 )
-                .opacity(target.isAvailable || target == .tab ? 1 : 0.45)
         }
         .buttonStyle(.plain)
-        .help(target == .tab ? "Tab capture is available in the Chrome extension" : target.label)
+        .help(target.label)
     }
 
     private var deviceSection: some View {
@@ -240,7 +269,7 @@ struct RecordToCloudSetupView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(brand)
-            .disabled(isStarting || captureTarget == .tab)
+            .disabled(isStarting)
             .keyboardShortcut(.defaultAction)
         }
         .padding(16)
@@ -281,10 +310,6 @@ struct RecordToCloudSetupView: View {
 
     private func start() async {
         localError = nil
-        guard captureTarget != .tab else {
-            localError = "Tab capture is only available in the Chrome extension."
-            return
-        }
         if captureTarget == .window && selectedWindowID == 0 {
             localError = "Select a window to capture."
             return
