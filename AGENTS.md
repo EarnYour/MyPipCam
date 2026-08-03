@@ -75,7 +75,7 @@ If `dist/manifest.json` lacks `key`, Chrome assigns a **different** ID. Google C
 
 Library URL (stable ID):
 
-`chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`
+`chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html` (macOS Open in Chrome uses `https://mypipcam.earnyour.com/open-library` so ad blockers do not `ERR_BLOCKED_BY_CLIENT` the extension page)
 
 ---
 

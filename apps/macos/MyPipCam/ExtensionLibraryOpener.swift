@@ -6,10 +6,13 @@ import Darwin
 enum ExtensionLibraryOpener {
     /// Stable ID from the public `key` in `apps/extension/manifest.config.ts`.
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
+    /// Must match popup/`openLibraryTab` and `apps/extension/dist` (CRX keeps `src/…`).
     static let libraryPath = "src/library/index.html"
+    /// HTTPS bridge asks the extension to open Library via chrome.tabs (avoids ad-block ERR_BLOCKED_BY_CLIENT).
+    static let bridgeOpenPath = "https://mypipcam.earnyour.com/open-library"
     static let extensionDisplayName = "MyPipCam"
     static let releasesURL = URL(string: "https://github.com/EarnYour/MyPipCam/releases")!
-    static let extensionReleaseTag = "v1.1.8"
+    static let extensionReleaseTag = "v1.1.10"
 
     private static let firstOpenTipKey = "hasShownLibraryExtensionTip"
     private static let extensionIdDefaultsKey = "chromeExtensionId"
@@ -25,6 +28,19 @@ enum ExtensionLibraryOpener {
             urlString += "?id=\(recordingID)"
         }
         return URL(string: urlString)
+    }
+
+    /// Primary open target: product-site bridge → extension `OPEN_LIBRARY` message.
+    static func bridgeLibraryURL(extensionID: String, recordingID: String? = nil) -> URL? {
+        let id = sanitizedExtensionID(extensionID)
+        guard isValidExtensionID(id) else { return nil }
+        var components = URLComponents(string: bridgeOpenPath)
+        var items: [URLQueryItem] = [URLQueryItem(name: "ext", value: id)]
+        if let recordingID, isSafeRecordingID(recordingID) {
+            items.append(URLQueryItem(name: "id", value: recordingID))
+        }
+        components?.queryItems = items
+        return components?.url
     }
 
     /// Resolves which extension ID to use, in order:
@@ -62,10 +78,11 @@ enum ExtensionLibraryOpener {
         }
 
         let id = resolveExtensionID(preferred: extensionID)
-        guard let url = libraryURL(extensionID: id, recordingID: recordingID) else {
+        guard let bridgeURL = bridgeLibraryURL(extensionID: id, recordingID: recordingID) else {
             promptForExtensionID(reason: .invalidOrMissing, thenOpen: true, recordingID: recordingID)
             return
         }
+        let directURL = libraryURL(extensionID: id, recordingID: recordingID)
 
         let extensionPresent = extensionLikelyPresent(id: id)
         if !extensionPresent {
@@ -74,7 +91,7 @@ enum ExtensionLibraryOpener {
             alert.informativeText = """
             Chrome doesn’t appear to have the MyPipCam extension loaded (checked your Chromium profiles).
 
-            You can still try opening the library URL — it works when the extension is installed under ID:
+            You can still try opening the library bridge — it works when the extension is installed under ID:
             \(id)
 
             Or install/reload it first (Load unpacked → apps/extension/dist, or GitHub Releases \(extensionReleaseTag)).
@@ -85,7 +102,7 @@ enum ExtensionLibraryOpener {
             alert.addButton(withTitle: "Cancel")
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {
-                showMissingExtensionHelp(openedURL: url, openFailed: false)
+                showMissingExtensionHelp(openedURL: bridgeURL, directURL: directURL, openFailed: false)
                 return
             }
             if response != .alertFirstButtonReturn {
@@ -93,17 +110,22 @@ enum ExtensionLibraryOpener {
             }
         }
 
-        openInChromiumBrowser(url) { success, detail in
+        openInChromiumBrowser(bridgeURL) { success, detail in
             Task { @MainActor in
                 if success {
                     if !UserDefaults.standard.bool(forKey: firstOpenTipKey) {
                         UserDefaults.standard.set(true, forKey: firstOpenTipKey)
-                        showFirstOpenTip(openedURL: url)
+                        showFirstOpenTip(openedURL: bridgeURL, directURL: directURL)
                     }
                 } else if !extensionPresent {
-                    showMissingExtensionHelp(openedURL: url, openFailed: true, detail: detail)
+                    showMissingExtensionHelp(
+                        openedURL: bridgeURL,
+                        directURL: directURL,
+                        openFailed: true,
+                        detail: detail
+                    )
                 } else {
-                    showOpenFailedAlert(openedURL: url, detail: detail)
+                    showOpenFailedAlert(openedURL: bridgeURL, directURL: directURL, detail: detail)
                 }
             }
         }
@@ -202,10 +224,10 @@ enum ExtensionLibraryOpener {
         4. In both apps, choose the same folder (suggested: ~/Movies/MyPipCam)
 
         \(idLine)
-        Library path: \(libraryPath)
-        Example URL: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
+        Bridge: \(bridgeOpenPath)?ext=\(detected ?? defaultExtensionID)
+        Extension page: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
 
-        Use Open in Chrome… for the editor/transcription UI. If that page fails, use Set Extension ID… and paste the ID from chrome://extensions.
+        Use Open in Chrome… for the editor/transcription UI. If Chrome shows ERR_BLOCKED_BY_CLIENT, disable the ad blocker for the tab or open Library from the extension popup. Wrong ID → Set Extension ID….
         """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
@@ -620,26 +642,42 @@ enum ExtensionLibraryOpener {
     }
 
     @MainActor
-    private static func showFirstOpenTip(openedURL: URL) {
+    private static func showFirstOpenTip(openedURL: URL, directURL: URL?) {
         let alert = NSAlert()
         alert.messageText = "Opened Recording Library"
-        alert.informativeText = """
-        MyPipCam opened:
+        var text = """
+        MyPipCam opened the HTTPS bridge (so Chrome opens Library from inside the extension):
 
         \(openedURL.absoluteString)
 
-        If Chrome shows a blank page or “extension not found”, your install may use a different extension ID (common for older unpacked loads). Use Set Extension ID… and paste the ID from chrome://extensions.
+        If the bridge says it couldn’t reach the extension, reload MyPipCam on chrome://extensions (ID should be \(defaultExtensionID)).
+        If you ever open the raw chrome-extension:// URL and see ERR_BLOCKED_BY_CLIENT, an ad blocker is blocking it — use the bridge, disable the blocker for that tab, or click Library in the extension popup.
         """
+        if let directURL {
+            text += "\n\nDirect extension URL (fallback):\n\(directURL.absoluteString)"
+        }
+        alert.informativeText = text
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
-        if alert.runModal() == .alertSecondButtonReturn {
+        if let directURL {
+            alert.addButton(withTitle: "Open Direct URL…")
+        }
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
+        } else if response == .alertThirdButtonReturn, let directURL {
+            openInChromiumBrowser(directURL) { _, _ in }
         }
     }
 
     @MainActor
-    private static func showMissingExtensionHelp(openedURL: URL, openFailed: Bool, detail: String? = nil) {
+    private static func showMissingExtensionHelp(
+        openedURL: URL,
+        directURL: URL?,
+        openFailed: Bool,
+        detail: String? = nil
+    ) {
         openChromeExtensionsPage()
         revealExtensionDistInFinder()
 
@@ -657,9 +695,12 @@ enum ExtensionLibraryOpener {
         4. Confirm the ID under MyPipCam is \(defaultExtensionID) (or use Set Extension ID…)
         5. Choose the same library folder as this Mac app (suggested: ~/Movies/MyPipCam)
 
-        Target URL:
+        Bridge URL:
         \(openedURL.absoluteString)
         """
+        if let directURL {
+            text += "\n\nDirect extension URL:\n\(directURL.absoluteString)"
+        }
         if let detail, !detail.isEmpty {
             text += "\n\nDetails: \(detail)"
         }
@@ -668,9 +709,9 @@ enum ExtensionLibraryOpener {
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
         alert.addButton(withTitle: "Open Releases…")
-        alert.addButton(withTitle: "Copy URL")
+        alert.addButton(withTitle: "Copy Bridge URL")
         let response = alert.runModal()
-        // Buttons: OK (1000), Set Extension ID… (1001), Open Releases… (1002), Copy URL (1003)
+        // Buttons: OK (1000), Set Extension ID… (1001), Open Releases… (1002), Copy (1003)
         switch response {
         case .alertSecondButtonReturn:
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
@@ -685,10 +726,10 @@ enum ExtensionLibraryOpener {
     }
 
     @MainActor
-    private static func showOpenFailedAlert(openedURL: URL, detail: String?) {
+    private static func showOpenFailedAlert(openedURL: URL, directURL: URL?, detail: String?) {
         let alert = NSAlert()
         alert.messageText = "Couldn’t Open Chrome Library"
-        alert.informativeText = """
+        var text = """
         macOS couldn’t hand this URL to Chrome:
 
         \(openedURL.absoluteString)
@@ -696,18 +737,27 @@ enum ExtensionLibraryOpener {
         \(detail ?? "Unknown error")
 
         Try: quit and reopen Google Chrome, then use Open in Chrome… again.
-        If Chrome shows “extension not found”, use Set Extension ID… or Install Chrome Extension….
+        If Chrome shows ERR_BLOCKED_BY_CLIENT on a chrome-extension:// page, disable the ad blocker or open Library from the extension popup.
         """
+        if let directURL {
+            text += "\n\nDirect fallback:\n\(directURL.absoluteString)"
+        }
+        alert.informativeText = text
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Set Extension ID…")
-        alert.addButton(withTitle: "Copy URL")
+        alert.addButton(withTitle: "Copy Bridge URL")
+        if directURL != nil {
+            alert.addButton(withTitle: "Open Direct URL…")
+        }
         let response = alert.runModal()
         if response == .alertSecondButtonReturn {
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
         } else if response == .alertThirdButtonReturn {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(openedURL.absoluteString, forType: .string)
+        } else if response == NSApplication.ModalResponse(rawValue: 1003), let directURL {
+            openInChromiumBrowser(directURL) { _, _ in }
         }
     }
 
