@@ -171,7 +171,7 @@ final class CameraBubbleController: NSObject {
             guard let self, let panel = self.panel, event.window == panel else {
                 return event
             }
-            // Widescreen is a fixed ~80% / 16:9 layout — ignore scroll resize.
+            // Widescreen uses fixed 16:9 presets — ignore scroll resize.
             guard !self.settings.useWidescreen else { return event }
 
             let delta = event.scrollingDeltaY

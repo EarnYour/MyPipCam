@@ -19,6 +19,7 @@ enum LegacySettingsMigration {
         "mirrorCamera",
         "bubbleSize",
         "useWidescreen",
+        "widescreenSize",
         "bubbleShape",
         "bubbleOpacity",
         "bubbleOriginX",

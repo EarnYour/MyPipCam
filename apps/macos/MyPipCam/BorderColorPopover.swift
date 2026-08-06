@@ -27,6 +27,34 @@ struct BorderColorPopover: View {
                 .labelsHidden()
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Size")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Toggle("Widescreen 16:9", isOn: Binding(
+                    get: { settings.useWidescreen },
+                    set: { on in
+                        if on {
+                            settings.applyWidescreen(settings.widescreenSize)
+                        } else {
+                            settings.useWidescreen = false
+                        }
+                    }
+                ))
+                .font(.system(size: 12, weight: .medium))
+                if settings.useWidescreen {
+                    Picker("Widescreen size", selection: Binding(
+                        get: { settings.widescreenSize },
+                        set: { settings.applyWidescreen($0) }
+                    )) {
+                        ForEach(WidescreenSize.allCases) { size in
+                            Text(size.menuLabel).tag(size)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Opacity")

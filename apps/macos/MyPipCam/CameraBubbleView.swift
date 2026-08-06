@@ -420,13 +420,9 @@ struct CameraBubbleView: View {
             sizeMenuButton("Large", squareSize: 300)
             sizeMenuButton("XL", squareSize: 380)
             Divider()
-            Button {
-                settings.applyWidescreen()
-            } label: {
-                if settings.useWidescreen {
-                    Label("Widescreen 16:9", systemImage: "checkmark")
-                } else {
-                    Text("Widescreen 16:9")
+            Menu("Widescreen 16:9") {
+                ForEach(WidescreenSize.allCases) { size in
+                    widescreenSizeMenuButton(size)
                 }
             }
         }
@@ -488,6 +484,20 @@ struct CameraBubbleView: View {
                 Label(title, systemImage: "checkmark")
             } else {
                 Text(title)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func widescreenSizeMenuButton(_ size: WidescreenSize) -> some View {
+        let selected = settings.useWidescreen && settings.widescreenSize == size
+        Button {
+            settings.applyWidescreen(size)
+        } label: {
+            if selected {
+                Label(size.menuLabel, systemImage: "checkmark")
+            } else {
+                Text(size.menuLabel)
             }
         }
     }

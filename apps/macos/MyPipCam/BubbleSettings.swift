@@ -19,6 +19,44 @@ enum BubbleShape: String, CaseIterable, Identifiable {
     static let squareCornerFraction: CGFloat = 0.14
 }
 
+/// 16:9 widescreen presets as a fraction of the screen’s visible frame.
+enum WidescreenSize: String, CaseIterable, Identifiable {
+    case small
+    case medium
+    case large
+    case xl
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        case .xl: return "XL"
+        }
+    }
+
+    /// Short menu label with approximate screen coverage.
+    var menuLabel: String {
+        "\(label) (\(percentLabel))"
+    }
+
+    var percentLabel: String {
+        "\(Int((screenFraction * 100).rounded()))%"
+    }
+
+    /// Fraction of the shorter screen axis budget used for the 16:9 fit.
+    var screenFraction: CGFloat {
+        switch self {
+        case .small: return 0.28
+        case .medium: return 0.50
+        case .large: return 0.80
+        case .xl: return 0.90
+        }
+    }
+}
+
 enum BorderPreset: String, CaseIterable, Identifiable {
     case transparent
     case white
@@ -118,8 +156,12 @@ final class BubbleSettings: ObservableObject {
     @AppStorage("bubbleSize") var bubbleSize: Double = 220 {
         didSet { objectWillChange.send() }
     }
-    /// When true, the floating bubble is 16:9 and sized to ~80% of the screen.
+    /// When true, the floating bubble is 16:9 and sized by `widescreenSize`.
     @AppStorage("useWidescreen") var useWidescreen: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    /// Widescreen 16:9 size preset (Small…XL). Ignored unless `useWidescreen` is true.
+    @AppStorage("widescreenSize") var widescreenSizeRaw: String = WidescreenSize.large.rawValue {
         didSet { objectWillChange.send() }
     }
     @AppStorage("bubbleShape") var bubbleShapeRaw: String = BubbleShape.circle.rawValue {
@@ -205,8 +247,13 @@ final class BubbleSettings: ObservableObject {
         set { bubbleShapeRaw = newValue.rawValue }
     }
 
-    /// Fraction of the screen’s visible frame used by Widescreen 16:9.
-    static let widescreenScreenFraction: CGFloat = 0.80
+    var widescreenSize: WidescreenSize {
+        get { WidescreenSize(rawValue: widescreenSizeRaw) ?? .large }
+        set { widescreenSizeRaw = newValue.rawValue }
+    }
+
+    /// Default / legacy Widescreen coverage (~80% of the visible frame).
+    static let widescreenScreenFraction: CGFloat = WidescreenSize.large.screenFraction
     static let widescreenAspect: CGFloat = 16.0 / 9.0
 
     /// Corner radius for the square / rounded-rect bubble mask (points).
@@ -222,18 +269,22 @@ final class BubbleSettings: ObservableObject {
     /// Content size for the camera bubble (excludes shadow padding).
     func contentSize(on screen: NSScreen? = NSScreen.main) -> CGSize {
         if useWidescreen {
-            return Self.widescreenContentSize(on: screen)
+            return Self.widescreenContentSize(fraction: widescreenSize.screenFraction, on: screen)
         }
         let side = CGFloat(bubbleSize)
         return CGSize(width: side, height: side)
     }
 
-    /// Largest 16:9 rect that fits in ~80% of the screen’s visible frame.
-    static func widescreenContentSize(on screen: NSScreen? = NSScreen.main) -> CGSize {
+    /// Largest 16:9 rect that fits in `fraction` of the screen’s visible frame.
+    static func widescreenContentSize(
+        fraction: CGFloat = WidescreenSize.large.screenFraction,
+        on screen: NSScreen? = NSScreen.main
+    ) -> CGSize {
         let visible = screen?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let maxWidth = visible.width * widescreenScreenFraction
-        let maxHeight = visible.height * widescreenScreenFraction
+        let clamped = min(0.95, max(0.15, fraction))
+        let maxWidth = visible.width * clamped
+        let maxHeight = visible.height * clamped
         let aspect = widescreenAspect
         if maxWidth / maxHeight > aspect {
             let height = maxHeight
@@ -249,9 +300,10 @@ final class BubbleSettings: ObservableObject {
         bubbleSize = size
     }
 
-    /// 16:9 at ~80% of the screen. Uses a rounded rectangle shape.
-    func applyWidescreen() {
+    /// 16:9 at the given screen-fraction preset. Uses a rounded rectangle shape.
+    func applyWidescreen(_ size: WidescreenSize = .large) {
         bubbleShape = .square
+        widescreenSize = size
         useWidescreen = true
     }
 
