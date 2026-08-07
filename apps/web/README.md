@@ -9,7 +9,7 @@ Static marketing site plus serverless share APIs and Loom-style watch pages.
 | URL | Purpose |
 | --- | --- |
 | `https://mypipcam.earnyour.com/w/{shareId}` | Public watch page (counts as a view on load) |
-| `https://mypipcam.earnyour.com/open-library?ext=…&id=…` | macOS → extension Library bridge (`externally_connectable`). `ext=` = store `meiehjfjcaahfjcdneoegjkmajbfghmm` or unpacked `akpchobfndfddajiihkkdpnihihdicjc` |
+| `https://mypipcam.earnyour.com/open-library?ext=…&id=…` | macOS → extension Library bridge (`externally_connectable`). `ext=` = store `moalajbpehfocfeecpleceplighfhim` or unpacked `akpchobfndfddajiihkkdpnihihdicjc` |
 | `POST /api/shares` | Extension creates/registers a share after Drive anyone-with-link |
 | `GET /api/shares?ids=…` | Batch view stats for Library |
 | `GET /api/shares/:id` | Share metadata for the watch page (`410` when expired) |

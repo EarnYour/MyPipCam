@@ -69,15 +69,19 @@ npm run dev
 
 | Build | Extension ID |
 | --- | --- |
-| **Chrome Web Store** (live) | `meiehjfjcaahfjcdneoegjkmajbfghmm` |
+| **Chrome Web Store** (live / Published — public) | `moalajbpehfocfeecpleceplighfhim` |
 | **Unpacked** (manifest `key` present) | `akpchobfndfddajiihkkdpnihihdicjc` |
 
-Google Cloud OAuth **Item ID** (Chrome extension client) must match the install you are testing:
+Public listing: `https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim` (also `https://chrome.google.com/webstore/detail/mypipcam/moalajbpehfocfeecpleceplighfhim`).
 
-- Store / published build → `meiehjfjcaahfjcdneoegjkmajbfghmm`  
-- Local unpacked with `key` → `akpchobfndfddajiihkkdpnihihdicjc`
+Google Cloud OAuth **Item ID** must match the install under test. Prefer **two** Chrome-extension OAuth clients (do not flip one Item ID):
 
-If `dist/manifest.json` lacks `key` and is not the store package, Chrome assigns yet another ID — use whatever `chrome://extensions` shows.
+| Client | Item ID | Where the client ID goes |
+| --- | --- | --- |
+| **A — store** | `moalajbpehfocfeecpleceplighfhim` | Store zip / release build only |
+| **B — local** | `akpchobfndfddajiihkkdpnihihdicjc` | `apps/extension/.env.local` for daily local builds |
+
+If `dist/manifest.json` lacks `key` and is not the store package, Chrome assigns a random third ID — reload **`apps/extension/dist`** after a normal build so `key` stays and the ID remains `akpchobfndfddajiihkkdpnihihdicjc`.
 
 Library URL (unpacked stable ID):
 
@@ -99,9 +103,10 @@ VITE_GOOGLE_OAUTH_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
 
 - Chrome-extension OAuth **client ID** only (no `client_secret`).
 - Read at **build time** via Vite / `driveConfig.ts`. Rebuild after changing.
+- For local Drive: use **Client B** (Item ID = unpacked ID above). Keep store Client A out of daily `.env.local`.
 - Without a real ID, core record/library/editor still works; **Connect Google** will fail until configured.
 
-Google Cloud (optional Drive): enable Drive API → OAuth consent (home/privacy/terms on `mypipcam.earnyour.com`, authorized domain `earnyour.com`) → **APIs & Services → Credentials → OAuth client ID → Chrome extension** → **Item ID** = store `meiehjfjcaahfjcdneoegjkmajbfghmm` or unpacked `akpchobfndfddajiihkkdpnihihdicjc` (match `chrome://extensions`). Full steps: [README.md § Google Drive](README.md#google-drive-optional-cloud-library) · [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md).
+Google Cloud (optional Drive): enable Drive API → OAuth consent (home/privacy/terms on `mypipcam.earnyour.com`, authorized domain `earnyour.com`) → create **two** Chrome-extension OAuth clients (store + local Item IDs). Full steps: [README.md § Google Drive](README.md#google-drive-optional-cloud-library) · [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md).
 
 ### Web — Vercel / local serverless
 
@@ -160,7 +165,7 @@ Shared on-disk library with Chrome (optional): both pick the same folder, e.g. `
 | --- | --- |
 | Wrong cwd / inventing a root `npm install` | No root package.json — `cd apps/extension` or `apps/web` |
 | Loading `apps/extension` or `src` in Chrome | Load **`apps/extension/dist`** only |
-| OAuth “bad client id” / auth page fail | Google Cloud Item ID ≠ live extension ID; rebuild so manifest `key` is present; set `.env.local` and rebuild |
+| OAuth “bad client id” / auth page fail | Item ID ≠ live extension ID (store vs unpacked); use Client B for local; rebuild so manifest `key` is present; Reload |
 | Changed `.env.local` but Connect still fails | Must `npm run build` (or `dev`) and **Reload** the extension |
 | MV3 service worker “asleep” / stale behavior | On `chrome://extensions` → extension card → **Reload**; reopen popup |
 | Share API 401/RLS errors | Set `SUPABASE_SERVICE_ROLE_KEY` on Vercel Production **and** Preview |

@@ -2,11 +2,13 @@
 
 **Product name:** MyPipCam (not MyPixCam)  
 **Brand:** EarnYour Marketing · [mypipcam.earnyour.com](https://mypipcam.earnyour.com)  
-**Dashboard store ID (live):** `meiehjfjcaahfjcdneoegjkmajbfghmm`
+**Dashboard store ID (live / Published — public):** `moalajbpehfocfeecpleceplighfhim`  
+**Public listing:** [chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim](https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim) · [chrome.google.com/webstore/detail/mypipcam/moalajbpehfocfeecpleceplighfhim](https://chrome.google.com/webstore/detail/mypipcam/moalajbpehfocfeecpleceplighfhim)
 
-> After store publish, update Google Cloud OAuth **Chrome extension → Item ID** to  
-> `meiehjfjcaahfjcdneoegjkmajbfghmm` (Connect Google / Drive will fail until this matches).  
-> Local unpacked ID remains `akpchobfndfddajiihkkdpnihihdicjc` when the manifest `key` is present.
+> Prefer **two** Chrome-extension OAuth clients:  
+> **Client A** Item ID = store `moalajbpehfocfeecpleceplighfhim` (store zip only).  
+> **Client B** Item ID = unpacked `akpchobfndfddajiihkkdpnihihdicjc` (daily `.env.local`).  
+> Do not flip one client’s Item ID between store and local — see [`../CHROME_WEBSTORE.md`](../CHROME_WEBSTORE.md).
 
 Upload graphics from this folder (see filenames below). Package zip: `../MyPipCam-chrome-webstore.zip`.
 
@@ -174,15 +176,25 @@ MyPipCam records the current Chrome tab with an optional live camera picture-in-
 
 ## After publish — OAuth reminder
 
-**Live store ID:** `meiehjfjcaahfjcdneoegjkmajbfghmm`  
-**Unpacked (manifest `key`) ID:** `akpchobfndfddajiihkkdpnihihdicjc` — do not overwrite the store Item ID with this when testing Connect Google on the published listing.
+**Live store ID:** `moalajbpehfocfeecpleceplighfhim`  
+**Public listing:** `https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim`  
+**Unpacked (manifest `key`) ID:** `akpchobfndfddajiihkkdpnihihdicjc`
 
-### Exact Google Cloud click path (store Item ID)
+Use **two** clients — do not put the store client ID into daily `.env.local`.
+
+### Store Client A (production)
 
 1. [Google Cloud Console](https://console.cloud.google.com/) → MyPipCam project  
 2. **APIs & Services** → **Credentials**  
-3. Open (or create) the **OAuth 2.0 Client ID** with Application type **Chrome extension**  
-4. **Item ID** = `meiehjfjcaahfjcdneoegjkmajbfghmm` → **Save**  
-5. Copy **Client ID** → `apps/extension/.env.local` → `VITE_GOOGLE_OAUTH_CLIENT_ID=…` → rebuild store zip → retest **Connect Google** from the store install
+3. Open (or create) a **Chrome extension** OAuth client named e.g. `MyPipCam Store`  
+4. **Item ID** = `moalajbpehfocfeecpleceplighfhim` → **Save**  
+5. For the **store zip only**: set `VITE_GOOGLE_OAUTH_CLIENT_ID` to Client A → `npm run build` → strip manifest `key` → zip → upload → retest **Connect Google** from the store install  
+6. Restore Client B in `.env.local` for local work
+
+### Local Client B (dev)
+
+1. Same Credentials page → **Create** another **Chrome extension** client (`MyPipCam Local`)  
+2. **Item ID** = `akpchobfndfddajiihkkdpnihihdicjc` → **Create**  
+3. Put Client B’s ID in `apps/extension/.env.local` → rebuild → Reload unpacked → **Connect Google**
 
 See also: [`../CHROME_WEBSTORE.md`](../CHROME_WEBSTORE.md)

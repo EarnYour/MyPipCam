@@ -7,9 +7,9 @@ enum ExtensionLibraryOpener {
     /// Stable ID from the public `key` in `apps/extension/manifest.config.ts` (Load unpacked).
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
     /// Live Chrome Web Store item ID (published zip without manifest `key`).
-    static let chromeWebStoreExtensionID = "meiehjfjcaahfjcdneoegjkmajbfghmm"
-    /// Known installs: unpacked first (dev), then store.
-    private static let knownExtensionIDs = [defaultExtensionID, chromeWebStoreExtensionID]
+    static let chromeWebStoreExtensionID = "moalajbpehfocfeecpleceplighfhim"
+    /// Known installs: store (published) first, then unpacked local.
+    private static let knownExtensionIDs = [chromeWebStoreExtensionID, defaultExtensionID]
     /// Must match popup/`openLibraryTab` and `apps/extension/dist` (CRX keeps `src/…`).
     static let libraryPath = "src/library/index.html"
     /// HTTPS bridge asks the extension to open Library via chrome.tabs (avoids ad-block ERR_BLOCKED_BY_CLIENT).
@@ -266,11 +266,11 @@ enum ExtensionLibraryOpener {
     /// Scans Chromium-family profiles for a MyPipCam install (packed Extensions dirs + unpacked Preferences).
     static func detectInstalledExtensionID() -> String? {
         let found = allDetectedExtensionIDs()
-        if found.contains(defaultExtensionID) {
-            return defaultExtensionID
-        }
         if found.contains(chromeWebStoreExtensionID) {
             return chromeWebStoreExtensionID
+        }
+        if found.contains(defaultExtensionID) {
+            return defaultExtensionID
         }
         return found.first
     }

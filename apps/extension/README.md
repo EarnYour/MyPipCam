@@ -63,7 +63,7 @@ starts until the countdown finishes (Cancel / discard aborts without saving).
 
 Optional. Set `VITE_GOOGLE_OAUTH_CLIENT_ID` in gitignored `.env.local` (copy from `.env.example`), then rebuild (see root [README](../../README.md#google-drive-optional-cloud-library)).
 
-- **OAuth client type:** Chrome extension — Item ID must match the ID on `chrome://extensions`. Store (live): `meiehjfjcaahfjcdneoegjkmajbfghmm`. Unpacked with manifest `key`: `akpchobfndfddajiihkkdpnihihdicjc`. Not the website.
+- **OAuth client type:** Chrome extension — prefer two clients: store Item ID `moalajbpehfocfeecpleceplighfhim` (Client A, store zip only) and unpacked+`key` Item ID `akpchobfndfddajiihkkdpnihihdicjc` (Client B in `.env.local`). Not the website. See [CHROME_WEBSTORE.md](../../docs/marketing/CHROME_WEBSTORE.md).
 - **Consent screen URLs** (product funnel): home `https://mypipcam.earnyour.com`, privacy `https://mypipcam.earnyour.com/privacy`, terms `https://mypipcam.earnyour.com/terms`; authorized domain `earnyour.com`.
 - Auth uses `chrome.identity` in the **background service worker** (Settings → `CONNECT_GOOGLE`; other pages may use `GET_DRIVE_TOKEN`). Interactive `getAuthToken` starts in the SW message listener so the click gesture is preserved. The site does not replace the extension client ID.
 - If Connect fails, Settings shows the real `chrome.runtime.lastError` / OAuth text. Client-mismatch errors include the live extension ID to paste as the Google Cloud OAuth **Item ID**.

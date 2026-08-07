@@ -2,14 +2,15 @@
   // Unpacked dist with manifest `key` (local / Load unpacked).
   var UNPACKED_EXT_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
   // Chrome Web Store listing (published zip without `key`).
-  var STORE_EXT_ID = 'meiehjfjcaahfjcdneoegjkmajbfghmm'
+  var STORE_EXT_ID = 'moalajbpehfocfeecpleceplighfhim'
   var LIBRARY_PATH = 'src/library/index.html'
   var EXT_ID_RE = /^[a-p]{32}$/
 
   var params = new URLSearchParams(window.location.search)
   var extParam = (params.get('ext') || '').trim().toLowerCase()
   var hasExplicitExt = EXT_ID_RE.test(extParam)
-  var primaryId = hasExplicitExt ? extParam : UNPACKED_EXT_ID
+  // Default to published store ID; unpacked remains a fallback (and via ?ext=).
+  var primaryId = hasExplicitExt ? extParam : STORE_EXT_ID
   var recordingId = (params.get('id') || '').trim()
 
   var titleEl = document.getElementById('title')
@@ -138,12 +139,12 @@
       })
   }
 
-  // Explicit ?ext= uses that ID only. Otherwise try unpacked then store.
+  // Explicit ?ext= uses that ID only. Otherwise try store (published) then unpacked.
   var ids = hasExplicitExt
     ? [primaryId]
-    : primaryId === STORE_EXT_ID
-      ? [STORE_EXT_ID, UNPACKED_EXT_ID]
-      : [UNPACKED_EXT_ID, STORE_EXT_ID]
+    : primaryId === UNPACKED_EXT_ID
+      ? [UNPACKED_EXT_ID, STORE_EXT_ID]
+      : [STORE_EXT_ID, UNPACKED_EXT_ID]
 
   tryIds(ids, 0, null)
 })()

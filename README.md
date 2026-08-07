@@ -128,34 +128,34 @@ Auth still uses **`chrome.identity`** with a **Chrome extension** OAuth client. 
    - **Application privacy policy link:** `https://mypipcam.earnyour.com/privacy` (host or mirror [`PRIVACY.md`](PRIVACY.md) there)
    - **Application terms of service link** (optional): `https://mypipcam.earnyour.com/terms` (host or mirror [`TERMS.md`](TERMS.md) there)
    - **Authorized domains:** add `earnyour.com`
-4. Create credentials: **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-5. Application type: **Chrome extension** (not “Web application”).
-6. Item ID / Application ID: paste the **extension ID shown on `chrome://extensions`**
-   (Developer mode) — **not** the website hostname.
-   - **Chrome Web Store (live):** `meiehjfjcaahfjcdneoegjkmajbfghmm` — use this Item ID for the published / store build (Connect Google for store users).
-   - **Unpacked with manifest `key`:** `akpchobfndfddajiihkkdpnihihdicjc` — local dist builds that keep `key`.
-   - Unpacked *without* `key` gets a different Chrome-assigned ID; Item ID must match that live ID or OAuth fails (“bad client id” / “Authorization page could not be loaded”).
-   Click path: **APIs & Services → Credentials →** Chrome-extension OAuth client → **Item ID**.
-   Connect Google surfaces the live extension ID in the Settings error when auth fails for a client mismatch. See [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md).
-7. Copy the **Client ID** (ends with `.apps.googleusercontent.com`).
-8. Put it in gitignored env (never commit the real ID):
+4. Create **two** credentials (recommended): **APIs & Services → Credentials → Create credentials → OAuth client ID** — Application type **Chrome extension** (not “Web application”) for each.
+5. Item ID / Application ID = the **extension ID** for that build — **not** the website hostname:
+
+| Client | Suggested name | Item ID | Use |
+| --- | --- | --- | --- |
+| **A — store** | `MyPipCam Store` | `moalajbpehfocfeecpleceplighfhim` | Store zip / published listing only |
+| **B — local** | `MyPipCam Local` | `akpchobfndfddajiihkkdpnihihdicjc` | Daily `.env.local` + unpacked `dist` (manifest `key` present) |
+
+   Unpacked *without* `key` gets a random third ID; OAuth will fail until you reload a build that keeps `key`. Do not flip one client’s Item ID between store and local. Full dual-client workflow: [docs/marketing/CHROME_WEBSTORE.md](docs/marketing/CHROME_WEBSTORE.md). Connect Google surfaces the live extension ID in Settings when auth fails for a mismatch.
+6. Copy **Client B**’s **Client ID** (ends with `.apps.googleusercontent.com`) for local work.
+7. Put it in gitignored env (never commit the real ID):
 
 ```bash
 cp apps/extension/.env.example apps/extension/.env.local
-# edit .env.local:
+# edit .env.local — Client B (local Item ID), not the store client:
 VITE_GOOGLE_OAUTH_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com
 ```
 
-`driveConfig.ts` reads `VITE_GOOGLE_OAUTH_CLIENT_ID` at build time; the committed fallback is a placeholder. The manifest `oauth2.client_id` imports that value automatically.
+`driveConfig.ts` reads `VITE_GOOGLE_OAUTH_CLIENT_ID` at build time; the committed fallback is a placeholder. The manifest `oauth2.client_id` imports that value automatically. Bake Client A only when packaging the store zip.
 
-9. Rebuild and reload:
+8. Rebuild and reload:
 
 ```bash
 cd apps/extension
 npm run build
 ```
 
-Then **Reload** the extension on `chrome://extensions`.
+Then **Reload** the extension on `chrome://extensions` (ID should be `akpchobfndfddajiihkkdpnihihdicjc`).
 
 ### Using Drive in the extension
 
@@ -217,7 +217,9 @@ npm run build
 
 Shortcut: **⌘⇧U** (Mac) / **Ctrl+Shift+U** (Windows/Linux) — start or stop.
 
-**Extension IDs:** store (live) `meiehjfjcaahfjcdneoegjkmajbfghmm` · unpacked (`key`) `akpchobfndfddajiihkkdpnihihdicjc`  
+**Extension IDs:** store (live) `moalajbpehfocfeecpleceplighfhim` · unpacked (`key`) `akpchobfndfddajiihkkdpnihihdicjc`  
+**Store listing:** [chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim](https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim)  
+Library page (store): `chrome-extension://moalajbpehfocfeecpleceplighfhim/src/library/index.html`  
 Library page (unpacked): `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
 **Open in Chrome…** (macOS) opens the HTTPS bridge `https://mypipcam.earnyour.com/open-library?ext=…` with either ID so the extension opens Library via `chrome.tabs` — direct `chrome-extension://` navigation is often blocked by ad blockers (`ERR_BLOCKED_BY_CLIENT`).  
 (The macOS app **Open Recording Library** menu opens this URL.)
