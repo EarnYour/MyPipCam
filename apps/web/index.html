@@ -87,9 +87,10 @@
             "applicationCategory": "MultimediaApplication",
             "operatingSystem": "macOS, Chrome",
             "url": "https://mypipcam.earnyour.com/",
-            "downloadUrl": "https://github.com/EarnYour/MyPipCam",
+            "downloadUrl": "https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm",
+            "installUrl": "https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm",
             "image": "https://mypipcam.earnyour.com/assets/og.png",
-            "description": "Free open-source screen and camera PiP recorder with Google Drive sync, share watch pages that track views, and a shared local library for Chrome and Mac.",
+            "description": "Free open-source screen and camera PiP recorder for Chrome (Chrome Web Store) with an optional macOS companion, Google Drive sync, share watch pages that track views, and a shared local library.",
             "offers": {
               "@type": "Offer",
               "price": "0",
@@ -142,7 +143,7 @@
                 "name": "How do I install MyPipCam?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Get the Chrome extension and macOS app from the GitHub repository at https://github.com/EarnYour/MyPipCam. Follow the README for build and install steps. Connect Google Drive from Library → Settings after install."
+                  "text": "Install the Chrome extension from the Chrome Web Store: https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm. Source code and the optional macOS app are on GitHub at https://github.com/EarnYour/MyPipCam. Connect Google Drive from Library → Settings after install."
                 }
               },
               {
@@ -174,6 +175,11 @@
         <nav class="nav" aria-label="Primary">
           <a href="#watch">Watch</a>
           <a href="#see-it">Screenshots</a>
+          <a
+            href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+            rel="noopener noreferrer"
+            >Add to Chrome</a
+          >
           <a href="#install">Install</a>
           <a href="#support">Support</a>
           <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
@@ -202,8 +208,14 @@
             <div class="cta-row">
               <a
                 class="btn btn--primary"
+                href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                rel="noopener noreferrer"
+                >Add to Chrome</a
+              >
+              <a
+                class="btn btn--ghost"
                 href="https://github.com/EarnYour/MyPipCam"
-                >Download on GitHub</a
+                >View on GitHub</a
               >
               <a
                 class="btn btn--tip"
@@ -212,11 +224,6 @@
                 >Support MyPipCam</a
               >
               <a class="btn btn--ghost" href="#watch">Watch the demo</a>
-              <a
-                class="btn btn--ghost"
-                href="https://github.com/EarnYour/MyPipCam#readme"
-                >Install guide</a
-              >
             </div>
           </div>
           <div class="hero__visual" aria-hidden="true">
@@ -262,21 +269,24 @@
                 >Open the promo MP4</a
               >
               or
-              <a href="https://github.com/EarnYour/MyPipCam"
-                >get MyPipCam on GitHub</a
+              <a
+                href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                rel="noopener noreferrer"
+                >Add MyPipCam from the Chrome Web Store</a
               >.
             </p>
           </div>
           <div class="cta-row cta-row--center">
             <a
               class="btn btn--primary"
-              href="https://github.com/EarnYour/MyPipCam"
-              >Get the Chrome + Mac apps</a
+              href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+              rel="noopener noreferrer"
+              >Add to Chrome</a
             >
             <a
               class="btn btn--ghost"
-              href="https://github.com/EarnYour/MyPipCam/releases"
-              >Releases</a
+              href="https://github.com/EarnYour/MyPipCam"
+              >Source &amp; macOS on GitHub</a
             >
           </div>
         </div>
@@ -372,7 +382,12 @@
             <li>
               <h3>Open source &amp; free</h3>
               <p>
-                MIT-licensed. Build and install from
+                MIT-licensed. Install from the
+                <a
+                  href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                  rel="noopener noreferrer"
+                  >Chrome Web Store</a
+                >; source and the macOS app live on
                 <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
                 — core recording works without a paid account.
               </p>
@@ -434,49 +449,59 @@
 
       <section class="section section--install" aria-labelledby="install-title" id="install">
         <div class="section__inner section__inner--install">
-          <h2 id="install-title">Install from GitHub in minutes</h2>
+          <h2 id="install-title">Add MyPipCam to Chrome</h2>
           <p>
-            Clone the repo, build the Chrome extension into
-            <code>apps/extension/dist</code>, load unpacked in Chrome, and
-            optionally install the macOS PiP bubble. Full steps live in the
-            README.
+            The Chrome extension is published on the Chrome Web Store. Pin it,
+            open any http(s) page, and start recording. Source code and the
+            optional macOS PiP bubble are on GitHub.
           </p>
           <ol class="install-steps">
             <li>
-              <h3>Clone</h3>
+              <h3>Add to Chrome</h3>
               <p>
-                <code>git clone https://github.com/EarnYour/MyPipCam.git</code>
+                Open the
+                <a
+                  href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                  rel="noopener noreferrer"
+                  >Chrome Web Store listing</a
+                >
+                → <strong>Add to Chrome</strong> → pin MyPipCam.
               </p>
             </li>
             <li>
-              <h3>Build the extension</h3>
+              <h3>Record</h3>
               <p>
-                <code>cd apps/extension &amp;&amp; npm install &amp;&amp; npm run build</code>
+                Open any http(s) page → click the MyPipCam icon → Tab + Cam or
+                Tab only → start recording.
               </p>
             </li>
             <li>
-              <h3>Load unpacked</h3>
+              <h3>Optional: macOS &amp; source</h3>
               <p>
-                Chrome → Extensions → Developer mode → Load
-                <code>apps/extension/dist</code>
+                Want the floating Mac camera bubble or to build from source?
+                Clone
+                <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
+                and follow the README (developers can also Load unpacked from
+                <code>apps/extension/dist</code>).
               </p>
             </li>
           </ol>
           <div class="cta-row">
             <a
               class="btn btn--primary"
+              href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+              rel="noopener noreferrer"
+              >Add to Chrome</a
+            >
+            <a
+              class="btn btn--ghost"
               href="https://github.com/EarnYour/MyPipCam"
-              >Open GitHub repository</a
+              >View on GitHub</a
             >
             <a
               class="btn btn--ghost"
               href="https://github.com/EarnYour/MyPipCam#readme"
-              >Read the README</a
-            >
-            <a
-              class="btn btn--ghost"
-              href="https://github.com/EarnYour/MyPipCam/blob/master/AGENTS.md"
-              >Agent / build notes</a
+              >README (macOS &amp; build)</a
             >
           </div>
         </div>
@@ -557,12 +582,16 @@
             <details>
               <summary><h3>How do I install MyPipCam?</h3></summary>
               <p>
-                Get the extension and macOS app from
-                <a href="https://github.com/EarnYour/MyPipCam"
-                  >GitHub</a
+                Install the Chrome extension from the
+                <a
+                  href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                  rel="noopener noreferrer"
+                  >Chrome Web Store</a
                 >
-                and follow the README. After install, connect Drive from Library
-                → Settings if you want cloud sync and share views.
+                (Add to Chrome). Source code and the optional macOS app are on
+                <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>.
+                After install, connect Drive from Library → Settings if you want
+                cloud sync and share views.
               </p>
             </details>
             <details>
@@ -608,6 +637,11 @@
       <div class="site-footer__inner">
         <p>© 2026 MyPipCam · EarnYour Marketing</p>
         <nav aria-label="Footer">
+          <a
+            href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+            rel="noopener noreferrer"
+            >Chrome Web Store</a
+          >
           <a href="https://github.com/EarnYour/MyPipCam">GitHub</a>
           <a
             href="https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09"

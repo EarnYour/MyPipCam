@@ -2,6 +2,8 @@
 
 Static marketing site plus serverless share APIs and Loom-style watch pages.
 
+**Primary CTA:** [Chrome Web Store — Add to Chrome](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm). Secondary: GitHub (source / macOS).
+
 **Tip jar:** [donate.stripe.com/…](https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09) (pay-what-you-want; hero CTA + `#support` section on the funnel + `?thanks=1` after payment).
 
 ## Share links

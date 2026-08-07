@@ -4,6 +4,8 @@ Read this first after cloning. Prefer these commands over inventing a root works
 
 Product: **MyPipCam** (EarnYour Marketing) · Site: [mypipcam.earnyour.com](https://mypipcam.earnyour.com) · Brand: [earnyour.com](https://earnyour.com)
 
+**End users:** install from the [Chrome Web Store](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm) (ID `meiehjfjcaahfjcdneoegjkmajbfghmm`). This doc is the **developer / agent** path (Load unpacked). Funnel CTAs should lead with the Store; GitHub / macOS are secondary.
+
 Deeper product docs: [README.md](README.md) · Human PR norms: [CONTRIBUTING.md](CONTRIBUTING.md) · Secrets policy: [SECURITY.md](SECURITY.md)
 
 ---
@@ -26,7 +28,7 @@ Apps are independent. Always `cd` into the app you are building.
 | Need | When |
 | --- | --- |
 | **Node.js 20+** (22 OK) + npm | Extension and web |
-| **Google Chrome** (or Chromium) | Load unpacked extension |
+| **Google Chrome** (or Chromium) | Store install or Load unpacked for local builds |
 | **macOS 14+ + Xcode 16+** | macOS app only |
 | **ImageMagick** (`magick` on PATH) | Only `./scripts/install-macos-app.sh` (icon generation) |
 | **Vercel CLI** (optional) | Local/prod deploy of `apps/web` |
@@ -72,7 +74,7 @@ npm run dev
 | **Chrome Web Store** (live / Published — public) | `meiehjfjcaahfjcdneoegjkmajbfghmm` |
 | **Unpacked** (manifest `key` present) | `akpchobfndfddajiihkkdpnihihdicjc` |
 
-Public listing: `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm` (also `https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`).
+Public listing: `https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm` (also `https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`).
 
 Google Cloud OAuth **Item ID** must match the install under test. Prefer **two** Chrome-extension OAuth clients (do not flip one Item ID):
 

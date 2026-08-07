@@ -337,7 +337,7 @@ export const beats: Beat[] = [
         subtitle: "Chrome extension + Mac app",
         bullets: [
           "Grab GitHub Releases",
-          "Load unpacked in Chrome",
+          "Add to Chrome from the Web Store",
           "Replace Loom for free",
         ],
         accentWord: "Install",

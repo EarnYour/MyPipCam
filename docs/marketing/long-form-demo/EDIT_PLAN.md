@@ -27,7 +27,9 @@ Thumbnail / messaging alignment: **Replace Loom for free**
 Links:
 
 - Site: https://mypipcam.earnyour.com  
-- Releases: https://github.com/EarnYour/MyPipCam/releases  
+- Chrome Web Store: https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm  
+- GitHub (source / macOS): https://github.com/EarnYour/MyPipCam  
+
 - Tip (optional, soft): Stripe tip jar only if it feels natural — never hard-sell after “free forever”
 
 ---
@@ -40,13 +42,13 @@ Target pacing: energetic, popup-forward, glass overlays. Trim talking-head fille
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Cold hook** | 0:00–0:35 | 0:00–0:45 | Glass title card: “Replace Loom for free” | MyPipCam · Free forever |
 | 2 | **Problem** | 0:35–1:20 | 5:00–6:30 | Popup: “No Loom bill” · “No seat tax” | Why I built this |
-| 3 | **Install** | 1:20–2:20 | 29:45–31:30 | Steps popup: Download zip → Load unpacked | Install in under a minute |
+| 3 | **Install** | 1:20–2:20 | 29:45–31:30 | Steps popup: Chrome Web Store → Add to Chrome | Install in under a minute |
 | 4 | **Record (Chrome)** | 2:20–3:40 | 24:40–25:30 | Callout: “Tab + Cam PiP” | Record this tab |
 | 5 | **PiP flex** | 3:40–4:40 | 27:35–28:30 | Callout: Shape · Size · Always on top | macOS camera bubble |
 | 6 | **Library** | 4:40–5:40 | 39:15–40:10 | Popup: “Local first · Drive optional” | Your recordings, your disk |
 | 7 | **Editor** | 5:40–7:00 | 36:50–38:00 | Callout: Cut · Silence · Export | Trim without SaaS |
 | 8 | **Desktop path** | 7:00–7:40 | 23:50–24:25 | Soft: “Leave Chrome? Still covered” | Desktop + PiP |
-| 9 | **CTA** | 7:40–8:30+ | 40:30–41:30 + end card | End card glass: site + releases | Install free · Link in description |
+| 9 | **CTA** | 7:40–8:30+ | 40:30–41:30 + end card | End card glass: Chrome Web Store + site; GitHub secondary | Add to Chrome · Link in description |
 
 Stretch to 10–12 min by keeping more Install + Editor B-roll and one clean “share link / view counts” moment from Library detail (~24:40).
 
@@ -76,11 +78,11 @@ Keep more talking-head context from 0–23 min, but **jump-cut** silence. YouTub
 1. **0:05** — Brand + promise on screen (don’t wait for VO).  
 2. **After Install** — “Pin it → record any https tab.”  
 3. **After Library** — “No subscription. Files stay yours.”  
-4. **End card (8s hold)** — URL large, GitHub releases secondary, QR optional.
+4. **End card (8s hold)** — Chrome Web Store / site URL large, GitHub secondary, QR optional.
 
 Spoken CTA (suggested):
 
-> MyPipCam is free — Chrome extension and Mac app. Grab it at mypipcam.earnyour.com or the GitHub releases link below. Replace Loom for free.
+> MyPipCam is free — add the Chrome extension from the Chrome Web Store, or grab the Mac app and source on GitHub. Start at mypipcam.earnyour.com. Replace Loom for free.
 
 ---
 
@@ -94,7 +96,7 @@ Spoken CTA (suggested):
 | LT-mac | macOS app | Always-on-top bubble |
 | LT-lib | Local library | Optional Google Drive |
 | LT-edit | Built-in editor | Trim · cut · export |
-| LT-cta | Install free | mypipcam.earnyour.com |
+| LT-cta | Add to Chrome | Chrome Web Store |
 
 ---
 
@@ -111,7 +113,7 @@ Use short (1.5–2.5s) glass cards — spring in, soft glow, fade out. Never cov
 | macOS | Drag it anywhere | Orange |
 | Library | Files on your Mac | Mint |
 | Editor | Export locally | Orange |
-| CTA | Install → mypipcam.earnyour.com | Orange + mint |
+| CTA | Add to Chrome → Chrome Web Store | Orange + mint |
 
 Design tokens / CSS: [`OVERLAY_DESIGN.md`](./OVERLAY_DESIGN.md) · HTML kit: [`overlays/`](./overlays/).
 
@@ -144,7 +146,8 @@ Record tab + cam PiP, keep a local library, optional Google Drive, trim in the e
 
 Install (free):
 → https://mypipcam.earnyour.com
-→ https://github.com/EarnYour/MyPipCam/releases
+→ https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm  
+→ https://github.com/EarnYour/MyPipCam (source / macOS)
 
 0:00 Hook
 …

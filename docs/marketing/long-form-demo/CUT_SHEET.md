@@ -11,7 +11,7 @@ Timestamps are **source MOV** times (`hh:mm:ss`).
 | --- | --- | --- | --- | --- |
 | Hook | 00:00:00 | 00:00:45 | Hook — “Replace Loom for free” | Talking head cold open; punchy VO / overlays |
 | Problem | 00:05:00 | 00:06:30 | Problem — Loom bills & lock-in | Talking head; popup “No Loom bill” |
-| Install | 00:29:45 | 00:31:30 | Install — GitHub in 60s | Releases page + circular PiP; show zip / Load unpacked |
+| Install | 00:29:45 | 00:31:30 | Install — Chrome Web Store | Store listing + circular PiP; Add to Chrome (GitHub secondary) |
 | Record | 00:24:20 | 00:25:30 | Record — Tab + Cam PiP | Library / just-finished recording energy |
 | PiP | 00:27:35 | 00:28:30 | PiP — macOS bubble that floats | Right-click Size / Shape / Record… |
 | Library | 00:39:15 | 00:40:10 | Library — local + Drive | Grid with DRIVE badges, “Link ready” |

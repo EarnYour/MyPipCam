@@ -3,7 +3,7 @@
 **Product name:** MyPipCam (not MyPixCam)  
 **Brand:** EarnYour Marketing · [mypipcam.earnyour.com](https://mypipcam.earnyour.com)  
 **Dashboard store ID (live / Published — public):** `meiehjfjcaahfjcdneoegjkmajbfghmm`  
-**Public listing:** [chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm) · [chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm)
+**Public listing:** [chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm) · [chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm)
 
 > Prefer **two** Chrome-extension OAuth clients:  
 > **Client A** Item ID = store `meiehjfjcaahfjcdneoegjkmajbfghmm` (store zip only).  
@@ -177,7 +177,7 @@ MyPipCam records the current Chrome tab with an optional live camera picture-in-
 ## After publish — OAuth reminder
 
 **Live store ID:** `meiehjfjcaahfjcdneoegjkmajbfghmm`  
-**Public listing:** `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm`  
+**Public listing:** `https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`  
 **Unpacked (manifest `key`) ID:** `akpchobfndfddajiihkkdpnihihdicjc`
 
 Use **two** clients — do not put the store client ID into daily `.env.local`.

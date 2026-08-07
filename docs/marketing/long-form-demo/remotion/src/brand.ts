@@ -5,6 +5,9 @@ export const brand = {
   ink: "#111312",
   site: "mypipcam.earnyour.com",
   siteUrl: "https://mypipcam.earnyour.com",
+  store: "chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm",
+  storeUrl:
+    "https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm",
   releases: "github.com/EarnYour/MyPipCam/releases",
   releasesUrl: "https://github.com/EarnYour/MyPipCam/releases",
 } as const;

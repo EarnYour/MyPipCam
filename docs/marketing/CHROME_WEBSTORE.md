@@ -13,7 +13,7 @@ Local / unpacked builds **keep** `key` so Chrome assigns a **stable extension ID
 **Live Chrome Web Store item ID:** `meiehjfjcaahfjcdneoegjkmajbfghmm` (Published — public; confirmed from the public listing URL — must be 32 chars `a–p`).
 
 **Public listing URLs:**
-- `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm`
+- `https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`
 - `https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`
 
 | Build | Extension ID | When |
@@ -87,7 +87,7 @@ If you only have one Chrome-extension client today: set its **Item ID** back to 
 ## After publish (live)
 
 1. Live store extension ID: `meiehjfjcaahfjcdneoegjkmajbfghmm` (Developer Dashboard header / item ID).  
-2. Public URL: `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm`  
+2. Public URL: `https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`  
 3. Ensure **Client A** Item ID is that store ID and the published package was built with Client A’s client ID.  
 4. Keep local `.env.local` on **Client B** so unpacked Connect Google keeps working.
 

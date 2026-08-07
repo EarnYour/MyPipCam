@@ -645,7 +645,8 @@ export function SettingsPanel({
               </summary>
               <div className="settings-advanced-body">
                 <p className="settings-hint">
-                  Load unpacked from <code>apps/extension/dist</code> after build.
+                  Store installs update automatically. Local builds: Load unpacked
+                  from <code>apps/extension/dist</code> after build.
                 </p>
                 {swHealth && (
                   <div className="settings-health-meta">

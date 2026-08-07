@@ -51,10 +51,21 @@
   function showFallback(reason, extId) {
     if (titleEl) titleEl.textContent = 'Couldn’t reach the extension'
     if (bodyEl) {
-      bodyEl.textContent =
-        'Install MyPipCam from the Chrome Web Store, or Load unpacked → apps/extension/dist, then click Open extension page. If that shows ERR_BLOCKED_BY_CLIENT, disable your ad blocker for this tab or open Library from the extension popup.'
+      bodyEl.innerHTML =
+        'Install MyPipCam from the <a href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm" rel="noopener noreferrer">Chrome Web Store</a>, then click Open extension page. Developers can Load unpacked → <code>apps/extension/dist</code>. If that shows ERR_BLOCKED_BY_CLIENT, disable your ad blocker for this tab or open Library from the extension popup.'
     }
     if (actionsEl) actionsEl.hidden = false
+    var storeLink = document.getElementById('openStore')
+    if (!storeLink && actionsEl) {
+      storeLink = document.createElement('a')
+      storeLink.id = 'openStore'
+      storeLink.className = 'btn ghost'
+      storeLink.href =
+        'https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm'
+      storeLink.rel = 'noopener noreferrer'
+      storeLink.textContent = 'Chrome Web Store'
+      actionsEl.appendChild(storeLink)
+    }
     if (hintEl) {
       hintEl.hidden = false
       hintEl.textContent =

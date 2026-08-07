@@ -8,6 +8,8 @@ Monorepo for **MyPipCam**: Loom-style camera PiP on macOS and in Chrome.
 
 **Product site / funnel:** [mypipcam.earnyour.com](https://mypipcam.earnyour.com)
 
+**Chrome extension (end users):** [Add to Chrome — Chrome Web Store](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm) (ID `meiehjfjcaahfjcdneoegjkmajbfghmm`)
+
 **Tip jar (optional):** [Support MyPipCam on Stripe](https://donate.stripe.com/7sY9AVb6S9uadWwek4cAo09) — pay what you want; keeps the project free and open source.
 
 | Path | What |
@@ -22,9 +24,19 @@ Monorepo for **MyPipCam**: Loom-style camera PiP on macOS and in Chrome.
 
 ## Quick start
 
-There is no root `package.json` — build each app from its directory.
+### End users — Chrome Web Store (primary)
 
-### Chrome extension (primary)
+Install the published extension:
+
+**[Add MyPipCam to Chrome](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm)**
+
+Pin it, open any http(s) page, click the icon → start recording. Optional Google Drive: Library → Settings → Connect Google.
+
+Source, issues, and the **macOS** companion app are on this GitHub repo (secondary).
+
+### Developers — Load unpacked
+
+There is no root `package.json` — build each app from its directory.
 
 ```bash
 cd /path/to/MyPipCam/apps/extension
@@ -199,7 +211,13 @@ vercel --prod
 
 ## Chrome extension
 
-### Load unpacked
+### Chrome Web Store (end users)
+
+**[Add to Chrome](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm)** → pin MyPipCam → open an http(s) page → start recording.
+
+Shortcut: **⌘⇧U** (Mac) / **Ctrl+Shift+U** (Windows/Linux) — start or stop.
+
+### Load unpacked (developers)
 
 1. Build:
 
@@ -215,10 +233,8 @@ npm run build
 5. Pin **MyPipCam**, open a normal http(s) page, click the icon → pick mode → **Start recording**
    — **3→2→1** countdown, then a draggable camera bubble + left control dock (no big recorder window).
 
-Shortcut: **⌘⇧U** (Mac) / **Ctrl+Shift+U** (Windows/Linux) — start or stop.
-
 **Extension IDs:** store (live) `meiehjfjcaahfjcdneoegjkmajbfghmm` · unpacked (`key`) `akpchobfndfddajiihkkdpnihihdicjc`  
-**Store listing:** [chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm)  
+**Store listing:** [chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm)  
 Library page (store): `chrome-extension://meiehjfjcaahfjcdneoegjkmajbfghmm/src/library/index.html`  
 Library page (unpacked): `chrome-extension://akpchobfndfddajiihkkdpnihihdicjc/src/library/index.html`  
 **Open in Chrome…** (macOS) opens the HTTPS bridge `https://mypipcam.earnyour.com/open-library?ext=…` with either ID so the extension opens Library via `chrome.tabs` — direct `chrome-extension://` navigation is often blocked by ad blockers (`ERR_BLOCKED_BY_CLIENT`).  
@@ -359,7 +375,6 @@ On-disk layout:
 ## Out of scope (for now)
 
 - Drawing tools, reaction stickers, auto-zoom
-- Chrome Web Store publish
 - Native Mac Google Drive SDK (Chrome Drive library is enough for multi-browser sync)
 
 ---

@@ -57,7 +57,7 @@ export const EndCard: React.FC = () => {
             marginBottom: 12,
           }}
         >
-          Install{" "}
+          Add{" "}
           <span
             style={{
               color: brand.orange,
@@ -65,14 +65,15 @@ export const EndCard: React.FC = () => {
             }}
           >
             MyPipCam
-          </span>
+          </span>{" "}
+          to Chrome
         </div>
         <div style={{ fontSize: 26, opacity: 0.92, marginBottom: 32 }}>
-          Replace Loom for free — Chrome extension + Mac bubble
+          Replace Loom for free — Chrome Web Store + optional Mac bubble
         </div>
         <div
           style={{
-            fontSize: 30,
+            fontSize: 26,
             color: brand.mint,
             textShadow: "0 0 16px rgba(125,223,154,0.4)",
             lineHeight: 1.55,
@@ -80,9 +81,13 @@ export const EndCard: React.FC = () => {
             marginBottom: 20,
           }}
         >
-          {brand.siteUrl}
+          {brand.store}
           <br />
-          <span style={{ fontSize: 24, opacity: 0.95 }}>
+          <span style={{ fontSize: 22, opacity: 0.95 }}>
+            {brand.siteUrl}
+          </span>
+          <br />
+          <span style={{ fontSize: 20, opacity: 0.85 }}>
             {brand.releasesUrl}
           </span>
         </div>

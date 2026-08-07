@@ -4,7 +4,7 @@ import Darwin
 /// Opens the Chrome extension library/editor (secondary path for transcription & editing).
 /// Prefer the native Recording Library window when a shared folder is configured.
 enum ExtensionLibraryOpener {
-    /// Stable ID from the public `key` in `apps/extension/manifest.config.ts` (Load unpacked).
+    /// Unpacked ID from the public `key` in `apps/extension/manifest.config.ts` (Load unpacked / local builds).
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
     /// Live Chrome Web Store item ID (published zip without manifest `key`).
     static let chromeWebStoreExtensionID = "meiehjfjcaahfjcdneoegjkmajbfghmm"
@@ -16,7 +16,12 @@ enum ExtensionLibraryOpener {
     /// Pass `ext=` = store or unpacked ID (`chromeWebStoreExtensionID` / `defaultExtensionID`).
     static let bridgeOpenPath = "https://mypipcam.earnyour.com/open-library"
     static let extensionDisplayName = "MyPipCam"
+    /// Authoritative Chrome Web Store listing (primary end-user install).
+    static let chromeWebStoreURL = URL(
+        string: "https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+    )!
     static let releasesURL = URL(string: "https://github.com/EarnYour/MyPipCam/releases")!
+    static let githubURL = URL(string: "https://github.com/EarnYour/MyPipCam")!
     static let extensionReleaseTag = "v1.1.10"
 
     private static let firstOpenTipKey = "hasShownLibraryExtensionTip"
@@ -50,8 +55,8 @@ enum ExtensionLibraryOpener {
 
     /// Resolves which extension ID to use, in order:
     /// 1. UserDefaults override (`chromeExtensionId`)
-    /// 2. Auto-detected install under Chromium profiles (unpacked key ID, then store ID, then name match)
-    /// 3. Stable unpacked ID from the packed manifest `key`
+    /// 2. Auto-detected install under Chromium profiles (store ID, then unpacked key ID, then name match)
+    /// 3. Published Chrome Web Store ID (end-user default)
     static func resolveExtensionID(preferred: String? = nil) -> String {
         if let preferred {
             let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -71,7 +76,7 @@ enum ExtensionLibraryOpener {
             return detected
         }
 
-        return defaultExtensionID
+        return chromeWebStoreExtensionID
     }
 
     /// Opens the library in Chrome/Chromium. Pass `recordingID` to highlight a clip (`?id=`).
@@ -104,7 +109,7 @@ enum ExtensionLibraryOpener {
             You can still try opening the library bridge — it works when the extension is installed under ID:
             \(id)
 
-            Or install/reload it first (Load unpacked → apps/extension/dist, or GitHub Releases \(extensionReleaseTag)).
+            Or install/reload it first from the Chrome Web Store, or Load unpacked → apps/extension/dist for local builds.
             """
             alert.alertStyle = .informational
             alert.addButton(withTitle: "Open Anyway")
@@ -154,22 +159,25 @@ enum ExtensionLibraryOpener {
         case .manual:
             alert.messageText = "Set Chrome Extension ID"
             alert.informativeText = """
-            If Open in Chrome… shows a blank/error page, your unpacked extension ID may differ from the default.
+            If Open in Chrome… shows a blank/error page, paste the ID from chrome://extensions.
+
+            Store ID: \(chromeWebStoreExtensionID)
+            Unpacked (local) ID: \(defaultExtensionID)
 
             1. Open chrome://extensions
-            2. Enable Developer mode
-            3. Under MyPipCam, copy the ID (32 letters)
-            4. Paste it below
+            2. Under MyPipCam, copy the ID (32 letters)
+            3. Paste it below
             """
         case .invalidOrMissing:
             alert.messageText = "Extension ID Needed"
             alert.informativeText = """
-            Paste your MyPipCam extension ID from chrome://extensions (Developer mode → copy ID under the extension).
+            Paste your MyPipCam extension ID from chrome://extensions (copy ID under the extension).
+            Store installs use \(chromeWebStoreExtensionID).
             """
         case .pageDidNotLoad:
             alert.messageText = "Library Didn’t Load?"
             alert.informativeText = """
-            Your Chrome extension may be installed under a different ID (common if it was loaded unpacked before the stable key was added).
+            Your Chrome extension may be installed under a different ID (store vs unpacked local).
 
             Paste the ID from chrome://extensions (32 letters under MyPipCam), then Open Library.
             """
@@ -177,16 +185,16 @@ enum ExtensionLibraryOpener {
         alert.alertStyle = .informational
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.placeholderString = "e.g. \(defaultExtensionID)"
+        field.placeholderString = "e.g. \(chromeWebStoreExtensionID)"
         field.stringValue = UserDefaults.standard.string(forKey: extensionIdDefaultsKey) ?? ""
         if field.stringValue.isEmpty {
-            field.stringValue = detectInstalledExtensionID() ?? defaultExtensionID
+            field.stringValue = detectInstalledExtensionID() ?? chromeWebStoreExtensionID
         }
         alert.accessoryView = field
 
         alert.addButton(withTitle: thenOpen ? "Save & Open Library" : "Save")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Use Default ID")
+        alert.addButton(withTitle: "Use Store ID")
         alert.window.initialFirstResponder = field
 
         let response = alert.runModal()
@@ -205,50 +213,52 @@ enum ExtensionLibraryOpener {
         case .alertThirdButtonReturn:
             UserDefaults.standard.set("", forKey: extensionIdDefaultsKey)
             if thenOpen {
-                openRecordingLibrary(extensionID: defaultExtensionID, recordingID: recordingID)
+                openRecordingLibrary(extensionID: chromeWebStoreExtensionID, recordingID: recordingID)
             }
         default:
             break
         }
     }
 
-    /// Guides the user through loading the unpacked extension.
+    /// Guides the user through installing the Chrome extension (Store first).
     @MainActor
     static func showInstallChromeExtensionHelp() {
-        openChromeExtensionsPage()
-        revealExtensionDistInFinder()
-
         let detected = detectInstalledExtensionID()
         let idLine = detected.map { "Detected installed ID: \($0)" }
-            ?? "Default (manifest key) ID: \(defaultExtensionID)"
+            ?? "Default (Chrome Web Store) ID: \(chromeWebStoreExtensionID)"
 
         let alert = NSAlert()
         alert.messageText = "Install MyPipCam Chrome Extension"
         alert.informativeText = """
         The Chrome extension records clips and can share them via a local library folder with this Mac app.
 
-        1. Build once: cd apps/extension && npm run build
-           (or download the extension from GitHub Releases \(extensionReleaseTag))
-        2. Chrome opens chrome://extensions — enable Developer mode
-        3. Click “Load unpacked” and select the revealed dist folder
-           (…/MyPipCam/apps/extension/dist)
-        4. In both apps, choose the same folder (suggested: ~/Movies/MyPipCam)
+        Recommended:
+        1. Add MyPipCam from the Chrome Web Store (Add to Chrome)
+        2. Pin the extension, then choose the same library folder in both apps
+           (suggested: ~/Movies/MyPipCam)
+
+        Developers (local builds):
+        1. cd apps/extension && npm run build
+        2. chrome://extensions → Developer mode → Load unpacked → apps/extension/dist
 
         \(idLine)
-        Bridge: \(bridgeOpenPath)?ext=\(detected ?? defaultExtensionID)
-        Extension page: chrome-extension://\(detected ?? defaultExtensionID)/\(libraryPath)
+        Store: \(chromeWebStoreURL.absoluteString)
+        Bridge: \(bridgeOpenPath)?ext=\(detected ?? chromeWebStoreExtensionID)
 
         Use Open in Chrome… for the editor/transcription UI. If Chrome shows ERR_BLOCKED_BY_CLIENT, disable the ad blocker for the tab or open Library from the extension popup. Wrong ID → Set Extension ID….
         """
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Open Chrome Web Store…")
         alert.addButton(withTitle: "Set Extension ID…")
-        alert.addButton(withTitle: "Open Releases…")
+        alert.addButton(withTitle: "Open GitHub…")
+        alert.addButton(withTitle: "OK")
         let response = alert.runModal()
-        if response == .alertSecondButtonReturn {
+        if response == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(chromeWebStoreURL)
+        } else if response == .alertSecondButtonReturn {
             promptForExtensionID(reason: .manual, thenOpen: true)
         } else if response == .alertThirdButtonReturn {
-            NSWorkspace.shared.open(releasesURL)
+            NSWorkspace.shared.open(githubURL)
         }
     }
 
@@ -321,7 +331,7 @@ enum ExtensionLibraryOpener {
         found.append(contentsOf: detectPackedExtensionIDs())
         found.append(contentsOf: detectUnpackedExtensionIDsFromPreferences())
         found.append(contentsOf: detectExtensionIDsViaPathProbe())
-        // Unpacked key ID first (dev), then store ID, then any other MyPipCam match.
+        // Store ID first (published), then unpacked key ID, then any other MyPipCam match.
         var ordered: [String] = []
         for known in knownExtensionIDs where found.contains(known) {
             ordered.append(known)
@@ -818,9 +828,6 @@ enum ExtensionLibraryOpener {
         openFailed: Bool,
         detail: String? = nil
     ) {
-        openChromeExtensionsPage()
-        revealExtensionDistInFinder()
-
         let alert = NSAlert()
         alert.messageText = openFailed
             ? "Couldn’t Open Chrome Library"
@@ -828,12 +835,11 @@ enum ExtensionLibraryOpener {
         var text = """
         Open in Chrome… needs the MyPipCam Chrome extension loaded in Google Chrome.
 
-        1. Go to chrome://extensions (opened for you)
-        2. Enable Developer mode
-        3. Load unpacked → select apps/extension/dist (revealed in Finder if found)
-           Or install from GitHub Releases (\(extensionReleaseTag) extension build)
-        4. Confirm the ID under MyPipCam is the store ID (\(chromeWebStoreExtensionID)) or unpacked (\(defaultExtensionID)) — or use Set Extension ID…
-        5. Choose the same library folder as this Mac app (suggested: ~/Movies/MyPipCam)
+        1. Install from the Chrome Web Store (recommended):
+           \(chromeWebStoreURL.absoluteString)
+        2. Or for local builds: chrome://extensions → Developer mode → Load unpacked → apps/extension/dist
+        3. Confirm the ID under MyPipCam is the store ID (\(chromeWebStoreExtensionID)) or unpacked (\(defaultExtensionID)) — or use Set Extension ID…
+        4. Choose the same library folder as this Mac app (suggested: ~/Movies/MyPipCam)
 
         Bridge URL:
         \(openedURL.absoluteString)
@@ -846,17 +852,19 @@ enum ExtensionLibraryOpener {
         }
         alert.informativeText = text
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Open Chrome Web Store…")
         alert.addButton(withTitle: "Set Extension ID…")
-        alert.addButton(withTitle: "Open Releases…")
+        alert.addButton(withTitle: "Open GitHub…")
         alert.addButton(withTitle: "Copy Bridge URL")
         let response = alert.runModal()
-        // Buttons: OK (1000), Set Extension ID… (1001), Open Releases… (1002), Copy (1003)
+        // Buttons: Store (1000), Set Extension ID… (1001), GitHub (1002), Copy (1003)
         switch response {
+        case .alertFirstButtonReturn:
+            NSWorkspace.shared.open(chromeWebStoreURL)
         case .alertSecondButtonReturn:
             promptForExtensionID(reason: .pageDidNotLoad, thenOpen: true)
         case .alertThirdButtonReturn:
-            NSWorkspace.shared.open(releasesURL)
+            NSWorkspace.shared.open(githubURL)
         case NSApplication.ModalResponse(rawValue: 1003):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(openedURL.absoluteString, forType: .string)
@@ -908,15 +916,16 @@ enum ExtensionLibraryOpener {
         alert.informativeText = """
         Open in Chrome… needs Google Chrome (or another Chromium browser: Arc, Brave, Edge, Vivaldi).
 
-        Install Chrome, then load the MyPipCam extension from:
-        \(releasesURL.absoluteString)
-        (extension build \(extensionReleaseTag), or build apps/extension locally).
+        Install Chrome, then add MyPipCam from the Chrome Web Store:
+        \(chromeWebStoreURL.absoluteString)
+
+        Developers can also Load unpacked from apps/extension/dist (see GitHub).
         """
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Open Releases…")
+        alert.addButton(withTitle: "Open Chrome Web Store…")
         if alert.runModal() == .alertSecondButtonReturn {
-            NSWorkspace.shared.open(releasesURL)
+            NSWorkspace.shared.open(chromeWebStoreURL)
         }
     }
 

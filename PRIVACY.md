@@ -2,15 +2,15 @@
 
 **Last updated:** August 2, 2026
 
-This policy describes how **MyPipCam** (Chrome extension and macOS companion app) handles information. MyPipCam is created by [EarnYour Marketing](https://earnyour.com) and published as free open-source software on GitHub.
+This policy describes how **MyPipCam** (Chrome extension and macOS companion app) handles information. MyPipCam is created by [EarnYour Marketing](https://earnyour.com). The Chrome extension is available on the [Chrome Web Store](https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm); source is free and open source on GitHub.
 
 **Product site:** [https://mypipcam.earnyour.com](https://mypipcam.earnyour.com) (public privacy page when mirrored: [https://mypipcam.earnyour.com/privacy](https://mypipcam.earnyour.com/privacy)). Source of truth for this policy remains this repository file until the live page is updated.
 
-**Short version:** MyPipCam is local-first. Recordings and secrets stay on your device unless **you** connect optional cloud features (OpenAI, Google Drive, or MyPipCam share links). Share-link view counts are optional and only apply when you use Library → Share.
+**Short version:** MyPipCam is local-first. Recordings and secrets stay on your device unless **you** connect optional cloud features (OpenAI, Google Drive, or MyPipCam share links). Share-link view counts are optional and only apply when you use Library → Share. We do **not** sell your recordings or personal data. Contact: [steven@earnyour.com](mailto:steven@earnyour.com).
 
 ## 1. Who this applies to
 
-This policy covers the MyPipCam software you build or install from this repository. It does not cover third-party services you choose to use (OpenAI, Google, Apple, Chrome, etc.). Those have their own privacy policies.
+This policy covers the MyPipCam software you install from the Chrome Web Store or build from this repository. It does not cover third-party services you choose to use (OpenAI, Google, Apple, Chrome, etc.). Those have their own privacy policies.
 
 ## 2. Local-first by design
 
@@ -75,16 +75,20 @@ The macOS companion is a real always-on-top window that shows your selected came
 
 **Share** in the Library (1) enables Google Drive “anyone with the link can view” so the video can play, and (2) copies a **MyPipCam watch URL** (`https://mypipcam.earnyour.com/w/…`) that embeds the Drive preview and counts opens. Google’s access model still governs who can stream the file; revoke access in Google Drive / Google Account settings. View counts are stored by the MyPipCam share API (see §5).
 
-## 8. Children
+## 8. Limited use (Chrome Web Store)
+
+User data handled by MyPipCam (including recordings, optional auth tokens, optional API keys, and optional share view metadata) is used only to provide the product’s single purpose: recording, local library/editing, and optional Drive upload / transcription / share links that you choose. We do not sell or transfer user data to third parties for advertising, and we do not use it to determine creditworthiness or for lending. Optional third parties you connect (Google, OpenAI) process data under their own policies for the feature you invoked.
+
+## 9. Children
 
 MyPipCam is not directed at children. Do not use it to collect personal information from children in violation of applicable law.
 
-## 9. Changes
+## 10. Changes
 
 Privacy practices may change as the project evolves. Updates will be reflected in this file in the repository. Material changes to data leaving the device should be called out clearly.
 
-## 10. Contact
+## 11. Contact
 
-Privacy questions: [mypipcam.earnyour.com](https://mypipcam.earnyour.com), [earnyour.com](https://earnyour.com), or open a GitHub issue.
+Privacy and support: [steven@earnyour.com](mailto:steven@earnyour.com), [mypipcam.earnyour.com](https://mypipcam.earnyour.com), [earnyour.com](https://earnyour.com), or open a GitHub issue.
 
 Security vulnerabilities: see [SECURITY.md](SECURITY.md) (prefer GitHub Security Advisories).
