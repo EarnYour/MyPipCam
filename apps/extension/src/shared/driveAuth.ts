@@ -1,7 +1,9 @@
 import {
+  CHROME_WEB_STORE_EXTENSION_ID,
   DRIVE_SCOPE,
   STABLE_EXTENSION_ID,
   currentExtensionId,
+  extensionInstallChannel,
   isOAuthClientConfigured,
 } from './driveConfig'
 
@@ -33,21 +35,32 @@ function identityApiAvailable(): boolean {
 }
 
 function missingIdentityMessage(): string {
+  const live = currentExtensionId()
+  const channel = extensionInstallChannel(live)
+  const expected =
+    channel === 'store'
+      ? CHROME_WEB_STORE_EXTENSION_ID
+      : `${STABLE_EXTENSION_ID} (Load unpacked from apps/extension/dist with manifest key)`
   return (
-    'chrome.identity is unavailable. Reload MyPipCam from apps/extension/dist ' +
+    'chrome.identity is unavailable. Reload MyPipCam on chrome://extensions ' +
     '(manifest must include the "identity" permission and oauth2). ' +
-    `Confirm chrome://extensions shows ID ${currentExtensionId()} (expected ${STABLE_EXTENSION_ID} with manifest key).`
+    `Confirm chrome://extensions shows ID ${live} (expected ${expected}).`
   )
 }
 
 function itemIdHint(): string {
   const live = currentExtensionId()
+  const channel = extensionInstallChannel(live)
+  const channelHint =
+    channel === 'store'
+      ? ` (Chrome Web Store item ${CHROME_WEB_STORE_EXTENSION_ID})`
+      : channel === 'unpacked-stable'
+        ? ''
+        : ` (for local Drive, Load unpacked from apps/extension/dist so ID is ${STABLE_EXTENSION_ID}; store builds use ${CHROME_WEB_STORE_EXTENSION_ID})`
   return (
     `Google Cloud → APIs & Services → Credentials → your Chrome-extension OAuth client → ` +
     `Item ID must be exactly "${live}"` +
-    (live === STABLE_EXTENSION_ID
-      ? ''
-      : ` (packed builds use ${STABLE_EXTENSION_ID}; reload from dist so manifest key is present)`) +
+    channelHint +
     `. Not the website hostname.`
   )
 }

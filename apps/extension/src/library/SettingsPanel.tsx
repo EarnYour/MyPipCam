@@ -24,7 +24,15 @@ import {
   type DriveConnectionStatus,
 } from '../shared/driveSync'
 import { loadDriveSettings } from '../shared/driveSettings'
-import { DRIVE_LIBRARY_FOLDER_NAME, isOAuthClientConfigured, STABLE_EXTENSION_ID } from '../shared/driveConfig'
+import {
+  DRIVE_LIBRARY_FOLDER_NAME,
+  expectedExtensionId,
+  extensionInstallChannel,
+  isKnownExtensionId,
+  isOAuthClientConfigured,
+  STABLE_EXTENSION_ID,
+  type ExtensionInstallChannel,
+} from '../shared/driveConfig'
 import type { ApiSettings } from '../shared/types'
 
 type Props = {
@@ -69,6 +77,7 @@ export function SettingsPanel({
   const [advancedMsg, setAdvancedMsg] = useState<string | null>(null)
   const [swHealth, setSwHealth] = useState<{
     id: string
+    channel: ExtensionInstallChannel
     expectedId: string
     idMatch: boolean
     ready: boolean
@@ -78,13 +87,16 @@ export function SettingsPanel({
   } | null>(null)
 
   const refreshSwHealth = useCallback(async () => {
-    const expectedId = STABLE_EXTENSION_ID
     const liveId = chrome.runtime.id
+    const channel = extensionInstallChannel(liveId)
+    const expectedId = expectedExtensionId(liveId)
+    const idMatch = isKnownExtensionId(liveId)
     try {
       const res = (await Promise.race([
         chrome.runtime.sendMessage({ type: 'GET_SW_HEALTH' }) as Promise<{
           ok?: boolean
           id?: string
+          channel?: ExtensionInstallChannel
           expectedId?: string
           idMatch?: boolean
           ready?: boolean
@@ -96,6 +108,7 @@ export function SettingsPanel({
       ])) as {
         ok?: boolean
         id?: string
+        channel?: ExtensionInstallChannel
         expectedId?: string
         idMatch?: boolean
         ready?: boolean
@@ -105,8 +118,9 @@ export function SettingsPanel({
       if (!res) {
         setSwHealth({
           id: liveId,
+          channel,
           expectedId,
-          idMatch: liveId === expectedId,
+          idMatch,
           ready: false,
           bootError: null,
           reachable: false,
@@ -114,10 +128,12 @@ export function SettingsPanel({
         })
         return
       }
+      const id = res.id || liveId
       setSwHealth({
-        id: res.id || liveId,
-        expectedId: res.expectedId || expectedId,
-        idMatch: res.idMatch ?? liveId === expectedId,
+        id,
+        channel: res.channel ?? extensionInstallChannel(id),
+        expectedId: res.expectedId || expectedExtensionId(id),
+        idMatch: res.idMatch ?? isKnownExtensionId(id),
         ready: Boolean(res.ready),
         bootError: res.bootError ?? null,
         reachable: true,
@@ -126,8 +142,9 @@ export function SettingsPanel({
       const detail = err instanceof Error ? err.message : String(err)
       setSwHealth({
         id: liveId,
+        channel,
         expectedId,
-        idMatch: liveId === expectedId,
+        idMatch,
         ready: false,
         bootError: null,
         reachable: false,
@@ -383,9 +400,15 @@ export function SettingsPanel({
   const driveConnected = Boolean(drive && isDriveLinked(drive))
   const driveNeedsReconnect = driveConnected && !drive?.signedIn
   const keySet = openai.trim().length > 0
-  const swOk = Boolean(swHealth?.reachable && swHealth.ready && swHealth.idMatch)
-  const swNeedsAttention = Boolean(
-    swHealth && (!swHealth.idMatch || !swHealth.reachable || !swHealth.ready),
+  const swRuntimeOk = Boolean(swHealth?.reachable && swHealth.ready)
+  const swChannel = swHealth?.channel ?? extensionInstallChannel()
+  const swIsStore = swChannel === 'store'
+  // Store / stable unpacked: healthy when SW is up. Never alarm store users for ID.
+  // Random unpacked IDs: soft “Local build” note — not “Needs attention”.
+  const swOk = Boolean(swRuntimeOk && swHealth?.idMatch)
+  const swNeedsAttention = Boolean(swHealth && !swRuntimeOk)
+  const swLocalDevNote = Boolean(
+    swHealth && swRuntimeOk && swChannel === 'dev-other',
   )
 
   return (
@@ -638,24 +661,52 @@ export function SettingsPanel({
               <summary className="settings-advanced-summary">
                 <span className="settings-advanced-label">Advanced</span>
                 {swHealth && (
-                  <StatusChip tone={swOk ? 'success' : swNeedsAttention ? 'warn' : 'neutral'}>
-                    {swOk ? 'Healthy' : swNeedsAttention ? 'Needs attention' : 'Checking…'}
+                  <StatusChip
+                    tone={
+                      swOk
+                        ? 'success'
+                        : swNeedsAttention
+                          ? 'warn'
+                          : swLocalDevNote
+                            ? 'neutral'
+                            : 'neutral'
+                    }
+                  >
+                    {swOk
+                      ? swIsStore
+                        ? 'Store install'
+                        : 'Healthy'
+                      : swNeedsAttention
+                        ? 'Needs attention'
+                        : swLocalDevNote
+                          ? 'Local build'
+                          : 'Checking…'}
                   </StatusChip>
                 )}
               </summary>
               <div className="settings-advanced-body">
                 <p className="settings-hint">
-                  Store installs update automatically. Local builds: Load unpacked
-                  from <code>apps/extension/dist</code> after build.
+                  Chrome Web Store installs update automatically.
+                  {swIsStore ? null : (
+                    <>
+                      {' '}
+                      <span className="muted">
+                        Developers: Load unpacked from <code>apps/extension/dist</code>{' '}
+                        after build (stable local ID{' '}
+                        <code>{STABLE_EXTENSION_ID}</code>).
+                      </span>
+                    </>
+                  )}
                 </p>
                 {swHealth && (
                   <div className="settings-health-meta">
                     <div>
-                      ID <code>{swHealth.id}</code>
-                      {!swHealth.idMatch && (
-                        <span className="settings-health-bad">
+                      {swIsStore ? 'Chrome Web Store' : 'Install'} · ID{' '}
+                      <code>{swHealth.id}</code>
+                      {swLocalDevNote && (
+                        <span className="muted">
                           {' '}
-                          mismatch (expected <code>{swHealth.expectedId}</code>)
+                          (random ID — dist missing manifest <code>key</code>)
                         </span>
                       )}
                     </div>
@@ -671,11 +722,32 @@ export function SettingsPanel({
                     </div>
                   </div>
                 )}
-                {swNeedsAttention && (
+                {swNeedsAttention && swIsStore && (
                   <p className="settings-warn">
-                    Remove MyPipCam on chrome://extensions → Load unpacked →{' '}
-                    <code>apps/extension/dist</code> → confirm ID{' '}
-                    <code>{STABLE_EXTENSION_ID}</code>.
+                    Reload MyPipCam on chrome://extensions, or reinstall from the{' '}
+                    <a
+                      href="https://chromewebstore.google.com/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Chrome Web Store
+                    </a>
+                    .
+                  </p>
+                )}
+                {swNeedsAttention && !swIsStore && (
+                  <p className="settings-warn">
+                    On chrome://extensions → Reload MyPipCam. For local builds, Load
+                    unpacked → <code>apps/extension/dist</code> (confirm ID{' '}
+                    <code>{STABLE_EXTENSION_ID}</code>).
+                  </p>
+                )}
+                {swLocalDevNote && (
+                  <p className="settings-hint">
+                    Optional for Drive OAuth: rebuild so <code>manifest.key</code> is
+                    present, then Load unpacked → <code>apps/extension/dist</code>{' '}
+                    (ID <code>{STABLE_EXTENSION_ID}</code>). Store users can ignore
+                    this.
                   </p>
                 )}
                 <div className="settings-actions">

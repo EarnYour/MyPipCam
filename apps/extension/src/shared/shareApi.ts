@@ -49,7 +49,8 @@ function normalizeShare(share: ShareStats): ShareStats {
     (expiresAt ? Date.parse(expiresAt) <= Date.now() : false)
   return {
     ...share,
-    watchUrl: share.watchUrl || watchUrlForShareId(share.id),
+    // Always canonical — ignore stale API hosts (typos / old deploys).
+    watchUrl: watchUrlForShareId(share.id),
     viewCount: share.viewCount ?? 0,
     lastViewedAt: share.lastViewedAt ?? null,
     processingStatus: share.processingStatus ?? 'unknown',

@@ -5,7 +5,13 @@
  * imports only — Vite/CRX may still emit separate ESM chunks, which is fine.
  */
 
-import { STABLE_EXTENSION_ID } from '../shared/driveConfig'
+import {
+  CHROME_WEB_STORE_EXTENSION_ID,
+  expectedExtensionId,
+  extensionInstallChannel,
+  isKnownExtensionId,
+  STABLE_EXTENSION_ID,
+} from '../shared/driveConfig'
 import './main'
 
 const KEEP_ALIVE_ALARM = 'mypipcam-sw-keepalive'
@@ -15,11 +21,13 @@ let bootError: string | null = null
 
 function bootHealth() {
   const id = chrome.runtime.id
+  const channel = extensionInstallChannel(id)
   return {
     ok: true as const,
     id,
-    expectedId: STABLE_EXTENSION_ID,
-    idMatch: id === STABLE_EXTENSION_ID,
+    channel,
+    expectedId: expectedExtensionId(id),
+    idMatch: isKnownExtensionId(id),
     ready: mainReady,
     bootError,
   }
@@ -49,12 +57,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener((details) => {
   const h = bootHealth()
   console.log('[MyPipCam] installed', details.reason, h)
-  if (!h.idMatch) {
-    console.error(
-      '[MyPipCam] WRONG EXTENSION ID — load unpacked from apps/extension/dist so manifest.key is present. Expected',
+  if (h.channel === 'dev-other') {
+    console.warn(
+      '[MyPipCam] Unstable extension ID — for local Drive/OAuth, load unpacked from apps/extension/dist so manifest.key is present. Expected',
       STABLE_EXTENSION_ID,
       'got',
       h.id,
+      '(Chrome Web Store installs use',
+      CHROME_WEB_STORE_EXTENSION_ID + ')',
     )
   }
 })
