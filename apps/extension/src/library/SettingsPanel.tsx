@@ -33,6 +33,10 @@ import {
   STABLE_EXTENSION_ID,
   type ExtensionInstallChannel,
 } from '../shared/driveConfig'
+import {
+  bugReportGitHubUrl,
+  bugReportMailtoUrl,
+} from '../shared/bugReport'
 import type { ApiSettings } from '../shared/types'
 
 type Props = {
@@ -649,6 +653,35 @@ export function SettingsPanel({
                 </div>
               </div>
               {savedMsg && <p className="settings-saved">{savedMsg}</p>}
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h3>Report a bug</h3>
+                <p className="settings-hint">
+                  Found a bug? Report it — we actually read these.
+                </p>
+              </div>
+              <div className="settings-actions">
+                <a
+                  className="settings-link-btn primary"
+                  href={bugReportGitHubUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open GitHub issue
+                </a>
+                <a
+                  className="settings-link-btn ghost"
+                  href={bugReportMailtoUrl()}
+                >
+                  Email instead
+                </a>
+              </div>
+              <p className="settings-hint settings-feedback-meta">
+                Prefills version, install channel, and a short browser string — no API
+                keys or Drive tokens.
+              </p>
             </section>
 
             <details

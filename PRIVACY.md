@@ -89,6 +89,6 @@ Privacy practices may change as the project evolves. Updates will be reflected i
 
 ## 11. Contact
 
-Privacy and support: [steven@earnyour.com](mailto:steven@earnyour.com), [mypipcam.earnyour.com](https://mypipcam.earnyour.com), [earnyour.com](https://earnyour.com), or open a GitHub issue.
+Privacy and support: [steven@earnyour.com](mailto:steven@earnyour.com), [mypipcam.earnyour.com](https://mypipcam.earnyour.com), [earnyour.com](https://earnyour.com), or open a [GitHub issue](https://github.com/EarnYour/MyPipCam/issues). In the Chrome extension: Library → Settings → **Report a bug** (prefilled version / install info; no API keys or Drive tokens).
 
 Security vulnerabilities: see [SECURITY.md](SECURITY.md) (prefer GitHub Security Advisories).
