@@ -69,16 +69,16 @@ npm run dev
 
 | Build | Extension ID |
 | --- | --- |
-| **Chrome Web Store** (live / Published — public) | `moalajbpehfocfeecpleceplighfhim` |
+| **Chrome Web Store** (live / Published — public) | `meiehjfjcaahfjcdneoegjkmajbfghmm` |
 | **Unpacked** (manifest `key` present) | `akpchobfndfddajiihkkdpnihihdicjc` |
 
-Public listing: `https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim` (also `https://chrome.google.com/webstore/detail/mypipcam/moalajbpehfocfeecpleceplighfhim`).
+Public listing: `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm` (also `https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`).
 
 Google Cloud OAuth **Item ID** must match the install under test. Prefer **two** Chrome-extension OAuth clients (do not flip one Item ID):
 
 | Client | Item ID | Where the client ID goes |
 | --- | --- | --- |
-| **A — store** | `moalajbpehfocfeecpleceplighfhim` | Store zip / release build only |
+| **A — store** | `meiehjfjcaahfjcdneoegjkmajbfghmm` | Store zip / release build only |
 | **B — local** | `akpchobfndfddajiihkkdpnihihdicjc` | `apps/extension/.env.local` for daily local builds |
 
 If `dist/manifest.json` lacks `key` and is not the store package, Chrome assigns a random third ID — reload **`apps/extension/dist`** after a normal build so `key` stays and the ID remains `akpchobfndfddajiihkkdpnihihdicjc`.

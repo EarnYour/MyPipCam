@@ -9,7 +9,7 @@ export default defineManifest({
   version: '1.1.13',
   // PUBLIC key only → stable unpacked extension ID across reloads.
   // Unpacked ID: akpchobfndfddajiihkkdpnihihdicjc
-  // Chrome Web Store ID (zip without this field): moalajbpehfocfeecpleceplighfhim
+  // Chrome Web Store ID (zip without this field): meiehjfjcaahfjcdneoegjkmajbfghmm
   // Matching PRIVATE key must never be committed (apps/extension/keys/*.pem).
   // Forks/distributors: generate your own keypair (`openssl genrsa` / Chrome pack)
   // and replace this field, or omit `key` and accept a new extension ID.
@@ -55,7 +55,7 @@ export default defineManifest({
   oauth2: {
     // From VITE_GOOGLE_OAUTH_CLIENT_ID (.env.local) via driveConfig.ts.
     // Local: Client B Item ID akpchobfndfddajiihkkdpnihihdicjc.
-    // Store zip: Client A Item ID moalajbpehfocfeecpleceplighfhim.
+    // Store zip: Client A Item ID meiehjfjcaahfjcdneoegjkmajbfghmm.
     client_id: GOOGLE_OAUTH_CLIENT_ID,
     scopes: [DRIVE_SCOPE],
   },

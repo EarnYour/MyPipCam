@@ -2,7 +2,7 @@
   // Unpacked dist with manifest `key` (local / Load unpacked).
   var UNPACKED_EXT_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
   // Chrome Web Store listing (published zip without `key`).
-  var STORE_EXT_ID = 'moalajbpehfocfeecpleceplighfhim'
+  var STORE_EXT_ID = 'meiehjfjcaahfjcdneoegjkmajbfghmm'
   var LIBRARY_PATH = 'src/library/index.html'
   var EXT_ID_RE = /^[a-p]{32}$/
 

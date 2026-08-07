@@ -10,15 +10,15 @@ Chrome Web Store **rejects** first uploads that include a `"key"` field in `mani
 
 Local / unpacked builds **keep** `key` so Chrome assigns a **stable extension ID** (`akpchobfndfddajiihkkdpnihihdicjc`). The store package must not include it.
 
-**Live Chrome Web Store item ID:** `moalajbpehfocfeecpleceplighfhim` (Published — public; confirmed from Developer Dashboard).
+**Live Chrome Web Store item ID:** `meiehjfjcaahfjcdneoegjkmajbfghmm` (Published — public; confirmed from the public listing URL — must be 32 chars `a–p`).
 
 **Public listing URLs:**
-- `https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim`
-- `https://chrome.google.com/webstore/detail/mypipcam/moalajbpehfocfeecpleceplighfhim`
+- `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm`
+- `https://chrome.google.com/webstore/detail/mypipcam/meiehjfjcaahfjcdneoegjkmajbfghmm`
 
 | Build | Extension ID | When |
 | --- | --- | --- |
-| **Chrome Web Store** (published / zip without `key`) | `moalajbpehfocfeecpleceplighfhim` | Production users → OAuth **Client A** Item ID |
+| **Chrome Web Store** (published / zip without `key`) | `meiehjfjcaahfjcdneoegjkmajbfghmm` | Production users → OAuth **Client A** Item ID |
 | **Unpacked local** (dist with manifest `key`) | `akpchobfndfddajiihkkdpnihihdicjc` | Dev → OAuth **Client B** Item ID |
 
 If `dist/manifest.json` has **no** `key` and you load unpacked, Chrome invents a **third** random ID (e.g. something like `jakcphobnlddjaalpcpdhfelcpcdfoib`). That ID is useless for OAuth — reload **`apps/extension/dist`** after a normal `npm run build` so `key` is present and the ID stays `akpchobfndfddajiihkkdpnihihdicjc`.
@@ -33,7 +33,7 @@ Do **not** flip a single client’s Item ID between store and local. Create **tw
 
 | Client | Name (suggested) | Item ID | Used by |
 | --- | --- | --- | --- |
-| **A — store / production** | `MyPipCam Store` | `moalajbpehfocfeecpleceplighfhim` | Store zip / published listing |
+| **A — store / production** | `MyPipCam Store` | `meiehjfjcaahfjcdneoegjkmajbfghmm` | Store zip / published listing |
 | **B — local / unpacked** | `MyPipCam Local` | `akpchobfndfddajiihkkdpnihihdicjc` | `apps/extension/.env.local` + local `dist` |
 
 ### Create Client B (local) — do this for Drive today
@@ -60,12 +60,12 @@ cd apps/extension && npm run build
 
 Then on `chrome://extensions`: confirm ID is `akpchobfndfddajiihkkdpnihihdicjc` → **Reload** → Library → Settings → **Connect Google**.
 
-Leave **Client A** (store Item ID `moalajbpehfocfeecpleceplighfhim`) alone — store prep stays ready.
+Leave **Client A** (store Item ID `meiehjfjcaahfjcdneoegjkmajbfghmm`) alone — store prep stays ready.
 
 ### Create / keep Client A (store) — leave ready; do not put in `.env.local` while developing
 
 1. Same **Credentials** page → open (or create) a **Chrome extension** client for production  
-2. **Item ID** = exactly `moalajbpehfocfeecpleceplighfhim` → **Save**  
+2. **Item ID** = exactly `meiehjfjcaahfjcdneoegjkmajbfghmm` → **Save**  
 3. Note that client’s **Client ID** somewhere private (password manager / release notes) — **not** committed  
 4. When packaging the store zip, temporarily set:
 
@@ -80,14 +80,14 @@ Alternatively: keep Client A’s ID only in CI / a release script env; daily `.e
 
 ### Temporary single-client workaround (not preferred)
 
-If you only have one Chrome-extension client today: set its **Item ID** back to `akpchobfndfddajiihkkdpnihihdicjc`, rebuild/reload local — Drive works locally. Before store users need Connect Google, switch that Item ID (or better: create Client A) to `moalajbpehfocfeecpleceplighfhim` and rebuild the store zip with that client’s ID. Dual clients avoid this flip-flop.
+If you only have one Chrome-extension client today: set its **Item ID** back to `akpchobfndfddajiihkkdpnihihdicjc`, rebuild/reload local — Drive works locally. Before store users need Connect Google, switch that Item ID (or better: create Client A) to `meiehjfjcaahfjcdneoegjkmajbfghmm` and rebuild the store zip with that client’s ID. Dual clients avoid this flip-flop.
 
 ---
 
 ## After publish (live)
 
-1. Live store extension ID: `moalajbpehfocfeecpleceplighfhim` (Developer Dashboard header / item ID).  
-2. Public URL: `https://chromewebstore.google.com/detail/moalajbpehfocfeecpleceplighfhim`  
+1. Live store extension ID: `meiehjfjcaahfjcdneoegjkmajbfghmm` (Developer Dashboard header / item ID).  
+2. Public URL: `https://chromewebstore.google.com/detail/meiehjfjcaahfjcdneoegjkmajbfghmm`  
 3. Ensure **Client A** Item ID is that store ID and the published package was built with Client A’s client ID.  
 4. Keep local `.env.local` on **Client B** so unpacked Connect Google keeps working.
 

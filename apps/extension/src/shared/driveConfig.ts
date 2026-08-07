@@ -5,7 +5,7 @@
  * See `.env.example`. Never commit a client_secret — Chrome-extension OAuth has none.
  *
  * Prefer two Google Cloud Chrome-extension clients (do not flip one Item ID):
- *   Client A (store zip): Item ID moalajbpehfocfeecpleceplighfhim
+ *   Client A (store zip): Item ID meiehjfjcaahfjcdneoegjkmajbfghmm
  *   Client B (local .env.local): Item ID akpchobfndfddajiihkkdpnihihdicjc
  * One env var per build is enough — point local env at Client B; bake Client A
  * only when packaging the store zip. See docs/marketing/CHROME_WEBSTORE.md.
@@ -42,7 +42,7 @@ export const GOOGLE_OAUTH_CLIENT_ID =
 export const STABLE_EXTENSION_ID = 'akpchobfndfddajiihkkdpnihihdicjc'
 
 /** Live Chrome Web Store item ID (zip without `key`). OAuth Item ID for store builds. */
-export const CHROME_WEB_STORE_EXTENSION_ID = 'moalajbpehfocfeecpleceplighfhim'
+export const CHROME_WEB_STORE_EXTENSION_ID = 'meiehjfjcaahfjcdneoegjkmajbfghmm'
 
 /** Preferred scope: only files/folders this app creates or the user opens with it. */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'

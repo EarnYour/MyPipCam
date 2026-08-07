@@ -7,7 +7,7 @@ enum ExtensionLibraryOpener {
     /// Stable ID from the public `key` in `apps/extension/manifest.config.ts` (Load unpacked).
     static let defaultExtensionID = "akpchobfndfddajiihkkdpnihihdicjc"
     /// Live Chrome Web Store item ID (published zip without manifest `key`).
-    static let chromeWebStoreExtensionID = "moalajbpehfocfeecpleceplighfhim"
+    static let chromeWebStoreExtensionID = "meiehjfjcaahfjcdneoegjkmajbfghmm"
     /// Known installs: store (published) first, then unpacked local.
     private static let knownExtensionIDs = [chromeWebStoreExtensionID, defaultExtensionID]
     /// Must match popup/`openLibraryTab` and `apps/extension/dist` (CRX keeps `src/…`).
