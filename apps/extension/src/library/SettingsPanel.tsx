@@ -74,7 +74,6 @@ export function SettingsPanel({
   const [drive, setDrive] = useState<DriveConnectionStatus | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [advancedMsg, setAdvancedMsg] = useState<string | null>(null)
   const [swHealth, setSwHealth] = useState<{
     id: string
     channel: ExtensionInstallChannel
@@ -216,7 +215,6 @@ export function SettingsPanel({
     setSavedMsg(null)
     setFolderMsg(null)
     setDriveMsg(null)
-    setAdvancedMsg(null)
     setLoaded(false)
     let cancelled = false
     void (async () => {
@@ -746,32 +744,9 @@ export function SettingsPanel({
                   <p className="settings-hint">
                     Optional for Drive OAuth: rebuild so <code>manifest.key</code> is
                     present, then Load unpacked → <code>apps/extension/dist</code>{' '}
-                    (ID <code>{STABLE_EXTENSION_ID}</code>). Store users can ignore
-                    this.
+                    (ID <code>{STABLE_EXTENSION_ID}</code>).
                   </p>
                 )}
-                <div className="settings-actions">
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => void refreshSwHealth()}
-                  >
-                    Re-check background
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => {
-                      void chrome.runtime
-                        .sendMessage({ type: 'FORCE_STOP_CAPTURE' })
-                        .catch(() => {})
-                      setAdvancedMsg('Stopped orphaned sharing.')
-                    }}
-                  >
-                    Stop orphaned sharing
-                  </button>
-                </div>
-                {advancedMsg && <p className="settings-saved">{advancedMsg}</p>}
               </div>
             </details>
           </div>
