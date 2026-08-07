@@ -1,0 +1,23 @@
+{
+  "name": "mypipcam-ig-fb-reel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Instagram/Facebook 9:16 reel — captions + glass/push overlays",
+  "scripts": {
+    "start": "npx remotion studio",
+    "link-clips": "mkdir -p public/clips && cp -f ../clips/*.mp4 public/clips/",
+    "postinstall": "npm run link-clips",
+    "render": "mkdir -p ../output && npx remotion render IgFbReel ../output/MyPipCam-ig-fb-reel.mp4 --codec h264"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.286",
+    "@remotion/media": "^4.0.286",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.286"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3"
+  }
+}

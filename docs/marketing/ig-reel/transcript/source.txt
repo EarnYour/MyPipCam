@@ -1,0 +1,41 @@
+ What's up?
+ I'm excited.
+ I just published a Chrome extension for the first time, and it's live for free on Chrome,
+ and it replaces Loom absolutely free and does everything that Loom does absolutely free
+ with no ties to the subscription.
+ So go download this if you use Loom or your recording videos or your recording screen
+ shares, does everything Loom does absolutely free.
+ So go download it, I'm going to show you a demo of that because it's live, but we're
+ actually looking at the app if you want to download the GitHub and go get the app, but
+ we're going to demo the extension because you don't even have to do the GitHub.
+ I know that sounds way too technical.
+ So we're not going to worry about all that technical stuff, and we're just going to worry
+ about the simple stuff.
+ So a link should be down below, and it's called my pip cam, and this is exactly what it does.
+ I'm going to go ahead and remove it so we can go through the install process together.
+ All right, so as soon as you click the link, you should open it in Chrome.
+ This is a Chrome extension, so don't have to be on any certain OS as long as you're using
+ Chrome, and you can install this.
+ Add to Chrome.
+ We're going to go ahead and add this extension.
+ It's telling you that it could read the screen, view the screen.
+ Once we have it added, I'm going to click it here, and I got all kinds of extensions.
+ There it is, I'm going to pin it, so it shows up in my little bar here, but now that I have
+ it pinned, this is what it does, just like you would expect Loom, and then I can start
+ the recording.
+ I'm going to add effects to that, and then when they're all set and done and all these
+ videos are recorded, they're going to go to your library, and in this library, I'm going
+ to be able to connect it to Google Drive, and then I'm going to be able to pick a local
+ folder as well, so I'm going to go ahead and pick this folder, and when I pick my local
+ folder, it's going to ask me, are you sure you want to allow this app to edit your folders,
+ because we are putting videos in, and taking videos out of that folder.
+ Do we want to keep that setting, absolutely, and then it's going to look just like your
+ Loom dashboard, so you can see all your recorded videos, you can see which ones I've uploaded
+ to the Google Drive, which ones are still here locally, and then I can see the activity,
+ one person has viewed this, I have a sharing link, now that it's on the drive, I can hit
+ share, get that link, go over here, and somebody can go watch my video, and then I get notified
+ when they've watched it, all the features of Loom without having a Loom subscription just
+ by installing this free plugin that I've built for you, so go download it, get any questions,
+ feel free to hit me up, but I'm excited about this, hope you guys are, hope you guys put
+ it to use, and stay tuned for more, oh, be sure to follow, follow if you download it,
+ I deserve a follow, right, thank you.

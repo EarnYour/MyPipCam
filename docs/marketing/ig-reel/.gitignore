@@ -1,0 +1,9 @@
+remotion/node_modules/
+remotion/out/
+remotion/public/clips/
+output/*.mp4
+clips/*.mp4
+models/
+transcript/*.wav
+transcript/*.json
+*.log
